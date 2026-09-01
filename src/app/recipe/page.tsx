@@ -694,8 +694,9 @@ export default function RecipePage() {
             </div>
           )}
 
-          {/* Plating Gallery */}
-          <div className="erp-card">
+                    {/* Plating Gallery — κρύβεται στην εκτύπωση (κενά placeholders,
+              δεν έχει νόημα να τυπώνονται). */}
+          <div id="plating-gallery-section" className="erp-card">
             <div className="erp-card-header"><h3 className="font-semibold">📸 {t("fieldPlating")}</h3></div>
             <div className="p-6">
               <div className="grid grid-cols-3 gap-4">
