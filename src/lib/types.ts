@@ -186,8 +186,8 @@ export interface Recipe {
   sellingPrice: string;
   menuPriceVat: string;
   menuPriceFinal: string;
-  caloriesPerPortion: string;
-  gramsPerPortion: string;
+  caloriesPerPortion?: string;
+  gramsPerPortion?: string;
   isActive: boolean | null;
   createdAt?: string;
   ingredients: RecipeIngredient[];
