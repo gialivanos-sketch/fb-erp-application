@@ -507,10 +507,9 @@ export default function RecipePage() {
             </div>
           </div>
         </div>
-      </div>
+          </div>
       )}
-
-      {/* Recipe Form Modal — ανοίγει με κλικ πάνω σε μια συνταγή ή στο
+      </div>      {/* Recipe Form Modal — ανοίγει με κλικ πάνω σε μια συνταγή ή στο
           "Νέα Συνταγή", αντί για ενσωματωμένο πάνελ. */}
       <Modal
         isOpen={editing}
@@ -538,8 +537,9 @@ export default function RecipePage() {
               }
               #printable-recipe-area .erp-card-header { padding: 3px 10px !important; }
               #printable-recipe-area .p-6 { padding: 8px !important; }
-              #printable-recipe-area, #printable-recipe-area * { font-size: 10px !important; line-height: 1.25 !important; }
-              #printable-recipe-area .erp-label { font-size: 8px !important; margin-bottom: 0 !important; }
+                            #printable-recipe-area, #printable-recipe-area * { font-size: 12.5px !important; line-height: 1.3 !important; }
+              #printable-recipe-area .erp-label { font-size: 10px !important; margin-bottom: 0 !important; color: #64748b !important; }
+              #printable-recipe-area h3 { font-size: 14px !important; }
               #printable-recipe-area input, #printable-recipe-area select, #printable-recipe-area textarea {
                 border: none !important; padding: 1px 0 !important; background: transparent !important;
                 height: auto !important; min-height: 0 !important;
