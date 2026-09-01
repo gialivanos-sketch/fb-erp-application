@@ -550,15 +550,29 @@ export async function fetchRecipes(): Promise<Recipe[]> {
     .order("name", { ascending: true });
   if (error) throw error;
 
-  // 1 αίτημα: ΟΛΕΣ οι γραμμές recipe_ingredients, για όλες τις
-  // συνταγές μαζί — αντί για ένα ξεχωριστό αίτημα ανά συνταγή (το
-  // οποίο, με χιλιάδες συνταγές, καθυστερούσε τόσο πολύ ώστε η
-  // αρχική φόρτωση δεδομένων της εφαρμογής δεν πρόλαβαινε ποτέ να
-  // ολοκληρωθεί εγκαίρως).
-  const { data: allIngredients, error: ingError } = await client
-    .from("recipe_ingredients")
-    .select("id, recipe_id, ingredient_id, ingredient_name, quantity, unit, unit_cost, total_cost, wastage_factor, requires_prep, prep_notes");
-  if (ingError) throw ingError;
+   // Όλες οι γραμμές recipe_ingredients, για όλες τις συνταγές μαζί —
+  // αντί για ένα ξεχωριστό αίτημα ανά συνταγή (το οποίο, με χιλιάδες
+  // συνταγές, καθυστερούσε τόσο πολύ ώστε η αρχική φόρτωση δεδομένων
+  // της εφαρμογής δεν πρόλαβαινε ποτέ να ολοκληρωθεί εγκαίρως).
+  // Η Supabase γυρνάει ΤΟ ΠΟΛΥ 1000 γραμμές ανά αίτημα (default),
+  // οπότε με περισσότερες από 1000 recipe_ingredients (π.χ. 14000+)
+  // χρειάζεται σελιδοποίηση με .range() — αλλιώς λείπουν υλικά από
+  // πολλές συνταγές.
+  const PAGE_SIZE = 1000;
+  const allIngredients: {
+    id: number; recipe_id: number; ingredient_id: number | null; ingredient_name: string; quantity: number;
+    unit: string; unit_cost: number; total_cost: number; wastage_factor: number; requires_prep: boolean; prep_notes: string | null;
+  }[] = [];
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data: page, error: ingError } = await client
+      .from("recipe_ingredients")
+      .select("id, recipe_id, ingredient_id, ingredient_name, quantity, unit, unit_cost, total_cost, wastage_factor, requires_prep, prep_notes")
+      .range(from, from + PAGE_SIZE - 1);
+    if (ingError) throw ingError;
+    if (!page || page.length === 0) break;
+    allIngredients.push(...page);
+    if (page.length < PAGE_SIZE) break;
+  }
 
   // Ομαδοποίηση στη μνήμη: recipe_id -> λίστα υλικών του.
   const ingredientsByRecipeId = new Map<number, typeof allIngredients>();
