@@ -132,6 +132,31 @@ export default function RecipePage() {
     }));
   }
 
+    // Εξάγει ΜΙΑ συνταγή (αυτή που είναι ανοιχτή στο popup) σε .xlsx —
+  // μία γραμμή ανά υλικό, με τα στοιχεία της συνταγής επαναλαμβανόμενα
+  // σε κάθε γραμμή, και μια τελευταία γραμμή ΣΥΝΟΛΟ με τα κόστη.
+  function exportRecipeToExcel() {
+    if (recipeItems.length === 0) return;
+    const rows: Record<string, string | number>[] = recipeItems.map((item) => ({
+      [locale === "gr" ? "Συνταγή" : "Recipe"]: form.name,
+      [locale === "gr" ? "Υλικό" : "Ingredient"]: item.ingredientName,
+      [locale === "gr" ? "Ποσότητα" : "Quantity"]: item.quantity,
+      [locale === "gr" ? "Μονάδα" : "Unit"]: item.unit,
+      [locale === "gr" ? "Τιμή Μονάδας" : "Unit Cost"]: Number(item.unitCost),
+      [locale === "gr" ? "Σύνολο" : "Total"]: Number(item.totalCost),
+    }));
+    rows.push({
+      [locale === "gr" ? "Συνταγή" : "Recipe"]: form.name,
+      [locale === "gr" ? "Υλικό" : "Ingredient"]: locale === "gr" ? "ΣΥΝΟΛΟ" : "TOTAL",
+      [locale === "gr" ? "Ποσότητα" : "Quantity"]: "",
+      [locale === "gr" ? "Μονάδα" : "Unit"]: "",
+      [locale === "gr" ? "Τιμή Μονάδας" : "Unit Cost"]: locale === "gr" ? "Κόστος Υλικών:" : "Raw Cost:",
+      [locale === "gr" ? "Σύνολο" : "Total"]: Number(form.totalRawMaterialCost),
+    });
+    const safeName = (form.name || (locale === "gr" ? "συνταγή" : "recipe")).replace(/[\\/:*?"<>|]/g, "").trim() || "recipe";
+    exportRowsToExcel(rows, safeName, locale === "gr" ? "Συνταγή" : "Recipe");
+  }
+
   // Καλείται όταν ο χρήστης διαλέγει ένα υλικό από το αποτέλεσμα
   // αναζήτησης. Γράφει ΑΜΕΣΩΣ στη βάση (addRecipeIngredient) --
   // απαιτεί ότι η συνταγή ήδη υπάρχει (έχει selectedRecipe.id), αφού
@@ -554,7 +579,10 @@ export default function RecipePage() {
             <button onClick={saveRecipe} disabled={saving} className="erp-btn-success">{saving ? "…" : "💾"} {t("btnSaveRecipe")}</button>
             <button onClick={calculateCosting} className="erp-btn-secondary">🧮 {locale === "gr" ? "Υπολογισμός Κόστους" : "Calculate Costing"}</button>
             <button onClick={() => setShowSearch(true)} className="erp-btn-secondary">🔍 {t("btnSearchRestore")}</button>
-            <button onClick={() => window.print()} className="erp-btn-secondary">🖨️ {t("btnPrint")}</button>
+                        <button onClick={() => window.print()} className="erp-btn-secondary">🖨️ {t("btnPrint")} / PDF</button>
+            {selectedRecipe && (
+              <button onClick={exportRecipeToExcel} className="erp-btn-secondary">📊 {locale === "gr" ? "Εξαγωγή Excel" : "Export Excel"}</button>
+            )}
           </div>
 
           <div className="erp-card mb-6">
