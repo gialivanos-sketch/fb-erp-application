@@ -518,8 +518,38 @@ export default function RecipePage() {
         title={selectedRecipe ? (locale === "gr" ? "Επεξεργασία Συνταγής" : "Edit Recipe") : (locale === "gr" ? "Νέα Συνταγή" : "New Recipe")}
         size="xl"
       >
-        <div id="printable-recipe-area">
-          <div className="flex flex-wrap items-center gap-2 mb-4">
+               <div id="printable-recipe-area">
+          <style>{`
+            @media print {
+              body * { visibility: hidden; }
+              #printable-recipe-area, #printable-recipe-area * { visibility: visible; }
+              #printable-recipe-area {
+                position: absolute; left: 0; top: 0; width: 100%; margin: 0; padding: 0;
+              }
+              .fixed { position: static !important; }
+              .overflow-y-auto { overflow: visible !important; }
+              [class*="max-h-"] { max-height: none !important; }
+              .backdrop-blur-sm { display: none !important; }
+              #plating-gallery-section { display: none !important; }
+              #printable-recipe-area .erp-card {
+                margin-bottom: 4px !important; box-shadow: none !important;
+                border: 1px solid #e2e8f0 !important; page-break-inside: avoid;
+              }
+              #printable-recipe-area .erp-card-header { padding: 3px 10px !important; }
+              #printable-recipe-area .p-6 { padding: 8px !important; }
+              #printable-recipe-area, #printable-recipe-area * { font-size: 10px !important; line-height: 1.25 !important; }
+              #printable-recipe-area .erp-label { font-size: 8px !important; margin-bottom: 0 !important; }
+              #printable-recipe-area input, #printable-recipe-area select, #printable-recipe-area textarea {
+                border: none !important; padding: 1px 0 !important; background: transparent !important;
+                height: auto !important; min-height: 0 !important;
+              }
+              #printable-recipe-area .erp-table th, #printable-recipe-area .erp-table td { padding: 2px 4px !important; }
+              #printable-recipe-area .gap-4 { gap: 4px !important; }
+              #printable-recipe-area .mb-4, #printable-recipe-area .mb-6 { margin-bottom: 3px !important; }
+              @page { size: A4; margin: 8mm; }
+            }
+          `}</style>
+          <div className="flex flex-wrap items-center gap-2 mb-4 print:hidden">
             <button onClick={saveRecipe} disabled={saving} className="erp-btn-success">{saving ? "…" : "💾"} {t("btnSaveRecipe")}</button>
             <button onClick={calculateCosting} className="erp-btn-secondary">🧮 {locale === "gr" ? "Υπολογισμός Κόστους" : "Calculate Costing"}</button>
             <button onClick={() => setShowSearch(true)} className="erp-btn-secondary">🔍 {t("btnSearchRestore")}</button>
