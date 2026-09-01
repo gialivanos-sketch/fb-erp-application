@@ -523,13 +523,14 @@ export default function RecipePage() {
             @media print {
               body * { visibility: hidden; }
               #printable-recipe-area, #printable-recipe-area * { visibility: visible; }
-              #printable-recipe-area {
-                position: absolute; left: 0; top: 0; width: 100%; margin: 0; padding: 0;
-              }
-              .fixed { position: static !important; }
-              .overflow-y-auto { overflow: visible !important; }
-              [class*="max-h-"] { max-height: none !important; }
+              .fixed.inset-0.z-50 { position: static !important; display: block !important; padding: 0 !important; }
               .backdrop-blur-sm { display: none !important; }
+              .relative.bg-white.rounded-2xl {
+                position: static !important; box-shadow: none !important; max-height: none !important;
+                width: 100% !important; margin: 0 !important; border-radius: 0 !important;
+              }
+              .flex-1.overflow-y-auto.p-6 { overflow: visible !important; padding: 0 !important; flex: none !important; }
+              #plating-gallery-section { display: none !important; }
               #plating-gallery-section { display: none !important; }
               #printable-recipe-area .erp-card {
                 margin-bottom: 4px !important; box-shadow: none !important;
