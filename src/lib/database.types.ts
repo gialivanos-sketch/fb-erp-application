@@ -306,6 +306,8 @@ export interface Database {
           selling_price: number;
           menu_price_vat: number;
           menu_price_final: number;
+          calories_per_portion: number;
+          grams_per_portion: number;
           is_active: boolean | null;
           created_at: string;
         };
@@ -326,6 +328,8 @@ export interface Database {
           selling_price?: number;
           menu_price_vat?: number;
           menu_price_final?: number;
+          calories_per_portion?: number;
+          grams_per_portion?: number;
           is_active?: boolean | null;
         };
         Update: Partial<Database["public"]["Tables"]["recipes"]["Insert"]>;
