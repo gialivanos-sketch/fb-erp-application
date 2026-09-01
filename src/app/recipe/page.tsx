@@ -509,7 +509,8 @@ export default function RecipePage() {
         </div>
           </div>
       )}
-      </div>      {/* Recipe Form Modal — ανοίγει με κλικ πάνω σε μια συνταγή ή στο
+      </div>    
+    {/* Recipe Form Modal — ανοίγει με κλικ πάνω σε μια συνταγή ή στο
           "Νέα Συνταγή", αντί για ενσωματωμένο πάνελ. */}
       <Modal
         isOpen={editing}
