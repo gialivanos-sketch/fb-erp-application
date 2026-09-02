@@ -28,6 +28,18 @@ export default function SkuMappingPage() {
   const [newGroup, setNewGroup] = useState("");
   const [creating, setCreating] = useState(false);
 
+  // Bulk select-and-merge: pick several rows (unmapped products and/or
+  // already-mapped entries, even from different SKU groups) that are really
+  // the same item, then merge them all into one SKU in a single action —
+  // instead of moving/assigning them one at a time.
+  const [selectedUnmapped, setSelectedUnmapped] = useState<Set<string>>(new Set());
+  const [selectedEntryIds, setSelectedEntryIds] = useState<Set<number>>(new Set());
+  const [bulkTargetTyped, setBulkTargetTyped] = useState("");
+  const [bulkNewSku, setBulkNewSku] = useState("");
+  const [bulkNewGroup, setBulkNewGroup] = useState("");
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const selectedCount = selectedUnmapped.size + selectedEntryIds.size;
+
   async function loadData() {
     setLoading(true);
     setLoadError(null);
@@ -102,6 +114,82 @@ export default function SkuMappingPage() {
   function flash(text: string) {
     setMsg(text);
     setTimeout(() => setMsg(""), 2500);
+  }
+
+  function toggleUnmapped(name: string) {
+    setSelectedUnmapped((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  }
+
+  function toggleAllUnmapped() {
+    setSelectedUnmapped((prev) => {
+      const allSelected = filteredUnmapped.length > 0 && filteredUnmapped.every((n) => prev.has(n));
+      if (allSelected) return new Set();
+      return new Set(filteredUnmapped);
+    });
+  }
+
+  function toggleEntry(id: number) {
+    setSelectedEntryIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleGroupAll(g: SkuGroup) {
+    setSelectedEntryIds((prev) => {
+      const ids = g.entries.map((e) => e.id);
+      const allSelected = ids.length > 0 && ids.every((id) => prev.has(id));
+      const next = new Set(prev);
+      if (allSelected) {
+        ids.forEach((id) => next.delete(id));
+      } else {
+        ids.forEach((id) => next.add(id));
+      }
+      return next;
+    });
+  }
+
+  function clearSelection() {
+    setSelectedUnmapped(new Set());
+    setSelectedEntryIds(new Set());
+  }
+
+  async function handleBulkMerge(targetSku: string, targetGroup: string) {
+    if (!targetSku.trim() || !targetGroup.trim()) return;
+    if (selectedCount === 0) return;
+    setBulkBusy(true);
+    try {
+      for (const id of selectedEntryIds) {
+        const entry = entries.find((e) => e.id === id);
+        if (entry && (entry.sku !== targetSku || entry.finalGroup !== targetGroup)) {
+          await db.updateProductSkuMapEntry(entry.id, { sku: targetSku, finalGroup: targetGroup });
+        }
+      }
+      for (const name of selectedUnmapped) {
+        await db.createProductSkuMapEntry({ productName: name, sku: targetSku, finalGroup: targetGroup });
+      }
+      await loadData();
+      clearSelection();
+      setBulkTargetTyped("");
+      setBulkNewSku("");
+      setBulkNewGroup("");
+      flash(
+        locale === "gr"
+          ? `✅ Συγχωνεύθηκαν ${selectedCount} στοιχεία στο ${targetSku}`
+          : `✅ Merged ${selectedCount} items into ${targetSku}`
+      );
+    } catch (err) {
+      flash((locale === "gr" ? "⚠️ Αποτυχία: " : "⚠️ Failed: ") + String(err));
+    } finally {
+      setBulkBusy(false);
+    }
   }
 
   async function handleAssignToExisting(productName: string, sku: string) {
@@ -272,13 +360,29 @@ export default function SkuMappingPage() {
             <table className="erp-table">
               <thead>
                 <tr>
+                  <th className="w-8">
+                    <input
+                      type="checkbox"
+                      checked={filteredUnmapped.length > 0 && filteredUnmapped.every((n) => selectedUnmapped.has(n))}
+                      onChange={toggleAllUnmapped}
+                      title={locale === "gr" ? "Επιλογή όλων" : "Select all"}
+                    />
+                  </th>
                   <th>{locale === "gr" ? "Προϊόν" : "Product"}</th>
                   <th>{locale === "gr" ? "Αντιστοίχιση σε υπάρχον SKU" : "Assign to existing SKU"}</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredUnmapped.map((name) => (
-                  <UnmappedRow key={name} name={name} skuLabelToCode={skuLabelToCode} locale={locale} onAssign={handleAssignToExisting} />
+                  <UnmappedRow
+                    key={name}
+                    name={name}
+                    skuLabelToCode={skuLabelToCode}
+                    locale={locale}
+                    onAssign={handleAssignToExisting}
+                    checked={selectedUnmapped.has(name)}
+                    onToggle={() => toggleUnmapped(name)}
+                  />
                 ))}
               </tbody>
             </table>
@@ -301,6 +405,12 @@ export default function SkuMappingPage() {
             {filteredGroups.map((g) => (
               <div key={g.sku} className="p-4">
                 <div className="flex items-center gap-3 mb-2 flex-wrap">
+                  <input
+                    type="checkbox"
+                    checked={g.entries.length > 0 && g.entries.every((e) => selectedEntryIds.has(e.id))}
+                    onChange={() => toggleGroupAll(g)}
+                    title={locale === "gr" ? "Επιλογή όλων σε αυτή την ομάδα" : "Select all in this group"}
+                  />
                   <Badge color="blue">{g.sku}</Badge>
                   <input
                     key={`${g.sku}-${g.finalGroup}`}
@@ -318,6 +428,9 @@ export default function SkuMappingPage() {
                     <tbody>
                       {g.entries.map((e) => (
                         <tr key={e.id}>
+                          <td className="w-8">
+                            <input type="checkbox" checked={selectedEntryIds.has(e.id)} onChange={() => toggleEntry(e.id)} />
+                          </td>
                           <td className="text-sm">{e.productName}</td>
                           <td className="w-64">
                             <MoveToSkuInput
@@ -343,6 +456,74 @@ export default function SkuMappingPage() {
           </div>
         )}
       </div>
+
+      {/* Floating bulk-merge bar: appears once anything is checked above */}
+      {selectedCount > 0 && (
+        <div className="fixed bottom-4 left-4 right-4 sm:left-auto sm:right-6 sm:w-[440px] z-50 bg-white border border-blue-300 shadow-xl rounded-xl p-4">
+          <div className="flex items-center justify-between mb-3">
+            <div className="font-semibold text-sm">
+              {locale === "gr" ? `✅ Επιλεγμένα: ${selectedCount}` : `✅ Selected: ${selectedCount}`}
+            </div>
+            <button onClick={clearSelection} className="text-slate-400 hover:text-slate-600 text-sm">
+              ✕ {locale === "gr" ? "Καθαρισμός" : "Clear"}
+            </button>
+          </div>
+
+          <div className="mb-3">
+            <label className="erp-label">{locale === "gr" ? "Συγχώνευση σε υπάρχον SKU" : "Merge into existing SKU"}</label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                list="all-sku-options"
+                value={bulkTargetTyped}
+                onChange={(e) => setBulkTargetTyped(e.target.value)}
+                className="erp-input text-sm flex-1"
+                placeholder={locale === "gr" ? "Πληκτρολόγησε SKU ή ομάδα..." : "Type SKU or group..."}
+              />
+              <button
+                onClick={() => {
+                  const code = skuLabelToCode.get(bulkTargetTyped.trim());
+                  const g = groups.find((x) => x.sku === code);
+                  if (code && g) handleBulkMerge(code, g.finalGroup);
+                }}
+                disabled={bulkBusy || !skuLabelToCode.get(bulkTargetTyped.trim())}
+                className="erp-btn-primary text-sm px-3"
+              >
+                {bulkBusy ? "…" : locale === "gr" ? "Συγχώνευση" : "Merge"}
+              </button>
+            </div>
+          </div>
+
+          <div className="border-t border-slate-100 pt-3">
+            <label className="erp-label">
+              {locale === "gr" ? "Ή νέο SKU από τα επιλεγμένα" : "Or new SKU from selection"}
+            </label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={bulkNewSku}
+                onChange={(e) => setBulkNewSku(e.target.value)}
+                className="erp-input text-sm w-28"
+                placeholder="SKU-0999"
+              />
+              <input
+                type="text"
+                value={bulkNewGroup}
+                onChange={(e) => setBulkNewGroup(e.target.value)}
+                className="erp-input text-sm flex-1"
+                placeholder={locale === "gr" ? "Όνομα ομάδας" : "Group name"}
+              />
+              <button
+                onClick={() => handleBulkMerge(bulkNewSku.trim(), bulkNewGroup.trim())}
+                disabled={bulkBusy || !bulkNewSku.trim() || !bulkNewGroup.trim()}
+                className="erp-btn-success text-sm px-3"
+              >
+                {bulkBusy ? "…" : "➕"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -352,16 +533,23 @@ function UnmappedRow({
   skuLabelToCode,
   locale,
   onAssign,
+  checked,
+  onToggle,
 }: {
   name: string;
   skuLabelToCode: Map<string, string>;
   locale: string;
   onAssign: (productName: string, sku: string) => void;
+  checked: boolean;
+  onToggle: () => void;
 }) {
   const [typed, setTyped] = useState("");
   const resolvedSku = skuLabelToCode.get(typed.trim());
   return (
     <tr>
+      <td className="w-8">
+        <input type="checkbox" checked={checked} onChange={onToggle} />
+      </td>
       <td className="text-sm">{name}</td>
       <td className="flex items-center gap-2 py-2">
         <input
