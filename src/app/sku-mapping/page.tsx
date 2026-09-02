@@ -313,29 +313,31 @@ export default function SkuMappingPage() {
                     {g.entries.length} {locale === "gr" ? "προϊόντα" : "products"}
                   </Badge>
                 </div>
-                <table className="erp-table">
-                  <tbody>
-                    {g.entries.map((e) => (
-                      <tr key={e.id}>
-                        <td className="text-sm">{e.productName}</td>
-                        <td className="w-64">
-                          <MoveToSkuInput
-                            entry={e}
-                            skuLabelToCode={skuLabelToCode}
-                            locale={locale}
-                            busy={busyId === e.id}
-                            onMove={handleMove}
-                          />
-                        </td>
-                        <td className="w-10">
-                          <button onClick={() => handleRemove(e)} disabled={busyId === e.id} className="text-red-400 hover:text-red-600 text-sm">
-                            ✕
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                <div className="overflow-x-auto">
+                  <table className="erp-table">
+                    <tbody>
+                      {g.entries.map((e) => (
+                        <tr key={e.id}>
+                          <td className="text-sm">{e.productName}</td>
+                          <td className="w-64">
+                            <MoveToSkuInput
+                              entry={e}
+                              skuLabelToCode={skuLabelToCode}
+                              locale={locale}
+                              busy={busyId === e.id}
+                              onMove={handleMove}
+                            />
+                          </td>
+                          <td className="w-10">
+                            <button onClick={() => handleRemove(e)} disabled={busyId === e.id} className="text-red-400 hover:text-red-600 text-sm">
+                              ✕
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             ))}
           </div>
