@@ -448,7 +448,7 @@ export default function DraftOrderPage() {
             return;
           }
           const supplierName = locale === "gr" ? s.name : (s.nameEn || s.name);
-          const dateStr = orderDate.toLocaleDateString("el-GR");
+             const dateStr = new Date(orderDate).toLocaleDateString("el-GR");
           const subject = (locale === "gr" ? "Παραγγελία" : "Order") + ` — ${supplierName} — ${dateStr}`;
           const lines = items.map(
             (i) => `${i.productName} — ${i.orderedQuantity} ${i.unit} x €${i.basePrice.toFixed(2)} = €${i.grossAmount.toFixed(2)}`
