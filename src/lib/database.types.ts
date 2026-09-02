@@ -491,6 +491,24 @@ export interface Database {
     // omitting these caused every table query in this file to silently
     // degrade to a `never` type instead of failing clearly, which is
     // exactly what was happening before this was added.
+         product_sku_map: {
+        Row: {
+          id: number;
+          product_name: string;
+          sku: string;
+          final_group: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: number;
+          product_name: string;
+          sku: string;
+          final_group: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["product_sku_map"]["Insert"]>;
+        Relationships: [];
+      };
+    };
     Views: Record<string, never>;
     Functions: {
       // Matches get_ingredient_current_price() in schema_dynamic_pricing.sql —
