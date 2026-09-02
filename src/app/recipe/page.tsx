@@ -46,6 +46,16 @@ export default function RecipePage() {
   });
   const [recipeItems, setRecipeItems] = useState<RecipeIngredient[]>([]);
   const [uploadingSlot, setUploadingSlot] = useState<number | null>(null);
+  // "Αριθμομηχανή" μερίδων — ανεξάρτητο από το portionYield της
+  // αποθηκευμένης συνταγής. Αλλάζοντάς το (π.χ. 5, 10, 50) ξαναϋπολογίζει
+  // ζωντανά τις ποσότητες/τιμές παρτίδας στον πίνακα υλικών, χωρίς να
+  // αλλάζει τίποτα στη βάση — καθαρά για το "πόσο χρειάζομαι για τη
+  // δουλειά που κάνω τώρα".
+  const [targetPortions, setTargetPortions] = useState<string>("1");
+  // Ανά-γραμμή επιλογή εμφάνισης kg/g (μόνο για υλικά με βασική μονάδα
+  // kg ή g) — καθαρά οπτικό, η πραγματική ποσότητα αποθηκεύεται πάντα
+  // στη βασική μονάδα του υλικού (item.unit).
+  const [rowUnitDisplay, setRowUnitDisplay] = useState<Record<number, "kg" | "g">>({});
   const [showSearch, setShowSearch] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   // Αναζήτηση υλικού με πληκτρολόγηση + dropdown, για προσθήκη υλικού
@@ -66,6 +76,20 @@ export default function RecipePage() {
       })
       .slice(0, 20);
   }, [ingredientSearchTerm, allIngredients, locale]);
+
+  // Γραμμάρια/μερίδα υπολογισμένα ΑΠΟ τα ίδια τα υλικά της συνταγής
+  // (άθροισμα των kg/g υλικών, διά τις μερίδες) — ενημερωτικά, δίπλα
+  // στο χειροκίνητο πεδίο "Γραμμάρια / Μερίδα".
+  const computedGramsPerPortion = useMemo(() => {
+    const totalGrams = recipeItems.reduce((sum, item) => {
+      const u = (item.unit || "").toLowerCase();
+      if (u === "kg") return sum + Number(item.quantity || 0) * 1000;
+      if (u === "g") return sum + Number(item.quantity || 0);
+      return sum;
+    }, 0);
+    const portions = Number(form.portionYield || 1) || 1;
+    return totalGrams / portions;
+  }, [recipeItems, form.portionYield]);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -98,6 +122,8 @@ export default function RecipePage() {
     setSelectedRecipe(null);
     setForm({ name: "", nameEn: "", portionYield: "1", portionUnit: "pcs", allergens: [], technicalGuide: "", totalRawMaterialCost: "0", laborCost: "0", overheadCost: "0", totalCost: "0", profitMarginPercent: "60", sellingPrice: "0", menuPriceVat: "0", menuPriceFinal: "0", caloriesPerPortion: "0", gramsPerPortion: "0", platingImages: "[]" });
     setRecipeItems([]);
+    setTargetPortions("1");
+    setRowUnitDisplay({});
   }
 
   function loadRecipe(r: Recipe) {
@@ -115,6 +141,8 @@ export default function RecipePage() {
       platingImages: r.platingImages ?? "[]",
     });
     setRecipeItems(r.ingredients || []);
+    setTargetPortions(r.portionYield || "1");
+    setRowUnitDisplay({});
   }
 
   function calculateCosting() {
@@ -135,6 +163,46 @@ export default function RecipePage() {
     }));
   }
 
+  // --- Μερίδες & ζύγιση: βοηθητικές συναρτήσεις για τον πίνακα υλικών ---
+  // Μετατρέπει μια ποσότητα ανάμεσα σε kg/g. Για κάθε άλλη μονάδα
+  // (τεμ, lt κ.λπ.) επιστρέφει την τιμή αμετάβλητη.
+  function convertQty(baseQty: number, fromUnit: string, toUnit: string): number {
+    const from = (fromUnit || "").toLowerCase();
+    const to = (toUnit || "").toLowerCase();
+    if (from === to) return baseQty;
+    if (from === "kg" && to === "g") return baseQty * 1000;
+    if (from === "g" && to === "kg") return baseQty / 1000;
+    return baseQty;
+  }
+  function isWeightUnit(u: string): boolean {
+    const x = (u || "").toLowerCase();
+    return x === "kg" || x === "g";
+  }
+  // Ποσότητα ΑΝΑ ΜΙΑ ΜΕΡΙΔΑ (στη βασική μονάδα του υλικού), με βάση τις
+  // αποθηκευμένες μερίδες της συνταγής (form.portionYield).
+  function qtyPerPortionBase(item: RecipeIngredient): number {
+    const portions = Number(form.portionYield || 1) || 1;
+    return Number(item.quantity || 0) / portions;
+  }
+  // Ποσότητα για τον ΣΤΟΧΟ μερίδων (targetPortions) — π.χ. πόσα
+  // γραμμάρια χρειάζονται για 50 μερίδες αντί για τη 1 που έχει η
+  // αποθηκευμένη συνταγή.
+  function batchQtyBase(item: RecipeIngredient): number {
+    const target = Number(targetPortions || 0);
+    return qtyPerPortionBase(item) * target;
+  }
+  // Τιμή Μερίδας: πόσο κοστίζει αυτό το υλικό ΑΝΑ ΜΙΑ μερίδα της
+  // συνταγής (αντί για τιμή ανά μονάδα/κιλό).
+  function pricePerPortion(item: RecipeIngredient): number {
+    const portions = Number(form.portionYield || 1) || 1;
+    return Number(item.totalCost || 0) / portions;
+  }
+  // Κόστος αυτού του υλικού για τον στόχο μερίδων.
+  function batchPrice(item: RecipeIngredient): number {
+    const target = Number(targetPortions || 0);
+    return pricePerPortion(item) * target;
+  }
+
   // Εξάγει ΜΙΑ συνταγή (αυτή που είναι ανοιχτή στο popup) σε .xlsx —
   // μία γραμμή ανά υλικό, με τα στοιχεία της συνταγής επαναλαμβανόμενα
   // σε κάθε γραμμή, και μια τελευταία γραμμή ΣΥΝΟΛΟ με τα κόστη.
@@ -142,18 +210,24 @@ export default function RecipePage() {
     if (recipeItems.length === 0) return;
     const rows: Record<string, string | number>[] = recipeItems.map((item) => ({
       [locale === "gr" ? "Συνταγή" : "Recipe"]: form.name,
+      [locale === "gr" ? "Μερίδες Συνταγής" : "Recipe Portions"]: Number(form.portionYield),
       [locale === "gr" ? "Υλικό" : "Ingredient"]: item.ingredientName,
       [locale === "gr" ? "Ποσότητα" : "Quantity"]: item.quantity,
       [locale === "gr" ? "Μονάδα" : "Unit"]: item.unit,
-      [locale === "gr" ? "Τιμή Μονάδας" : "Unit Cost"]: Number(item.unitCost),
+      [locale === "gr" ? "Τιμή Μερίδας" : "Portion Price"]: Number(pricePerPortion(item).toFixed(3)),
+      [locale === "gr" ? `Ποσότητα (${targetPortions || 0} μερ.)` : `Quantity (${targetPortions || 0} ptn)`]: Number(batchQtyBase(item).toFixed(4)),
+      [locale === "gr" ? `Κόστος (${targetPortions || 0} μερ.)` : `Cost (${targetPortions || 0} ptn)`]: Number(batchPrice(item).toFixed(2)),
       [locale === "gr" ? "Σύνολο" : "Total"]: Number(item.totalCost),
     }));
     rows.push({
       [locale === "gr" ? "Συνταγή" : "Recipe"]: form.name,
+      [locale === "gr" ? "Μερίδες Συνταγής" : "Recipe Portions"]: Number(form.portionYield),
       [locale === "gr" ? "Υλικό" : "Ingredient"]: locale === "gr" ? "ΣΥΝΟΛΟ" : "TOTAL",
       [locale === "gr" ? "Ποσότητα" : "Quantity"]: "",
       [locale === "gr" ? "Μονάδα" : "Unit"]: "",
-      [locale === "gr" ? "Τιμή Μονάδας" : "Unit Cost"]: locale === "gr" ? "Κόστος Υλικών:" : "Raw Cost:",
+      [locale === "gr" ? "Τιμή Μερίδας" : "Portion Price"]: "",
+      [locale === "gr" ? `Ποσότητα (${targetPortions || 0} μερ.)` : `Quantity (${targetPortions || 0} ptn)`]: "",
+      [locale === "gr" ? `Κόστος (${targetPortions || 0} μερ.)` : `Cost (${targetPortions || 0} ptn)`]: locale === "gr" ? "Κόστος Υλικών:" : "Raw Cost:",
       [locale === "gr" ? "Σύνολο" : "Total"]: Number(form.totalRawMaterialCost),
     });
     const safeName = (form.name || (locale === "gr" ? "συνταγή" : "recipe")).replace(/[\\/:*?"<>|]/g, "").trim() || "recipe";
@@ -669,7 +743,21 @@ export default function RecipePage() {
                 <div><label className="erp-label">{locale === "gr" ? "Γενικά Έξοδα" : "Overhead Cost"}</label><input type="number" value={form.overheadCost} onChange={e => setForm({ ...form, overheadCost: e.target.value })} className="erp-input" step="0.01" /></div>
                 <div><label className="erp-label">{locale === "gr" ? "Περιθώριο Κέρδους %" : "Profit Margin %"}</label><input type="number" value={form.profitMarginPercent} onChange={e => setForm({ ...form, profitMarginPercent: e.target.value })} className="erp-input" step="1" /></div>
                 <div><label className="erp-label">{locale === "gr" ? "Θερμίδες / Μερίδα" : "Calories / Portion"}</label><input type="number" value={form.caloriesPerPortion} onChange={e => setForm({ ...form, caloriesPerPortion: e.target.value })} className="erp-input" step="1" /></div>
-                <div><label className="erp-label">{locale === "gr" ? "Γραμμάρια / Μερίδα" : "Grams / Portion"}</label><input type="number" value={form.gramsPerPortion} onChange={e => setForm({ ...form, gramsPerPortion: e.target.value })} className="erp-input" step="1" /></div>
+                <div>
+                  <label className="erp-label">{locale === "gr" ? "Γραμμάρια / Μερίδα" : "Grams / Portion"}</label>
+                  <input type="number" value={form.gramsPerPortion} onChange={e => setForm({ ...form, gramsPerPortion: e.target.value })} className="erp-input" step="1" />
+                  {recipeItems.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setForm(prev => ({ ...prev, gramsPerPortion: computedGramsPerPortion.toFixed(0) }))}
+                      className="text-[11px] text-blue-600 hover:underline mt-0.5"
+                    >
+                      {locale === "gr"
+                        ? `Υπολογισμένο από τα υλικά: ${computedGramsPerPortion.toFixed(0)} g (χρήση)`
+                        : `Computed from ingredients: ${computedGramsPerPortion.toFixed(0)} g (use)`}
+                    </button>
+                  )}
+                </div>
               </div>
 
               {/* Allergens */}
@@ -694,12 +782,13 @@ export default function RecipePage() {
               </div>
 
               {/* Costing Summary */}
-              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 bg-slate-50 rounded-lg p-4">
+              <div className="grid grid-cols-2 sm:grid-cols-6 gap-3 bg-slate-50 rounded-lg p-4">
                 <div><div className="text-xs text-slate-500">{locale === "gr" ? "Κόστος Υλικών" : "Raw Material Cost"}</div><div className="font-bold">€{Number(form.totalRawMaterialCost).toFixed(2)}</div></div>
                 <div><div className="text-xs text-slate-500">{locale === "gr" ? "Συνολικό Κόστος" : "Total Cost"}</div><div className="font-bold">€{Number(form.totalCost).toFixed(2)}</div></div>
                 <div><div className="text-xs text-slate-500">{locale === "gr" ? "Τιμή Πώλησης" : "Selling Price"}</div><div className="font-bold text-emerald-700">€{Number(form.sellingPrice).toFixed(2)}</div></div>
                 <div><div className="text-xs text-slate-500">{locale === "gr" ? "Τιμή Μενού (ΦΠΑ)" : "Menu Price (VAT)"}</div><div className="font-bold text-blue-700">€{Number(form.menuPriceVat).toFixed(2)}</div></div>
                 <div><div className="text-xs text-slate-500">{locale === "gr" ? "Συνολικά Γραμμάρια" : "Total Grams"}</div><div className="font-bold">{(Number(form.gramsPerPortion) * Number(form.portionYield || 1)).toFixed(0)} g</div></div>
+                <div><div className="text-xs text-slate-500">{locale === "gr" ? `Κόστος Υλικών (${targetPortions || 0} μερ.)` : `Raw Cost (${targetPortions || 0} ptn)`}</div><div className="font-bold">€{((Number(form.totalRawMaterialCost) / (Number(form.portionYield || 1) || 1)) * Number(targetPortions || 0)).toFixed(2)}</div></div>
               </div>
             </div>
           </div>
@@ -708,8 +797,17 @@ export default function RecipePage() {
               συνταγής, κατόπιν ρητού αιτήματος του χρήστη. */}
           {selectedRecipe && (
             <div className="erp-card mb-6">
-              <div className="erp-card-header flex items-center justify-between">
+              <div className="erp-card-header flex items-center justify-between flex-wrap gap-2">
                 <h3 className="font-semibold">🧂 {locale === "gr" ? "Υλικά Συνταγής" : "Recipe Ingredients"}</h3>
+                <div className="flex items-center gap-1 text-xs bg-blue-50 rounded-lg px-2 py-1.5">
+                  <span className="text-slate-500">{locale === "gr" ? "Υπολογισμός για" : "Calculate for"}</span>
+                  <input
+                    type="number" value={targetPortions}
+                    onChange={(e) => setTargetPortions(e.target.value)}
+                    className="erp-input text-xs py-1 w-16 text-center" step="any"
+                  />
+                  <span className="text-slate-500">{locale === "gr" ? "μερίδες" : "portions"}</span>
+                </div>
                 <div className="relative" ref={ingredientSearchRef}>
                   <input
                     type="text"
@@ -756,35 +854,62 @@ export default function RecipePage() {
                       <th className="min-w-[220px]">{t("fieldProduct")}</th>
                       <th>{t("fieldQuantity")}</th>
                       <th>{t("fieldUnit")}</th>
-                      <th>{locale === "gr" ? "Τιμή Μονάδας" : "Unit Cost"}</th>
+                      <th>{locale === "gr" ? "Τιμή Μερίδας" : "Portion Price"}</th>
+                      <th>{locale === "gr" ? `Ποσότητα (${targetPortions || 0} μερ.)` : `Qty (${targetPortions || 0} ptn)`}</th>
+                      <th>{locale === "gr" ? `Κόστος (${targetPortions || 0} μερ.)` : `Cost (${targetPortions || 0} ptn)`}</th>
                       <th>{locale === "gr" ? "Σύνολο" : "Total"}</th>
                       <th></th>
                     </tr>
                   </thead>
                   <tbody>
                     {recipeItems.length === 0 ? (
-                      <tr><td colSpan={7} className="text-center py-6 text-slate-400">{t("noData")}</td></tr>
-                    ) : recipeItems.filter((item): item is typeof item & { id: number } => item.id != null).map((item, i) => (
-                      <tr key={item.id} className={savingIngredientRowId === item.id ? "opacity-50" : ""}>
-                        <td className="text-xs text-slate-400">{i + 1}</td>
-                        <td className="min-w-[220px] font-medium">{item.ingredientName}</td>
-                        <td>
-                          <input
-                            type="number" defaultValue={item.quantity}
-                            onBlur={(e) => updateIngredientRow(item.id, "quantity", Number(e.target.value))}
-                            className="erp-input text-xs py-1 w-20" step="0.001"
-                          />
-                        </td>
-                        <td>{item.unit}</td>
-                        <td>€{Number(item.unitCost).toFixed(2)}</td>
-                        <td className="font-semibold">€{Number(item.totalCost).toFixed(2)}</td>
-                        <td>
-                          <button onClick={() => deleteIngredientRow(item.id)} disabled={savingIngredientRowId === item.id} className="text-red-400 hover:text-red-600">
-                            {savingIngredientRowId === item.id ? "…" : "✕"}
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
+                      <tr><td colSpan={9} className="text-center py-6 text-slate-400">{t("noData")}</td></tr>
+                    ) : recipeItems.filter((item): item is typeof item & { id: number } => item.id != null).map((item, i) => {
+                      const toggleable = isWeightUnit(item.unit);
+                      const displayUnit = toggleable ? (rowUnitDisplay[item.id] || (item.unit.toLowerCase() as "kg" | "g")) : item.unit;
+                      const dispQty = toggleable ? convertQty(Number(item.quantity || 0), item.unit, displayUnit) : Number(item.quantity || 0);
+                      const dispBatchQty = toggleable ? convertQty(batchQtyBase(item), item.unit, displayUnit) : batchQtyBase(item);
+                      return (
+                        <tr key={item.id} className={savingIngredientRowId === item.id ? "opacity-50" : ""}>
+                          <td className="text-xs text-slate-400">{i + 1}</td>
+                          <td className="min-w-[220px] font-medium">{item.ingredientName}</td>
+                          <td>
+                            <div className="flex items-center gap-1">
+                              <input
+                                key={displayUnit}
+                                type="number" defaultValue={dispQty}
+                                onBlur={(e) => {
+                                  const displayVal = Number(e.target.value);
+                                  const baseVal = toggleable ? convertQty(displayVal, displayUnit, item.unit) : displayVal;
+                                  updateIngredientRow(item.id, "quantity", Number(baseVal.toFixed(4)));
+                                }}
+                                className="erp-input text-xs py-1 w-20" step="0.001"
+                              />
+                              {toggleable && (
+                                <select
+                                  value={displayUnit}
+                                  onChange={(e) => setRowUnitDisplay(prev => ({ ...prev, [item.id]: e.target.value as "kg" | "g" }))}
+                                  className="erp-input text-xs py-1 w-14"
+                                >
+                                  <option value="kg">kg</option>
+                                  <option value="g">g</option>
+                                </select>
+                              )}
+                            </div>
+                          </td>
+                          <td>{displayUnit}</td>
+                          <td>€{pricePerPortion(item).toFixed(3)}</td>
+                          <td>{dispBatchQty.toFixed(toggleable && displayUnit === "g" ? 0 : 3)} {displayUnit}</td>
+                          <td className="font-semibold">€{batchPrice(item).toFixed(2)}</td>
+                          <td className="font-semibold">€{Number(item.totalCost).toFixed(2)}</td>
+                          <td>
+                            <button onClick={() => deleteIngredientRow(item.id)} disabled={savingIngredientRowId === item.id} className="text-red-400 hover:text-red-600">
+                              {savingIngredientRowId === item.id ? "…" : "✕"}
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
