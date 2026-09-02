@@ -508,6 +508,29 @@ export interface Database {
         Update: Partial<Database["public"]["Tables"]["product_sku_map"]["Insert"]>;
         Relationships: [];
       };
+      business_profile: {
+        Row: {
+          id: number;
+          name: string | null;
+          address: string | null;
+          phone: string | null;
+          email: string | null;
+          tax_id: string | null;
+          logo_data_url: string | null;
+          updated_at: string;
+        };
+        Insert: {
+          id?: number;
+          name?: string | null;
+          address?: string | null;
+          phone?: string | null;
+          email?: string | null;
+          tax_id?: string | null;
+          logo_data_url?: string | null;
+        };
+        Update: Partial<Database["public"]["Tables"]["business_profile"]["Insert"]>;
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: {
