@@ -195,6 +195,14 @@ export async function createSupplierProductsBulk(
   return count ?? rows.length;
 }
 
+/** Updates a single supplier product's category — used by the inline
+ * dropdown in the Supplier Quotes ("Πίνακας Προσφορών") table so the
+ * owner can categorize items manually after import. */
+export async function updateSupplierProductCategory(id: number, category: string): Promise<void> {
+  const { error } = await requireClient().from("supplier_products").update({ category }).eq("id", id);
+  if (error) throw error;
+}
+
 // ------------------------------------------------------------
 // ORDERS + ORDER ITEMS
 // ------------------------------------------------------------
