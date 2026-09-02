@@ -4,7 +4,7 @@ import { useLanguage } from "@/lib/context";
 import { PageHeader, Badge, Modal } from "@/components/shared";
 import type { Recipe, RecipeIngredient } from "@/lib/types";
 import * as db from "@/lib/supabaseData";
-import { parseSpreadsheetFile, rowsToObjects, pick, exportRowsToExcel } from "@/lib/csv";
+import { parseSpreadsheetFile, rowsToObjects, pick, exportRowsToExcel, exportSheetsToExcel } from "@/lib/csv";
 
 const ALLERGEN_LIST = ["gluten","dairy","eggs","fish","shellfish","nuts","peanuts","soy","sesame","celery","mustard","lupin","molluscs","sulphites"];
 
@@ -458,6 +458,71 @@ export default function RecipePage() {
     exportRowsToExcel(rows, filename, locale === "gr" ? "Συνταγές" : "Recipes");
   }
 
+  // Χτίζει τις γραμμές ΜΙΑΣ συνταγής με ακριβώς την ίδια δομή/σειρά
+  // πληροφορίας που έχει η φόρμα συνταγής (στοιχεία, αλλεργιογόνα,
+  // τεχνικός οδηγός, πίνακας υλικών, κοστολόγηση) -- για το φύλλο της
+  // στη μαζική εξαγωγή "Εξαγωγή Φορμών".
+  function buildRecipeFormRows(r: Recipe): (string | number)[][] {
+    const gr = locale === "gr";
+    const portions = Number(r.portionYield || 1) || 1;
+    const rows: (string | number)[][] = [];
+    rows.push([gr ? "Συνταγή" : "Recipe", r.name]);
+    if (r.nameEn) rows.push([gr ? "Αγγλικό Όνομα" : "English Name", r.nameEn]);
+    rows.push([gr ? "Μερίδες" : "Portions", Number(r.portionYield || 0), r.portionUnit]);
+    rows.push([gr ? "Κόστος Εργασίας" : "Labor Cost", Number(r.laborCost || 0)]);
+    rows.push([gr ? "Γενικά Έξοδα" : "Overhead Cost", Number(r.overheadCost || 0)]);
+    rows.push([gr ? "Περιθώριο Κέρδους %" : "Profit Margin %", Number(r.profitMarginPercent || 0)]);
+    rows.push([gr ? "Θερμίδες / Μερίδα" : "Calories / Portion", Number(r.caloriesPerPortion || 0)]);
+    rows.push([gr ? "Γραμμάρια / Μερίδα" : "Grams / Portion", Number(r.gramsPerPortion || 0)]);
+    let allergens: string[] = [];
+    try {
+      allergens = typeof r.allergens === "string" ? JSON.parse(r.allergens || "[]") : ((r.allergens as unknown as string[]) || []);
+    } catch {
+      allergens = [];
+    }
+    rows.push([gr ? "Αλλεργιογόνα" : "Allergens", allergens.join(", ")]);
+    rows.push([]);
+    if (r.technicalGuide) {
+      rows.push([gr ? "Τεχνικός Οδηγός" : "Technical Guide"]);
+      for (const line of r.technicalGuide.split("\n")) rows.push([line]);
+      rows.push([]);
+    }
+    rows.push([
+      "#", gr ? "Υλικό" : "Ingredient", gr ? "Ποσότητα" : "Quantity", gr ? "Μονάδα" : "Unit",
+      gr ? "Τιμή Μερίδας" : "Portion Price", gr ? "Σύνολο" : "Total",
+    ]);
+    (r.ingredients || []).forEach((item, i) => {
+      rows.push([
+        i + 1, item.ingredientName, Number(item.quantity || 0), item.unit,
+        Number((Number(item.totalCost || 0) / portions).toFixed(3)), Number(item.totalCost || 0),
+      ]);
+    });
+    rows.push([]);
+    rows.push([gr ? "Κόστος Υλικών" : "Raw Material Cost", Number(r.totalRawMaterialCost || 0)]);
+    rows.push([gr ? "Συνολικό Κόστος" : "Total Cost", Number(r.totalCost || 0)]);
+    rows.push([gr ? "Τιμή Πώλησης" : "Selling Price", Number(r.sellingPrice || 0)]);
+    rows.push([gr ? "Τιμή Μενού (ΦΠΑ)" : "Menu Price (VAT)", Number(r.menuPriceVat || 0)]);
+    return rows;
+  }
+
+  // Μαζική εξαγωγή -- μία ΠΛΗΡΗΣ φόρμα συνταγής ανά φύλλο Excel, για τις
+  // επιλεγμένες συνταγές (ή όλες, αν καμία δεν είναι επιλεγμένη).
+  function exportRecipesFormsToExcel() {
+    const toExport = selectedIds.size > 0 ? recipes.filter((r) => selectedIds.has(r.id)) : recipes;
+    if (toExport.length === 0) return;
+    const usedNames = new Set<string>();
+    const sheets = toExport.map((r, idx) => {
+      let base = (r.name || (locale === "gr" ? `Συνταγή ${idx + 1}` : `Recipe ${idx + 1}`)).replace(/[\\/*?:[\]]/g, " ").trim().slice(0, 28) || `Sheet ${idx + 1}`;
+      let name = base;
+      let n = 2;
+      while (usedNames.has(name)) { name = `${base} ${n}`; n++; }
+      usedNames.add(name);
+      return { name, rows: buildRecipeFormRows(r) };
+    });
+    const filename = locale === "gr" ? "συνταγές-φόρμες" : "recipe-forms";
+    exportSheetsToExcel(sheets, filename);
+  }
+
   function openForEdit(r: Recipe) {
     loadRecipe(r);
   }
@@ -565,7 +630,10 @@ export default function RecipePage() {
               <button onClick={exportRecipesExcel} className="erp-btn-secondary text-xs px-3 py-1.5">
                 📊 {selectedIds.size > 0
                   ? (locale === "gr" ? `Εξαγωγή Επιλεγμένων (${selectedIds.size})` : `Export Selected (${selectedIds.size})`)
-                  : (locale === "gr" ? "Εξαγωγή Excel" : "Export Excel")}
+                  : (locale === "gr" ? "Εξαγωγή Excel (Λίστα)" : "Export Excel (List)")}
+              </button>
+              <button onClick={exportRecipesFormsToExcel} className="erp-btn-secondary text-xs px-3 py-1.5" title={locale === "gr" ? "Μία πλήρης φόρμα συνταγής ανά φύλλο Excel" : "One full recipe form per Excel sheet"}>
+                📑 {locale === "gr" ? "Εξαγωγή Φορμών (ανά φύλλο)" : "Export Forms (per sheet)"}
               </button>
             </div>
           </div>
