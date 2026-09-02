@@ -19,6 +19,21 @@ const EMPTY_BUSINESS_INFO: BusinessProfile = {
   logoDataUrl: null,
 };
 
+// Strips Greek tonos accents and διαλυτικά (diaeresis) and upper-cases,
+// so product search matches regardless of accents — typing "ΑΙΣΜΠΕΡΓΚ"
+// finds a product stored as "ΑΪΣΜΠΕΡΓΚ" (with διαλυτικά on the Ι), which
+// a plain text match would otherwise miss since Ι and Ϊ are different
+// characters even though they look almost the same.
+const GREEK_ACCENT_MAP: Record<string, string> = {
+  "Ά": "Α", "Έ": "Ε", "Ή": "Η", "Ί": "Ι", "Ϊ": "Ι", "Ό": "Ο", "Ύ": "Υ", "Ϋ": "Υ", "Ώ": "Ω",
+  "ά": "α", "έ": "ε", "ή": "η", "ί": "ι", "ϊ": "ι", "ΐ": "ι", "ό": "ο", "ύ": "υ", "ϋ": "υ", "ΰ": "υ", "ώ": "ω",
+};
+function normalizeGreek(s: string): string {
+  let out = "";
+  for (const ch of s) out += GREEK_ACCENT_MAP[ch] ?? ch;
+  return out.toUpperCase();
+}
+
 interface OrderItemDraft {
   id?: number;
   supplierId?: number;
@@ -64,6 +79,7 @@ export default function DraftOrderPage() {
   const { t, locale, data, refreshAll } = useApp();
   const suppliers = data.suppliers;
   const orders = data.orders;
+  const supplierProducts = data.supplierProducts;
 
   const [selectedSupplier, setSelectedSupplier] = useState<number>(0);
   const [orderDate, setOrderDate] = useState(new Date().toISOString().split("T")[0]);
@@ -120,48 +136,29 @@ export default function DraftOrderPage() {
   }, []);
 
   // ---- "Μηχανή Αναζήτησης SKU": live cross-supplier lookup dropdown ----
-  // Now a real Postgres full-text query (see searchSupplierProducts in
-  // supabaseData.ts) instead of an in-memory filter, so it's debounced
-  // (300ms after the person stops typing) rather than firing on every
-  // keystroke — a network round trip per character would feel laggy and
-  // needlessly load the database.
+  // Filters supplierProducts, which the app already loads in full into
+  // memory on every page (data.supplierProducts) — no network round trip
+  // or debounce needed, results update instantly on every keystroke.
+  // Matching is accent/διαλυτικά-insensitive (see normalizeGreek above)
+  // so "ΑΙΣΜΠΕΡΓΚ" also finds a product stored as "ΑΪΣΜΠΕΡΓΚ".
   const [lookupDismissed, setLookupDismissed] = useState(false);
-  const [lookupResults, setLookupResults] = useState<SupplierProduct[]>([]);
-  const [lookupLoading, setLookupLoading] = useState(false);
   const searchBoxRef = useRef<HTMLDivElement>(null);
   const trimmedQuery = newProductName.trim();
+  const normalizedQuery = normalizeGreek(trimmedQuery);
 
-  useEffect(() => {
-    if (!trimmedQuery) {
-      // No network sync needed for an empty query — nothing to debounce
-      // or fetch. Loading/dismissed state resets on the next render via
-      // the derived `showLookup` below; nothing to set here.
-      return;
-    }
-    // Must run synchronously here (not inside the debounced callback below)
-    // so the "searching…" indicator appears immediately on each keystroke,
-    // before the 300ms debounce even starts — standard debounced-search
-    // UX, not state that could instead be derived at render time.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setLookupLoading(true);
-    const timeoutId = setTimeout(async () => {
-      try {
-        const results = await db.searchSupplierProducts(trimmedQuery);
-        setLookupResults(results);
-      } catch {
-        setLookupResults([]);
-      } finally {
-        setLookupLoading(false);
-      }
-    }, 300);
-    return () => clearTimeout(timeoutId);
-  }, [trimmedQuery]);
+  const effectiveResults = useMemo(() => {
+    if (!normalizedQuery) return [];
+    return supplierProducts
+      .filter((p) => p.isActive !== false)
+      .filter(
+        (p) =>
+          normalizeGreek(p.productName).includes(normalizedQuery) ||
+          normalizeGreek(p.productNameEn || "").includes(normalizedQuery)
+      )
+      .sort((a, b) => Number(a.basePrice) - Number(b.basePrice));
+  }, [supplierProducts, normalizedQuery]);
 
-  // Derived, not stored: when there's no query, there's nothing to show,
-  // regardless of what the last real search happened to return.
-  const effectiveResults = trimmedQuery ? lookupResults : [];
-
-  const showLookup = trimmedQuery.length > 0 && (effectiveResults.length > 0 || lookupLoading) && !lookupDismissed;
+  const showLookup = trimmedQuery.length > 0 && effectiveResults.length > 0 && !lookupDismissed;
 
   // Close the lookup dropdown when clicking outside it.
   useEffect(() => {
@@ -449,11 +446,9 @@ export default function DraftOrderPage() {
                 {showLookup && (
                   <div className="absolute z-30 mt-1 w-[min(95vw,760px)] max-h-[28rem] overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-2xl">
                     <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-200 text-sm font-semibold text-slate-500 uppercase tracking-wide">
-                      {lookupLoading
-                        ? (locale === "gr" ? "Αναζήτηση…" : "Searching…")
-                        : locale === "gr"
-                          ? `${effectiveResults.length} προσφορές — ταξινομημένες από χαμηλότερη τιμή`
-                          : `${effectiveResults.length} matching offers — sorted by lowest price`}
+                      {locale === "gr"
+                        ? `${effectiveResults.length} προσφορές — ταξινομημένες από χαμηλότερη τιμή`
+                        : `${effectiveResults.length} matching offers — sorted by lowest price`}
                     </div>
                     <table className="w-full text-sm">
                       <thead>
