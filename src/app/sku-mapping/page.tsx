@@ -495,32 +495,39 @@ export default function SkuMappingPage() {
           </div>
 
           <div className="border-t border-slate-200 pt-4">
-            <label className="erp-label text-base mb-1 block">
-              {locale === "gr" ? "Ή νέο SKU από τα επιλεγμένα" : "Or new SKU from selection"}
-            </label>
-            <div className="flex flex-col sm:flex-row gap-2 mb-2">
-              <input
-                type="text"
-                value={bulkNewSku}
-                onChange={(e) => setBulkNewSku(e.target.value)}
-                className="erp-input text-base py-2.5 sm:w-36"
-                placeholder="SKU-0999"
-              />
-              <input
-                type="text"
-                value={bulkNewGroup}
-                onChange={(e) => setBulkNewGroup(e.target.value)}
-                className="erp-input text-base py-2.5 flex-1"
-                placeholder={locale === "gr" ? "Όνομα ομάδας" : "Group name"}
-              />
+            <div className="erp-label text-base mb-2 block font-bold text-slate-700">
+              {locale === "gr" ? "Ή δημιουργία νέου SKU από τα επιλεγμένα" : "Or create a new SKU from selection"}
             </div>
+
+            <label className="text-sm font-semibold text-slate-600 mb-1 block">
+              {locale === "gr" ? "1. Κωδικός SKU" : "1. SKU code"}
+            </label>
+            <input
+              type="text"
+              value={bulkNewSku}
+              onChange={(e) => setBulkNewSku(e.target.value)}
+              className="erp-input text-base w-full py-2.5 mb-3"
+              placeholder="SKU-0999"
+            />
+
+            <label className="text-sm font-semibold text-slate-600 mb-1 block">
+              {locale === "gr" ? "2. Όνομα Ομάδας" : "2. Group name"}
+            </label>
+            <input
+              type="text"
+              value={bulkNewGroup}
+              onChange={(e) => setBulkNewGroup(e.target.value)}
+              className="erp-input text-base w-full py-2.5 mb-3"
+              placeholder={locale === "gr" ? "π.χ. Πιπεριά Κίτρινη" : "e.g. Yellow Pepper"}
+            />
+
             <button
               onClick={() => handleBulkMerge(bulkNewSku.trim(), bulkNewGroup.trim())}
               disabled={bulkBusy || !bulkNewSku.trim() || !bulkNewGroup.trim()}
-              className="erp-btn-success text-base w-full py-2.5"
+              className="erp-btn-success text-base w-full py-3 font-semibold"
             >
               {bulkBusy ? "…" : "➕ "}
-              {locale === "gr" ? "Δημιουργία & Συγχώνευση" : "Create & Merge"}
+              {locale === "gr" ? "3. Δημιουργία & Συγχώνευση" : "3. Create & Merge"}
             </button>
           </div>
         </div>
