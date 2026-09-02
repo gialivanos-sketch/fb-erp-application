@@ -25,6 +25,7 @@ interface RecipeFormState {
   menuPriceFinal: string;
   caloriesPerPortion: string;
   gramsPerPortion: string;
+  platingImages: string;
 }
 
 export default function RecipePage() {
@@ -41,9 +42,10 @@ export default function RecipePage() {
     totalRawMaterialCost: "0", laborCost: "0", overheadCost: "0",
     totalCost: "0", profitMarginPercent: "60", sellingPrice: "0",
     menuPriceVat: "0", menuPriceFinal: "0",
-    caloriesPerPortion: "0", gramsPerPortion: "0",
+    caloriesPerPortion: "0", gramsPerPortion: "0", platingImages: "[]",
   });
   const [recipeItems, setRecipeItems] = useState<RecipeIngredient[]>([]);
+  const [uploadingSlot, setUploadingSlot] = useState<number | null>(null);
   const [showSearch, setShowSearch] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   // Αναζήτηση υλικού με πληκτρολόγηση + dropdown, για προσθήκη υλικού
@@ -94,7 +96,7 @@ export default function RecipePage() {
   function newRecipe() {
     setEditing(true);
     setSelectedRecipe(null);
-    setForm({ name: "", nameEn: "", portionYield: "1", portionUnit: "pcs", allergens: [], technicalGuide: "", totalRawMaterialCost: "0", laborCost: "0", overheadCost: "0", totalCost: "0", profitMarginPercent: "60", sellingPrice: "0", menuPriceVat: "0", menuPriceFinal: "0", caloriesPerPortion: "0", gramsPerPortion: "0" });
+    setForm({ name: "", nameEn: "", portionYield: "1", portionUnit: "pcs", allergens: [], technicalGuide: "", totalRawMaterialCost: "0", laborCost: "0", overheadCost: "0", totalCost: "0", profitMarginPercent: "60", sellingPrice: "0", menuPriceVat: "0", menuPriceFinal: "0", caloriesPerPortion: "0", gramsPerPortion: "0", platingImages: "[]" });
     setRecipeItems([]);
   }
 
@@ -110,6 +112,7 @@ export default function RecipePage() {
       totalCost: r.totalCost, profitMarginPercent: r.profitMarginPercent, sellingPrice: r.sellingPrice,
       menuPriceVat: r.menuPriceVat, menuPriceFinal: r.menuPriceFinal,
       caloriesPerPortion: r.caloriesPerPortion ?? "0", gramsPerPortion: r.gramsPerPortion ?? "0",
+      platingImages: r.platingImages ?? "[]",
     });
     setRecipeItems(r.ingredients || []);
   }
@@ -132,7 +135,7 @@ export default function RecipePage() {
     }));
   }
 
-    // Εξάγει ΜΙΑ συνταγή (αυτή που είναι ανοιχτή στο popup) σε .xlsx —
+  // Εξάγει ΜΙΑ συνταγή (αυτή που είναι ανοιχτή στο popup) σε .xlsx —
   // μία γραμμή ανά υλικό, με τα στοιχεία της συνταγής επαναλαμβανόμενα
   // σε κάθε γραμμή, και μια τελευταία γραμμή ΣΥΝΟΛΟ με τα κόστη.
   function exportRecipeToExcel() {
@@ -155,6 +158,54 @@ export default function RecipePage() {
     });
     const safeName = (form.name || (locale === "gr" ? "συνταγή" : "recipe")).replace(/[\\/:*?"<>|]/g, "").trim() || "recipe";
     exportRowsToExcel(rows, safeName, locale === "gr" ? "Συνταγή" : "Recipe");
+  }
+
+  // Χτίζει το ίδιο payload με το saveRecipe, χρησιμοποιείται για να
+  // αποθηκεύσει ΑΜΕΣΩΣ τις φωτογραφίες παρουσίασης, χωρίς να χρειάζεται
+  // ξεχωριστό πάτημα του κουμπιού "Αποθήκευση Συνταγής".
+  function buildRecipeDetailsPayload(platingImagesOverride: string) {
+    return {
+      name: form.name, nameEn: form.nameEn || null, portionYield: form.portionYield, portionUnit: form.portionUnit,
+      allergens: JSON.stringify(form.allergens), technicalGuide: form.technicalGuide || null,
+      totalRawMaterialCost: form.totalRawMaterialCost, laborCost: form.laborCost, overheadCost: form.overheadCost,
+      totalCost: form.totalCost, profitMarginPercent: form.profitMarginPercent, sellingPrice: form.sellingPrice,
+      menuPriceVat: form.menuPriceVat, menuPriceFinal: form.menuPriceFinal,
+      caloriesPerPortion: form.caloriesPerPortion, gramsPerPortion: form.gramsPerPortion,
+      platingImages: platingImagesOverride, isActive: true,
+    };
+  }
+
+  // Ανεβάζει μια φωτογραφία στο slot (0, 1 ή 2) της Φωτογαλερίας —
+  // απαιτεί ήδη αποθηκευμένη συνταγή (selectedRecipe.id), γράφει
+  // ΑΜΕΣΩΣ στη βάση ώστε να μη χαθεί αν ο χρήστης κλείσει το popup.
+  async function uploadPlatingImage(slot: number, file: File) {
+    if (!selectedRecipe?.id) return;
+    setUploadingSlot(slot);
+    try {
+      const url = await db.uploadRecipeImage(selectedRecipe.id, file);
+      const images: string[] = JSON.parse(form.platingImages || "[]");
+      while (images.length < 3) images.push("");
+      images[slot] = url;
+      const newPlatingImages = JSON.stringify(images);
+      setForm((prev) => ({ ...prev, platingImages: newPlatingImages }));
+      await db.updateRecipeDetails(selectedRecipe.id, buildRecipeDetailsPayload(newPlatingImages));
+    } catch (err) {
+      alert(locale === "gr" ? "Αποτυχία μεταφόρτωσης: " + String(err) : "Upload failed: " + String(err));
+    } finally {
+      setUploadingSlot(null);
+    }
+  }
+
+  function removePlatingImage(slot: number) {
+    if (!selectedRecipe?.id) return;
+    const images: string[] = JSON.parse(form.platingImages || "[]");
+    while (images.length < 3) images.push("");
+    images[slot] = "";
+    const newPlatingImages = JSON.stringify(images);
+    setForm((prev) => ({ ...prev, platingImages: newPlatingImages }));
+    db.updateRecipeDetails(selectedRecipe.id, buildRecipeDetailsPayload(newPlatingImages)).catch((err) =>
+      alert(locale === "gr" ? "Αποτυχία διαγραφής: " + String(err) : "Delete failed: " + String(err))
+    );
   }
 
   // Καλείται όταν ο χρήστης διαλέγει ένα υλικό από το αποτέλεσμα
@@ -240,9 +291,10 @@ export default function RecipePage() {
         menuPriceFinal: form.menuPriceFinal,
         caloriesPerPortion: form.caloriesPerPortion,
         gramsPerPortion: form.gramsPerPortion,
+        platingImages: form.platingImages,
         isActive: true,
       };
-            if (selectedRecipe?.id) {
+      if (selectedRecipe?.id) {
         await db.updateRecipeDetails(selectedRecipe.id, details);
         await refreshAll();
         setEditing(false);
@@ -411,6 +463,10 @@ export default function RecipePage() {
 
   return (
     <div>
+      {/* Όλο το περιεχόμενο εκτός popup — κρύβεται ΤΕΛΕΙΩΣ (display:none)
+          στην εκτύπωση, ώστε η κρυμμένη λίστα συνταγών να μην πιάνει χώρο
+          και να μη δημιουργεί άδειες σελίδες. */}
+      <div className="print:hidden">
       <PageHeader title={t("headerRecipe")} subtitle="Interactive Recipe Composition / Φόρμα Συνταγής">
         <button onClick={() => setListView((v) => !v)} className={listView ? "erp-btn-primary" : "erp-btn-secondary"}>
           📊 {listView ? (locale === "gr" ? "Κανονική Προβολή" : "Normal View") : (locale === "gr" ? "Προβολή Λίστας" : "List View")}
@@ -539,9 +595,11 @@ export default function RecipePage() {
             </div>
           </div>
         </div>
-          </div>
+      </div>
       )}
-    {/* Recipe Form Modal — ανοίγει με κλικ πάνω σε μια συνταγή ή στο
+      </div>
+
+      {/* Recipe Form Modal — ανοίγει με κλικ πάνω σε μια συνταγή ή στο
           "Νέα Συνταγή", αντί για ενσωματωμένο πάνελ. */}
       <Modal
         isOpen={editing}
@@ -549,7 +607,11 @@ export default function RecipePage() {
         title={selectedRecipe ? (locale === "gr" ? "Επεξεργασία Συνταγής" : "Edit Recipe") : (locale === "gr" ? "Νέα Συνταγή" : "New Recipe")}
         size="xl"
       >
-               <div id="printable-recipe-area">
+        <div id="printable-recipe-area">
+          {/* Print CSS — συμπυκνώνει τη συνταγή ώστε να χωράει σε 1
+              σελίδα εκτύπωσης αντί για 2-3, και σπάει έξω από τους
+              περιορισμούς ύψους/overflow του Modal ώστε να μην κόβεται
+              περιεχόμενο. */}
           <style>{`
             @media print {
               body * { visibility: hidden; }
@@ -562,14 +624,13 @@ export default function RecipePage() {
               }
               .flex-1.overflow-y-auto.p-6 { overflow: visible !important; padding: 0 !important; flex: none !important; }
               #plating-gallery-section { display: none !important; }
-              #plating-gallery-section { display: none !important; }
               #printable-recipe-area .erp-card {
                 margin-bottom: 4px !important; box-shadow: none !important;
                 border: 1px solid #e2e8f0 !important; page-break-inside: avoid;
               }
               #printable-recipe-area .erp-card-header { padding: 3px 10px !important; }
               #printable-recipe-area .p-6 { padding: 8px !important; }
-                            #printable-recipe-area, #printable-recipe-area * { font-size: 12.5px !important; line-height: 1.3 !important; }
+              #printable-recipe-area, #printable-recipe-area * { font-size: 12.5px !important; line-height: 1.3 !important; }
               #printable-recipe-area .erp-label { font-size: 10px !important; margin-bottom: 0 !important; color: #64748b !important; }
               #printable-recipe-area h3 { font-size: 14px !important; }
               #printable-recipe-area input, #printable-recipe-area select, #printable-recipe-area textarea {
@@ -586,7 +647,7 @@ export default function RecipePage() {
             <button onClick={saveRecipe} disabled={saving} className="erp-btn-success">{saving ? "…" : "💾"} {t("btnSaveRecipe")}</button>
             <button onClick={calculateCosting} className="erp-btn-secondary">🧮 {locale === "gr" ? "Υπολογισμός Κόστους" : "Calculate Costing"}</button>
             <button onClick={() => setShowSearch(true)} className="erp-btn-secondary">🔍 {t("btnSearchRestore")}</button>
-                        <button onClick={() => window.print()} className="erp-btn-secondary">🖨️ {t("btnPrint")} / PDF</button>
+            <button onClick={() => window.print()} className="erp-btn-secondary">🖨️ {t("btnPrint")} / PDF</button>
             {selectedRecipe && (
               <button onClick={exportRecipeToExcel} className="erp-btn-secondary">📊 {locale === "gr" ? "Εξαγωγή Excel" : "Export Excel"}</button>
             )}
@@ -729,26 +790,55 @@ export default function RecipePage() {
               </div>
             </div>
           )}
-
-                           {!selectedRecipe && (
+          {!selectedRecipe && (
             <div className="erp-card mb-6 p-6 text-center text-sm text-slate-400">
               {locale === "gr"
                 ? "Αποθήκευσε πρώτα τη συνταγή (💾 Αποθήκευση Συνταγής) για να εμφανιστεί εδώ ο πίνακας υλικών και να μπορείς να προσθέσεις υλικά."
                 : "Save the recipe first (💾 Save Recipe) — the ingredients table will appear here once it's saved."}
             </div>
           )}
-                 {/* Plating Gallery — κρύβεται στην εκτύπωση (κενά placeholders,
+
+          {/* Plating Gallery — κρύβεται στην εκτύπωση (κενά placeholders,
               δεν έχει νόημα να τυπώνονται). */}
           <div id="plating-gallery-section" className="erp-card">
             <div className="erp-card-header"><h3 className="font-semibold">📸 {t("fieldPlating")}</h3></div>
             <div className="p-6">
+              {!selectedRecipe && (
+                <div className="text-xs text-slate-400 mb-2">
+                  {locale === "gr" ? "Αποθήκευσε πρώτα τη συνταγή για να μπορείς να ανεβάσεις φωτογραφίες." : "Save the recipe first to upload photos."}
+                </div>
+              )}
               <div className="grid grid-cols-3 gap-4">
-                {[1, 2, 3].map(n => (
-                  <div key={n} className="border-2 border-dashed border-slate-300 rounded-xl p-8 text-center hover:border-blue-400 transition-colors cursor-pointer">
-                    <div className="text-3xl mb-2">📷</div>
-                    <div className="text-xs text-slate-400">{locale === "gr" ? `Εικόνα ${n}` : `Image ${n}`}</div>
-                  </div>
-                ))}
+                {[0, 1, 2].map((slot) => {
+                  let images: string[] = [];
+                  try { images = JSON.parse(form.platingImages || "[]"); } catch { images = []; }
+                  const url = images[slot];
+                  return (
+                    <div key={slot}>
+                      <input
+                        type="file" accept="image/*" id={`plating-slot-${slot}`} className="hidden"
+                        disabled={!selectedRecipe || uploadingSlot !== null}
+                        onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadPlatingImage(slot, f); e.target.value = ""; }}
+                      />
+                      {url ? (
+                        <div className="relative">
+                          <img src={url} alt={`plating-${slot}`} className="w-full h-32 object-cover rounded-xl border border-slate-200" />
+                          <button type="button" onClick={() => removePlatingImage(slot)} className="absolute top-1 right-1 bg-white/90 text-red-500 rounded-full w-6 h-6 text-xs shadow">✕</button>
+                        </div>
+                      ) : (
+                        <label
+                          htmlFor={`plating-slot-${slot}`}
+                          className={`border-2 border-dashed border-slate-300 rounded-xl p-8 text-center hover:border-blue-400 transition-colors flex flex-col items-center justify-center h-32 ${selectedRecipe ? "cursor-pointer" : "cursor-not-allowed opacity-50"}`}
+                        >
+                          <div className="text-3xl mb-2">{uploadingSlot === slot ? "…" : "📷"}</div>
+                          <div className="text-xs text-slate-400">
+                            {uploadingSlot === slot ? (locale === "gr" ? "Ανεβαίνει…" : "Uploading…") : (locale === "gr" ? `Εικόνα ${slot + 1}` : `Image ${slot + 1}`)}
+                          </div>
+                        </label>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </div>
