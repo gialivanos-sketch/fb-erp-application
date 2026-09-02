@@ -30,6 +30,7 @@ const kitchenLinks = [
 
 const adminLinks = [
   { key: "navUserManagement", href: "/user-management", icon: "👥" },
+  { key: "navBusinessProfile", href: "/profile", icon: "🏬" },
 ];
 
 export default function Sidebar() {
