@@ -35,6 +35,16 @@ export default function OrdersArchivePage() {
   const [restoreItems, setRestoreItems] = useState<RestoreItem[]>([]);
   const [restoreInvoiceNum, setRestoreInvoiceNum] = useState("");
   const [restoreMsg, setRestoreMsg] = useState("");
+  // ids of existing (already-saved) items removed during this correction —
+  // deleted from the database only when the correction is saved.
+  const [removedItemIds, setRemovedItemIds] = useState<number[]>([]);
+  // "add a missed product" mini-form, shown under the correction table
+  const [newItemName, setNewItemName] = useState("");
+  const [newItemQty, setNewItemQty] = useState(1);
+  const [newItemUnit, setNewItemUnit] = useState("kg");
+  const [newItemPrice, setNewItemPrice] = useState(0);
+  const [newItemVat, setNewItemVat] = useState(24);
+  const [newItemDiscount, setNewItemDiscount] = useState(0);
 
   const filtered = orders.filter(o => {
     if (!o) return false;
@@ -85,8 +95,37 @@ export default function OrdersArchivePage() {
       vatAmount: Number(i.vatAmount || 0),
       grossAmount: Number(i.grossAmount || 0),
     })));
+    setRemovedItemIds([]);
+    setNewItemName(""); setNewItemQty(1); setNewItemUnit("kg"); setNewItemPrice(0); setNewItemVat(24); setNewItemDiscount(0);
     setRestoreMsg("");
     setShowRestore(true);
+  }
+
+  function removeRestoreItem(idx: number) {
+    setRestoreItems(prev => {
+      const item = prev[idx];
+      if (item?.id != null) setRemovedItemIds(ids => [...ids, item.id as number]);
+      return prev.filter((_, i) => i !== idx);
+    });
+  }
+
+  function addRestoreItem() {
+    if (!newItemName.trim() || newItemQty <= 0) return;
+    const net = newItemPrice * newItemQty * (1 - newItemDiscount / 100);
+    const vatAmt = net * (newItemVat / 100);
+    setRestoreItems(prev => [...prev, {
+      productName: newItemName.trim(),
+      orderedQuantity: newItemQty,
+      deliveredQuantity: newItemQty,
+      unit: newItemUnit,
+      basePrice: newItemPrice,
+      vatPercent: newItemVat,
+      discountPercent: newItemDiscount,
+      netAmount: net,
+      vatAmount: vatAmt,
+      grossAmount: net + vatAmt,
+    }]);
+    setNewItemName(""); setNewItemQty(1); setNewItemPrice(0); setNewItemDiscount(0);
   }
 
   function updateRestoreItem(idx: number, field: string, value: number | string) {
@@ -114,10 +153,12 @@ export default function OrdersArchivePage() {
       await db.updateOrderStatus(selectedOrder.id, {
         invoiceNumber: restoreInvoiceNum, status: "delivered", totalNet, totalVat, totalGross,
       });
-      // Line items are updated in parallel — each is an independent row,
-      // so there's no ordering dependency between these writes.
-      await Promise.all(
-        restoreItems
+      // Existing items are updated, brand-new ones (added during this
+      // correction) are inserted, and ones the person removed are deleted
+      // — all in parallel, since each is an independent row with no
+      // ordering dependency between these writes.
+      await Promise.all([
+        ...restoreItems
           .filter((item) => item.id != null)
           .map((item) =>
             db.updateOrderItem(item.id as number, {
@@ -127,8 +168,18 @@ export default function OrdersArchivePage() {
               vatAmount: item.vatAmount,
               grossAmount: item.grossAmount,
             })
-          )
-      );
+          ),
+        ...restoreItems
+          .filter((item) => item.id == null)
+          .map((item) =>
+            db.addOrderItem(selectedOrder.id, {
+              productName: item.productName, orderedQuantity: item.orderedQuantity, deliveredQuantity: item.deliveredQuantity,
+              unit: item.unit, basePrice: item.basePrice, vatPercent: item.vatPercent, discountPercent: item.discountPercent,
+              netAmount: item.netAmount, vatAmount: item.vatAmount, grossAmount: item.grossAmount,
+            })
+          ),
+        ...removedItemIds.map((id) => db.deleteOrderItem(id)),
+      ]);
       await refreshAll();
       setRestoreMsg(locale === "gr" ? "✅ Παραγγελία ενημερώθηκε και τιμολόγιο καταχωρήθηκε!" : "✅ Order updated and invoice recorded!");
       setTimeout(() => { setShowRestore(false); setRestoreMsg(""); }, 1500);
@@ -240,12 +291,16 @@ export default function OrdersArchivePage() {
                     <th>{t("fieldNetAmount")}</th>
                     <th>{t("fieldGrossAmount")}</th>
                     <th>{locale === "gr" ? "Διαφορά" : "Diff"}</th>
+                    <th></th>
                   </tr>
                 </thead>
                 <tbody>
                   {restoreItems.map((item, i) => (
                     <tr key={i}>
-                      <td className="font-medium">{item.productName}</td>
+                      <td className="font-medium">
+                        {item.productName}
+                        {item.id == null && <span className="ml-2"><Badge color="green">{locale === "gr" ? "ΝΕΟ" : "NEW"}</Badge></span>}
+                      </td>
                       <td>{item.orderedQuantity}</td>
                       <td>
                         <input type="number" value={item.deliveredQuantity || ""} onChange={e => updateRestoreItem(i, "deliveredQuantity", Number(e.target.value))}
@@ -261,10 +316,37 @@ export default function OrdersArchivePage() {
                       <td className={(item.deliveredQuantity < item.orderedQuantity) ? "text-red-600 font-semibold" : "text-emerald-600"}>
                         {((item.deliveredQuantity || 0) - item.orderedQuantity).toFixed(2)} {item.unit}
                       </td>
+                      <td>
+                        <button onClick={() => removeRestoreItem(i)} className="text-red-400 hover:text-red-600 text-sm" title={locale === "gr" ? "Αφαίρεση προϊόντος" : "Remove product"}>
+                          ✕
+                        </button>
+                      </td>
                     </tr>
                   ))}
+                  {restoreItems.length === 0 && (
+                    <tr><td colSpan={9} className="text-center py-4 text-slate-400">{t("noData")}</td></tr>
+                  )}
                 </tbody>
               </table>
+            </div>
+
+            {/* Add a product missed off the original order */}
+            <div className="bg-slate-50 rounded-lg p-3 mt-3">
+              <h5 className="text-xs font-semibold text-slate-600 mb-2">
+                ➕ {locale === "gr" ? "Προσθήκη Προϊόντος" : "Add Product"}
+              </h5>
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+                <input type="text" value={newItemName} onChange={e => setNewItemName(e.target.value)}
+                  placeholder={locale === "gr" ? "Όνομα προϊόντος" : "Product name"} className="erp-input text-sm sm:col-span-2 lg:col-span-1" />
+                <input type="number" value={newItemQty} onChange={e => setNewItemQty(Number(e.target.value))} placeholder="Qty" className="erp-input text-sm" min="0" step="0.01" />
+                <select value={newItemUnit} onChange={e => setNewItemUnit(e.target.value)} className="erp-select text-sm">
+                  <option value="kg">kg</option><option value="g">g</option><option value="L">L</option><option value="ml">ml</option><option value="pcs">pcs</option>
+                </select>
+                <input type="number" value={newItemPrice || ""} onChange={e => setNewItemPrice(Number(e.target.value))} placeholder={t("fieldBasePrice")} className="erp-input text-sm" step="0.01" />
+                <input type="number" value={newItemVat} onChange={e => setNewItemVat(Number(e.target.value))} placeholder="VAT %" className="erp-input text-sm" />
+                <input type="number" value={newItemDiscount} onChange={e => setNewItemDiscount(Number(e.target.value))} placeholder="Disc %" className="erp-input text-sm" />
+              </div>
+              <button onClick={addRestoreItem} className="erp-btn-success text-xs mt-2">+ {t("btnAdd")}</button>
             </div>
           </div>
 
