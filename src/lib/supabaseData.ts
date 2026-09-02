@@ -204,6 +204,69 @@ export async function updateSupplierProductCategory(id: number, category: string
 }
 
 // ------------------------------------------------------------
+// PRODUCT SKU MAP (raw product name -> canonical SKU + group name).
+// Lets the owner manage which raw product names, as they appear in
+// order/quote history, belong under the same SKU — self-contained
+// data access for the new "Ομαδοποίηση Ειδών (SKU)" page.
+// ------------------------------------------------------------
+export interface ProductSkuMapEntry {
+  id: number;
+  productName: string;
+  sku: string;
+  finalGroup: string;
+  createdAt?: string;
+}
+
+interface ProductSkuMapRow {
+  id: number; product_name: string; sku: string; final_group: string; created_at: string;
+}
+
+function mapProductSkuMapEntry(row: ProductSkuMapRow): ProductSkuMapEntry {
+  return { id: row.id, productName: row.product_name, sku: row.sku, finalGroup: row.final_group, createdAt: row.created_at };
+}
+
+export async function fetchProductSkuMap(): Promise<ProductSkuMapEntry[]> {
+  const { data, error } = await requireClient()
+    .from("product_sku_map")
+    .select("id, product_name, sku, final_group, created_at")
+    .order("sku", { ascending: true });
+  if (error) throw error;
+  return (data ?? []).map((r) => mapProductSkuMapEntry(r as unknown as ProductSkuMapRow));
+}
+
+/** Adds one raw product name under a SKU (existing or brand new). */
+export async function createProductSkuMapEntry(input: { productName: string; sku: string; finalGroup: string }): Promise<void> {
+  const { error } = await requireClient().from("product_sku_map").insert({
+    product_name: input.productName, sku: input.sku, final_group: input.finalGroup,
+  });
+  if (error) throw error;
+}
+
+/** Moves one existing mapping to a different SKU/group (a single
+ * product-name row, not the whole group). */
+export async function updateProductSkuMapEntry(id: number, patch: { sku?: string; finalGroup?: string }): Promise<void> {
+  const dbPatch: Record<string, string> = {};
+  if (patch.sku !== undefined) dbPatch.sku = patch.sku;
+  if (patch.finalGroup !== undefined) dbPatch.final_group = patch.finalGroup;
+  if (Object.keys(dbPatch).length === 0) return;
+  const { error } = await requireClient().from("product_sku_map").update(dbPatch).eq("id", id);
+  if (error) throw error;
+}
+
+/** Renames a SKU's group label across every product mapped to it
+ * (final_group is meant to stay one consistent name per SKU). */
+export async function renameSkuGroup(sku: string, finalGroup: string): Promise<void> {
+  const { error } = await requireClient().from("product_sku_map").update({ final_group: finalGroup }).eq("sku", sku);
+  if (error) throw error;
+}
+
+/** Removes one product-name mapping (the product becomes "unmapped" again). */
+export async function deleteProductSkuMapEntry(id: number): Promise<void> {
+  const { error } = await requireClient().from("product_sku_map").delete().eq("id", id);
+  if (error) throw error;
+}
+
+// ------------------------------------------------------------
 // ORDERS + ORDER ITEMS
 // ------------------------------------------------------------
 interface OrderRow {
