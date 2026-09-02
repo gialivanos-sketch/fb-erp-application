@@ -23,7 +23,7 @@ export const translations: Record<string, { gr: string; en: string }> = {
   navMenuPlanner: { gr: "Κοστολόγηση Μενού", en: "Menu Planner" },
   navMenuArchive: { gr: "Αρχείο Μενού", en: "Menu Archive" },
   navUnits: { gr: "Πίνακες Μονάδων", en: "Units & Conversions" },
-  navPrepList: { gr: "Mise en Place", en: "Mise en Place" },,
+  navPrepList: { gr: "Mise en Place", en: "Mise en Place" },
   navSkuMapping: { gr: "Ομαδοποίηση Ειδών (SKU)", en: "SKU Grouping" },
 
   // Sidebar sections
