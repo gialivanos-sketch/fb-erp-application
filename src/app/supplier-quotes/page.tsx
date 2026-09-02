@@ -15,6 +15,9 @@ const CATEGORY_LABELS: Record<string, { gr: string; en: string }> = {
   Beverages: { gr: "Ποτά", en: "Beverages" },
   Meat: { gr: "Κρέας", en: "Meat" },
   Dairy: { gr: "Γαλακτοκομικά", en: "Dairy" },
+     IceCream: { gr: "Παγωτά", en: "Ice Cream" },
+   Bakery: { gr: "Ψωμιά/Αρτοποιίας", en: "Bakery" },
+   Frozen: { gr: "Κατεψυγμένα Τρόφιμα", en: "Frozen Foods" },
 };
 const CATEGORY_OPTIONS = Object.keys(CATEGORY_LABELS);
 
