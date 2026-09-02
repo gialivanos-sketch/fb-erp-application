@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "2.58.0",
+    "exceljs": "^4.4.0",
     "next": "16.2.6",
     "react": "19.2.6",
     "react-dom": "19.2.6",
@@ -26,4 +27,4 @@
     "tailwindcss": "4.1.17",
     "typescript": "5.9.3"
   }
-} 
+}
