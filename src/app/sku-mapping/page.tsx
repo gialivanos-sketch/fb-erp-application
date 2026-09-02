@@ -459,68 +459,69 @@ export default function SkuMappingPage() {
 
       {/* Floating bulk-merge bar: appears once anything is checked above */}
       {selectedCount > 0 && (
-        <div className="fixed bottom-4 left-4 right-4 sm:left-auto sm:right-6 sm:w-[440px] z-50 bg-white border border-blue-300 shadow-xl rounded-xl p-4">
-          <div className="flex items-center justify-between mb-3">
-            <div className="font-semibold text-sm">
+        <div className="fixed bottom-4 left-4 right-4 sm:left-auto sm:right-6 sm:w-[560px] max-w-[95vw] max-h-[85vh] overflow-y-auto z-50 bg-white border-2 border-blue-300 shadow-2xl rounded-xl p-6">
+          <div className="flex items-center justify-between mb-4">
+            <div className="font-bold text-lg">
               {locale === "gr" ? `✅ Επιλεγμένα: ${selectedCount}` : `✅ Selected: ${selectedCount}`}
             </div>
-            <button onClick={clearSelection} className="text-slate-400 hover:text-slate-600 text-sm">
+            <button onClick={clearSelection} className="text-slate-400 hover:text-slate-600 text-base font-medium">
               ✕ {locale === "gr" ? "Καθαρισμός" : "Clear"}
             </button>
           </div>
 
-          <div className="mb-3">
-            <label className="erp-label">{locale === "gr" ? "Συγχώνευση σε υπάρχον SKU" : "Merge into existing SKU"}</label>
-            <div className="flex gap-2">
-              <input
-                type="text"
-                list="all-sku-options"
-                value={bulkTargetTyped}
-                onChange={(e) => setBulkTargetTyped(e.target.value)}
-                className="erp-input text-sm flex-1"
-                placeholder={locale === "gr" ? "Πληκτρολόγησε SKU ή ομάδα..." : "Type SKU or group..."}
-              />
-              <button
-                onClick={() => {
-                  const code = skuLabelToCode.get(bulkTargetTyped.trim());
-                  const g = groups.find((x) => x.sku === code);
-                  if (code && g) handleBulkMerge(code, g.finalGroup);
-                }}
-                disabled={bulkBusy || !skuLabelToCode.get(bulkTargetTyped.trim())}
-                className="erp-btn-primary text-sm px-3"
-              >
-                {bulkBusy ? "…" : locale === "gr" ? "Συγχώνευση" : "Merge"}
-              </button>
-            </div>
+          <div className="mb-5">
+            <label className="erp-label text-base mb-1 block">
+              {locale === "gr" ? "Συγχώνευση σε υπάρχον SKU" : "Merge into existing SKU"}
+            </label>
+            <input
+              type="text"
+              list="all-sku-options"
+              value={bulkTargetTyped}
+              onChange={(e) => setBulkTargetTyped(e.target.value)}
+              className="erp-input text-base w-full py-2.5 mb-2"
+              placeholder={locale === "gr" ? "Πληκτρολόγησε SKU ή ομάδα..." : "Type SKU or group..."}
+            />
+            <button
+              onClick={() => {
+                const code = skuLabelToCode.get(bulkTargetTyped.trim());
+                const g = groups.find((x) => x.sku === code);
+                if (code && g) handleBulkMerge(code, g.finalGroup);
+              }}
+              disabled={bulkBusy || !skuLabelToCode.get(bulkTargetTyped.trim())}
+              className="erp-btn-primary text-base w-full py-2.5"
+            >
+              {bulkBusy ? "…" : locale === "gr" ? "Συγχώνευση" : "Merge"}
+            </button>
           </div>
 
-          <div className="border-t border-slate-100 pt-3">
-            <label className="erp-label">
+          <div className="border-t border-slate-200 pt-4">
+            <label className="erp-label text-base mb-1 block">
               {locale === "gr" ? "Ή νέο SKU από τα επιλεγμένα" : "Or new SKU from selection"}
             </label>
-            <div className="flex gap-2">
+            <div className="flex flex-col sm:flex-row gap-2 mb-2">
               <input
                 type="text"
                 value={bulkNewSku}
                 onChange={(e) => setBulkNewSku(e.target.value)}
-                className="erp-input text-sm w-28"
+                className="erp-input text-base py-2.5 sm:w-36"
                 placeholder="SKU-0999"
               />
               <input
                 type="text"
                 value={bulkNewGroup}
                 onChange={(e) => setBulkNewGroup(e.target.value)}
-                className="erp-input text-sm flex-1"
+                className="erp-input text-base py-2.5 flex-1"
                 placeholder={locale === "gr" ? "Όνομα ομάδας" : "Group name"}
               />
-              <button
-                onClick={() => handleBulkMerge(bulkNewSku.trim(), bulkNewGroup.trim())}
-                disabled={bulkBusy || !bulkNewSku.trim() || !bulkNewGroup.trim()}
-                className="erp-btn-success text-sm px-3"
-              >
-                {bulkBusy ? "…" : "➕"}
-              </button>
             </div>
+            <button
+              onClick={() => handleBulkMerge(bulkNewSku.trim(), bulkNewGroup.trim())}
+              disabled={bulkBusy || !bulkNewSku.trim() || !bulkNewGroup.trim()}
+              className="erp-btn-success text-base w-full py-2.5"
+            >
+              {bulkBusy ? "…" : "➕ "}
+              {locale === "gr" ? "Δημιουργία & Συγχώνευση" : "Create & Merge"}
+            </button>
           </div>
         </div>
       )}
