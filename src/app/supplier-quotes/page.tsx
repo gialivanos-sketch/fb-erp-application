@@ -7,6 +7,16 @@ import * as db from "@/lib/supabaseData";
 import type { SupplierProduct } from "@/lib/types";
 
 interface CartItem extends SupplierProduct { quantity: number; }
+const CATEGORY_LABELS: Record<string, { gr: string; en: string }> = {
+  Produce: { gr: "Λαχανικά/Φρούτα", en: "Produce" },
+  Grocery: { gr: "Παντοπωλείο", en: "Grocery" },
+  Seafood: { gr: "Θαλασσινά", en: "Seafood" },
+  Cleaning: { gr: "Καθαριότητα", en: "Cleaning" },
+  Beverages: { gr: "Ποτά", en: "Beverages" },
+  Meat: { gr: "Κρέας", en: "Meat" },
+  Dairy: { gr: "Γαλακτοκομικά", en: "Dairy" },
+};
+const CATEGORY_OPTIONS = Object.keys(CATEGORY_LABELS);
 
 export default function SupplierQuotesPage() {
   const { t, locale, data, refreshAll } = useApp();
@@ -68,6 +78,14 @@ export default function SupplierQuotesPage() {
   }
 
   function clearFilters() { setSearch(""); setCategory(""); setGrade(""); setRegion(""); }
+  async function handleCategoryChange(id: number, newCategory: string) {
+  try {
+    await db.updateSupplierProductCategory(id, newCategory);
+    await refreshAll();
+  } catch (err) {
+    alert(locale === "gr" ? "⚠️ Αποτυχία ενημέρωσης κατηγορίας: " + String(err) : "⚠️ Failed to update category: " + String(err));
+  }
+}
 
   function openFilePicker() {
     fileInputRef.current?.click();
@@ -196,7 +214,11 @@ export default function SupplierQuotesPage() {
           <label className="erp-label">{t("filterByCategory")}</label>
           <select value={category} onChange={(e) => setCategory(e.target.value)} className="erp-select">
             <option value="">{t("filterAll")}</option>
-            {categories.map((c) => <option key={c} value={c}>{c}</option>)}
+            {categories.map((c) => (
+  <option key={c} value={c}>
+    {c ? (locale === "gr" ? (CATEGORY_LABELS[c]?.gr ?? c) : (CATEGORY_LABELS[c]?.en ?? c)) : (locale === "gr" ? "(χωρίς κατηγορία)" : "(no category)")}
+  </option>
+))}
           </select>
         </div>
         <div>
@@ -252,7 +274,14 @@ export default function SupplierQuotesPage() {
                           {p.productNameEn && <div className="text-xs text-slate-400">{p.productNameEn}</div>}
                         </td>
                         <td className="text-sm">{locale === "gr" ? p.supplierName : (p.supplierNameEn || p.supplierName)}</td>
-                        <td><Badge color="grey">{p.category}</Badge></td>
+                       <td>
+  <select value={p.category || ""} onChange={(e) => handleCategoryChange(p.id, e.target.value)} className="erp-select text-xs py-1">
+    <option value="">— {locale === "gr" ? "Χωρίς κατηγορία" : "No category"} —</option>
+    {CATEGORY_OPTIONS.map((c) => (
+      <option key={c} value={c}>{locale === "gr" ? CATEGORY_LABELS[c].gr : CATEGORY_LABELS[c].en}</option>
+    ))}
+  </select>
+</td>
                         <td className="font-semibold text-emerald-700">
                           {fmt(Number(p.basePrice))}/{p.unit}
                           {isCheapest && <span className="ml-1 text-xs bg-emerald-100 text-emerald-700 px-1 rounded">{t("lowestPrice")}</span>}
@@ -333,7 +362,7 @@ export default function SupplierQuotesPage() {
             <div>
               <label className="erp-label">{t("fieldCategory")}</label>
               <select value={importCategory} onChange={(e) => setImportCategory(e.target.value)} className="erp-select">
-                {["Produce","Grocery","Seafood","Cleaning","Beverages","Meat","Dairy"].map((c) => <option key={c} value={c}>{c}</option>)}
+                {CATEGORY_OPTIONS.map((c) => <option key={c} value={c}>{locale === "gr" ? CATEGORY_LABELS[c].gr : CATEGORY_LABELS[c].en}</option>)}
               </select>
             </div>
           </div>
