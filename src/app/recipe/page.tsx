@@ -242,13 +242,20 @@ export default function RecipePage() {
         gramsPerPortion: form.gramsPerPortion,
         isActive: true,
       };
-      if (selectedRecipe?.id) {
+            if (selectedRecipe?.id) {
         await db.updateRecipeDetails(selectedRecipe.id, details);
+        await refreshAll();
+        setEditing(false);
       } else {
-        await db.createRecipeDetails(details);
+        // Νέα συνταγή: αποθηκεύουμε, αλλά ΔΕΝ κλείνουμε το popup —
+        // μένει ανοιχτό, φορτωμένο σαν "υπάρχουσα" συνταγή (με το νέο
+        // id), ώστε να εμφανιστεί αμέσως ο πίνακας υλικών και ο χρήστης
+        // να μπορεί να αρχίσει να προσθέτει υλικά χωρίς να κλείσει και
+        // να ξανανοίξει τη συνταγή.
+        const newId = await db.createRecipeDetails(details);
+        await refreshAll();
+        loadRecipe({ id: newId, ...details, ingredients: [] } as Recipe);
       }
-      await refreshAll();
-      setEditing(false);
     } catch (err) {
       alert(locale === "gr" ? "Αποτυχία αποθήκευσης: " + String(err) : "Failed to save: " + String(err));
     } finally {
@@ -723,7 +730,14 @@ export default function RecipePage() {
             </div>
           )}
 
-                    {/* Plating Gallery — κρύβεται στην εκτύπωση (κενά placeholders,
+                           {!selectedRecipe && (
+            <div className="erp-card mb-6 p-6 text-center text-sm text-slate-400">
+              {locale === "gr"
+                ? "Αποθήκευσε πρώτα τη συνταγή (💾 Αποθήκευση Συνταγής) για να εμφανιστεί εδώ ο πίνακας υλικών και να μπορείς να προσθέσεις υλικά."
+                : "Save the recipe first (💾 Save Recipe) — the ingredients table will appear here once it's saved."}
+            </div>
+          )}
+                 {/* Plating Gallery — κρύβεται στην εκτύπωση (κενά placeholders,
               δεν έχει νόημα να τυπώνονται). */}
           <div id="plating-gallery-section" className="erp-card">
             <div className="erp-card-header"><h3 className="font-semibold">📸 {t("fieldPlating")}</h3></div>
