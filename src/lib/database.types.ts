@@ -486,7 +486,7 @@ export interface Database {
         Update: Partial<Database["public"]["Tables"]["ingestion_logs"]["Insert"]>;
         Relationships: [];
       };
-    };
+  
     // Required by Supabase's GenericSchema constraint even when empty —
     // omitting these caused every table query in this file to silently
     // degrade to a `never` type instead of failing clearly, which is
