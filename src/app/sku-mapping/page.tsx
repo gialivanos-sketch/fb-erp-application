@@ -77,6 +77,11 @@ export default function SkuMappingPage() {
     [groups]
   );
 
+  // Label -> sku code lookup, used by the lightweight search-as-you-type inputs
+  // (a shared <datalist> + <input> instead of one big <select> per row — with
+  // hundreds of rows x hundreds of SKUs, per-row <select> elements freeze the page).
+  const skuLabelToCode = useMemo(() => new Map(skuOptions.map((o) => [o.label, o.sku])), [skuOptions]);
+
   const filteredGroups = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return groups;
@@ -184,6 +189,13 @@ export default function SkuMappingPage() {
       {msg && <div className="mb-4 p-3 bg-emerald-50 border border-emerald-300 text-emerald-800 rounded-lg text-sm">{msg}</div>}
       {loadError && <div className="mb-4 p-3 bg-red-50 border border-red-300 text-red-800 rounded-lg text-sm">⚠️ {loadError}</div>}
 
+      {/* One shared list of SKU options, reused by every search-as-you-type input below */}
+      <datalist id="all-sku-options">
+        {skuOptions.map((o) => (
+          <option key={o.sku} value={o.label} />
+        ))}
+      </datalist>
+
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
         <KpiCard label={locale === "gr" ? "SKU" : "SKUs"} value={groups.length} color="blue" icon="🏷️" />
         <KpiCard label={locale === "gr" ? "Αντιστοιχισμένα Προϊόντα" : "Mapped Products"} value={entries.length} color="green" icon="✅" />
@@ -266,7 +278,7 @@ export default function SkuMappingPage() {
               </thead>
               <tbody>
                 {filteredUnmapped.map((name) => (
-                  <UnmappedRow key={name} name={name} skuOptions={skuOptions} locale={locale} onAssign={handleAssignToExisting} />
+                  <UnmappedRow key={name} name={name} skuLabelToCode={skuLabelToCode} locale={locale} onAssign={handleAssignToExisting} />
                 ))}
               </tbody>
             </table>
@@ -307,24 +319,13 @@ export default function SkuMappingPage() {
                       <tr key={e.id}>
                         <td className="text-sm">{e.productName}</td>
                         <td className="w-64">
-                          <select
-                            defaultValue=""
-                            disabled={busyId === e.id}
-                            onChange={(ev) => {
-                              if (ev.target.value) handleMove(e, ev.target.value);
-                              ev.target.value = "";
-                            }}
-                            className="erp-select text-xs"
-                          >
-                            <option value="">{locale === "gr" ? "— Μετακίνηση σε άλλο SKU —" : "— Move to another SKU —"}</option>
-                            {skuOptions
-                              .filter((o) => o.sku !== g.sku)
-                              .map((o) => (
-                                <option key={o.sku} value={o.sku}>
-                                  {o.label}
-                                </option>
-                              ))}
-                          </select>
+                          <MoveToSkuInput
+                            entry={e}
+                            skuLabelToCode={skuLabelToCode}
+                            locale={locale}
+                            busy={busyId === e.id}
+                            onMove={handleMove}
+                          />
                         </td>
                         <td className="w-10">
                           <button onClick={() => handleRemove(e)} disabled={busyId === e.id} className="text-red-400 hover:text-red-600 text-sm">
@@ -346,41 +347,85 @@ export default function SkuMappingPage() {
 
 function UnmappedRow({
   name,
-  skuOptions,
+  skuLabelToCode,
   locale,
   onAssign,
 }: {
   name: string;
-  skuOptions: { sku: string; label: string }[];
+  skuLabelToCode: Map<string, string>;
   locale: string;
   onAssign: (productName: string, sku: string) => void;
 }) {
-  const [target, setTarget] = useState("");
+  const [typed, setTyped] = useState("");
+  const resolvedSku = skuLabelToCode.get(typed.trim());
   return (
     <tr>
       <td className="text-sm">{name}</td>
       <td className="flex items-center gap-2 py-2">
-        <select value={target} onChange={(e) => setTarget(e.target.value)} className="erp-select text-xs">
-          <option value="">{locale === "gr" ? "— Επιλέξτε SKU —" : "— Select SKU —"}</option>
-          {skuOptions.map((o) => (
-            <option key={o.sku} value={o.sku}>
-              {o.label}
-            </option>
-          ))}
-        </select>
+        <input
+          type="text"
+          list="all-sku-options"
+          value={typed}
+          onChange={(e) => setTyped(e.target.value)}
+          className="erp-input text-xs"
+          placeholder={locale === "gr" ? "Πληκτρολόγησε SKU ή όνομα ομάδας..." : "Type SKU or group name..."}
+        />
         <button
           onClick={() => {
-            if (target) {
-              onAssign(name, target);
-              setTarget("");
+            if (resolvedSku) {
+              onAssign(name, resolvedSku);
+              setTyped("");
             }
           }}
-          disabled={!target}
+          disabled={!resolvedSku}
           className="erp-btn-primary text-xs px-3 py-1"
         >
           {locale === "gr" ? "Αντιστοίχιση" : "Assign"}
         </button>
       </td>
     </tr>
+  );
+}
+
+function MoveToSkuInput({
+  entry,
+  skuLabelToCode,
+  locale,
+  busy,
+  onMove,
+}: {
+  entry: ProductSkuMapEntry;
+  skuLabelToCode: Map<string, string>;
+  locale: string;
+  busy: boolean;
+  onMove: (entry: ProductSkuMapEntry, newSku: string) => void;
+}) {
+  const [typed, setTyped] = useState("");
+
+  function commit() {
+    const code = skuLabelToCode.get(typed.trim());
+    if (code && code !== entry.sku) {
+      onMove(entry, code);
+    }
+    setTyped("");
+  }
+
+  return (
+    <input
+      type="text"
+      list="all-sku-options"
+      value={typed}
+      disabled={busy}
+      onChange={(e) => setTyped(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          (e.target as HTMLInputElement).blur();
+        }
+      }}
+      placeholder={locale === "gr" ? "Μετακίνηση σε άλλο SKU..." : "Move to another SKU..."}
+      className="erp-input text-xs"
+    />
   );
 }
