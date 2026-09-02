@@ -441,14 +441,29 @@ export default function DraftOrderPage() {
               {saving ? "…" : "💾"} {t("btnSaveOrder")}
             </button>
             <button onClick={() => window.print()} className="erp-btn-secondary">🖨️ {t("btnPrint")}</button>
-            <button onClick={handleExportPDF} className="erp-btn-secondary">📄 {t("btnExportPDF")}</button>
-            <button onClick={() => {
-              const s = suppliers.find((s) => s.id === selectedSupplier);
-              alert(s?.contactEmail
-                ? (locale === "gr" ? "📧 Email στάλθηκε στο " : "📧 Email sent to ") + s.contactEmail
-                : (locale === "gr" ? "⚠️ Δεν βρέθηκε email προμηθευτή" : "⚠️ No supplier email found"));
-            }} className="erp-btn-secondary">📧 {t("btnSendEmail")}</button>
-          </div>
+                   <button onClick={() => {
+          const s = suppliers.find((s) => s.id === selectedSupplier);
+          if (!s?.contactEmail) {
+            alert(locale === "gr" ? "⚠️ Δεν βρέθηκε email προμηθευτή" : "⚠️ No supplier email found");
+            return;
+          }
+          const supplierName = locale === "gr" ? s.name : (s.nameEn || s.name);
+          const dateStr = orderDate.toLocaleDateString("el-GR");
+          const subject = (locale === "gr" ? "Παραγγελία" : "Order") + ` — ${supplierName} — ${dateStr}`;
+          const lines = items.map(
+            (i) => `${i.productName} — ${i.orderedQuantity} ${i.unit} x €${i.basePrice.toFixed(2)} = €${i.grossAmount.toFixed(2)}`
+          );
+          const bodyLines = [
+            (locale === "gr" ? "Παραγγελία προς" : "Order to") + `: ${supplierName}`,
+            (locale === "gr" ? "Ημερομηνία" : "Date") + `: ${dateStr}`,
+            "",
+            ...lines,
+            "",
+            (locale === "gr" ? "Σύνολο" : "Total") + `: €${totalGross.toFixed(2)}`,
+          ];
+          const body = bodyLines.join("\n");
+          window.location.href = `mailto:${s.contactEmail}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+        }} className="erp-btn-secondary">📧 {t("btnSendEmail")}</button>
         </div>
       </div>
     </div>
