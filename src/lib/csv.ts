@@ -211,3 +211,30 @@ export function exportRowsToExcel(rows: Record<string, string | number>[], filen
   XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
   XLSX.writeFile(workbook, filename.endsWith(".xlsx") ? filename : `${filename}.xlsx`);
 }
+
+/** Δημιουργεί και κατεβάζει ένα .xlsx αρχείο με ΠΟΛΛΑΠΛΑ φύλλα -- ένα
+ * φύλλο ανά στοιχείο του `sheets`, όπου κάθε φύλλο δίνεται σαν πίνακας
+ * γραμμών (array of arrays, όχι αντικειμένων), για πλήρη έλεγχο της
+ * διάταξης (π.χ. να μοιάζει με μια ολόκληρη φόρμα συνταγής και όχι μόνο
+ * με έναν επίπεδο πίνακα). Χρησιμοποιεί XLSX.utils.aoa_to_sheet αντί για
+ * json_to_sheet ακριβώς γι' αυτόν τον λόγο. Τα ονόματα φύλλων καθαρίζονται
+ * από μη επιτρεπτούς χαρακτήρες του Excel και κονταίνονται στο όριο των
+ * 31 χαρακτήρων· αν προκύψει διπλότυπο όνομα μετά το κόψιμο, προστίθεται
+ * αριθμός στο τέλος ώστε να παραμείνει μοναδικό. */
+export function exportSheetsToExcel(sheets: { name: string; rows: (string | number)[][] }[], filename: string): void {
+  const workbook = XLSX.utils.book_new();
+  const usedNames = new Set<string>();
+  for (const sheet of sheets) {
+    let base = sheet.name.replace(/[\\/*?:[\]]/g, " ").trim().slice(0, 31) || "Sheet";
+    let name = base;
+    let n = 2;
+    while (usedNames.has(name)) {
+      name = `${base.slice(0, 28)} ${n}`;
+      n++;
+    }
+    usedNames.add(name);
+    const worksheet = XLSX.utils.aoa_to_sheet(sheet.rows);
+    XLSX.utils.book_append_sheet(workbook, worksheet, name);
+  }
+  XLSX.writeFile(workbook, filename.endsWith(".xlsx") ? filename : `${filename}.xlsx`);
+}
