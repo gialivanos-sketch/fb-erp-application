@@ -467,5 +467,6 @@ export default function DraftOrderPage() {
         </div>
       </div>
     </div>
+ </div>
   );
 }
