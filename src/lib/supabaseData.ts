@@ -546,11 +546,11 @@ export async function fetchRecipes(): Promise<Recipe[]> {
   // 1 αίτημα: όλες οι συνταγές (χωρίς τα υλικά τους ακόμα)
   const { data: recipes, error } = await client
     .from("recipes")
-    .select("id, name, name_en, portion_yield, portion_unit, allergens, technical_guide, total_raw_material_cost, labor_cost, overhead_cost, total_cost, profit_margin_percent, selling_price, menu_price_vat, menu_price_final, calories_per_portion, grams_per_portion, is_active, created_at")
+    .select("id, name, name_en, portion_yield, portion_unit, allergens, plating_images, technical_guide, total_raw_material_cost, labor_cost, overhead_cost, total_cost, profit_margin_percent, selling_price, menu_price_vat, menu_price_final, calories_per_portion, grams_per_portion, is_active, created_at")
     .order("name", { ascending: true });
   if (error) throw error;
 
-   // Όλες οι γραμμές recipe_ingredients, για όλες τις συνταγές μαζί —
+  // Όλες οι γραμμές recipe_ingredients, για όλες τις συνταγές μαζί —
   // αντί για ένα ξεχωριστό αίτημα ανά συνταγή (το οποίο, με χιλιάδες
   // συνταγές, καθυστερούσε τόσο πολύ ώστε η αρχική φόρτωση δεδομένων
   // της εφαρμογής δεν πρόλαβαινε ποτέ να ολοκληρωθεί εγκαίρως).
@@ -587,7 +587,7 @@ export async function fetchRecipes(): Promise<Recipe[]> {
     const ingredients = ingredientsByRecipeId.get(r.id) ?? [];
     result.push({
       id: r.id, name: r.name, nameEn: r.name_en, portionYield: numToStr(r.portion_yield), portionUnit: r.portion_unit,
-      allergens: JSON.stringify(r.allergens ?? []), technicalGuide: r.technical_guide,
+      allergens: JSON.stringify(r.allergens ?? []), platingImages: JSON.stringify(r.plating_images ?? []), technicalGuide: r.technical_guide,
       totalRawMaterialCost: numToStr(r.total_raw_material_cost), laborCost: numToStr(r.labor_cost),
       overheadCost: numToStr(r.overhead_cost), totalCost: numToStr(r.total_cost),
       profitMarginPercent: numToStr(r.profit_margin_percent), sellingPrice: numToStr(r.selling_price),
@@ -597,6 +597,20 @@ export async function fetchRecipes(): Promise<Recipe[]> {
     });
   }
   return result;
+}
+
+// Ανεβάζει μία φωτογραφία παρουσίασης (πιάτου) μιας συνταγής στο
+// Supabase Storage bucket "recipe-images" και επιστρέφει το δημόσιο
+// URL της. Ο καλών είναι υπεύθυνος να αποθηκεύσει το URL στο πεδίο
+// plating_images της συνταγής (μέσω updateRecipeDetails).
+export async function uploadRecipeImage(recipeId: number, file: File): Promise<string> {
+  const client = requireClient();
+  const ext = file.name.split(".").pop() || "jpg";
+  const path = `recipe-${recipeId}/${Date.now()}.${ext}`;
+  const { error } = await client.storage.from("recipe-images").upload(path, file, { upsert: true });
+  if (error) throw error;
+  const { data } = client.storage.from("recipe-images").getPublicUrl(path);
+  return data.publicUrl;
 }
 
 // Ενημερώνει ΜΟΝΟ τα δικά της πεδία μιας συνταγής (όνομα, μερίδες,
@@ -612,6 +626,7 @@ export async function updateRecipeDetails(
   const payload = {
     name: recipe.name, name_en: recipe.nameEn, portion_yield: strToNum(recipe.portionYield), portion_unit: recipe.portionUnit,
     allergens: typeof recipe.allergens === "string" ? JSON.parse(recipe.allergens || "[]") : recipe.allergens ?? [],
+    plating_images: typeof recipe.platingImages === "string" ? JSON.parse(recipe.platingImages || "[]") : recipe.platingImages ?? [],
     technical_guide: recipe.technicalGuide, total_raw_material_cost: strToNum(recipe.totalRawMaterialCost),
     labor_cost: strToNum(recipe.laborCost), overhead_cost: strToNum(recipe.overheadCost), total_cost: strToNum(recipe.totalCost),
     profit_margin_percent: strToNum(recipe.profitMarginPercent), selling_price: strToNum(recipe.sellingPrice),
@@ -632,6 +647,7 @@ export async function createRecipeDetails(
   const payload = {
     name: recipe.name, name_en: recipe.nameEn, portion_yield: strToNum(recipe.portionYield), portion_unit: recipe.portionUnit,
     allergens: typeof recipe.allergens === "string" ? JSON.parse(recipe.allergens || "[]") : recipe.allergens ?? [],
+    plating_images: typeof recipe.platingImages === "string" ? JSON.parse(recipe.platingImages || "[]") : recipe.platingImages ?? [],
     technical_guide: recipe.technicalGuide, total_raw_material_cost: strToNum(recipe.totalRawMaterialCost),
     labor_cost: strToNum(recipe.laborCost), overhead_cost: strToNum(recipe.overheadCost), total_cost: strToNum(recipe.totalCost),
     profit_margin_percent: strToNum(recipe.profitMarginPercent), selling_price: strToNum(recipe.sellingPrice),
@@ -648,6 +664,7 @@ export async function upsertRecipe(recipe: Omit<Recipe, "id" | "createdAt"> & { 
   const payload = {
     name: recipe.name, name_en: recipe.nameEn, portion_yield: strToNum(recipe.portionYield), portion_unit: recipe.portionUnit,
     allergens: typeof recipe.allergens === "string" ? JSON.parse(recipe.allergens || "[]") : recipe.allergens ?? [],
+    plating_images: typeof recipe.platingImages === "string" ? JSON.parse(recipe.platingImages || "[]") : recipe.platingImages ?? [],
     technical_guide: recipe.technicalGuide, total_raw_material_cost: strToNum(recipe.totalRawMaterialCost),
     labor_cost: strToNum(recipe.laborCost), overhead_cost: strToNum(recipe.overheadCost), total_cost: strToNum(recipe.totalCost),
     profit_margin_percent: strToNum(recipe.profitMarginPercent), selling_price: strToNum(recipe.sellingPrice),
