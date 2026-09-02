@@ -6,6 +6,15 @@
   --color-primary-dark: #1e3a8a;
 }
 
+html, body {
+  /* Safety net: a stray wide element on some page should never force the
+     WHOLE app to scroll sideways — individual tables/panels that need
+     horizontal scrolling wrap themselves in their own scrollable
+     container (overflow-x-auto) instead, so this stays hidden at the
+     document level and the app always fits within the screen width. */
+  overflow-x: hidden;
+}
+
 body {
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
 }
@@ -370,4 +379,3 @@ body {
     visibility: hidden;
   }
 }
-
