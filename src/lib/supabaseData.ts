@@ -345,6 +345,30 @@ export async function createOrderWithItems(
     );
     if (itemsError) throw itemsError;
   }
+
+  // Auto-record a "Χρέωση" (debit) in the Payments Ledger for this
+  // order's total, so the supplier's turnover (Σύνολο Χρεώσεων /
+  // Ανοιχτό Υπόλοιπο on the Supplier CRM page) reflects orders placed
+  // without having to enter them again by hand. Best-effort: a failure
+  // here shouldn't undo the order that was just successfully saved —
+  // the order itself is already committed above.
+  const grossTotal = strToNum(order.totalGross);
+  if (grossTotal > 0) {
+    const { error: debitError } = await client.from("supplier_payments").insert({
+      supplier_id: order.supplierId,
+      transaction_date: order.orderDate,
+      amount: grossTotal,
+      type: "debit",
+      reference: order.orderNumber,
+      notes: "Αυτόματη χρέωση από παραγγελία",
+    });
+    if (debitError) {
+      // Swallow rather than throw: the order + items are already saved,
+      // and surfacing this as a save failure would be misleading.
+      console.error("Failed to auto-record order debit:", debitError);
+    }
+  }
+
   return orderId;
 }
 
