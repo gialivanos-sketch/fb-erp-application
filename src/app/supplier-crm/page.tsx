@@ -12,6 +12,9 @@ const CATEGORY_LABELS: Record<string, { gr: string; en: string }> = {
   Beverages: { gr: "Ποτά", en: "Beverages" },
   Meat: { gr: "Κρέας", en: "Meat" },
   Dairy: { gr: "Γαλακτοκομικά", en: "Dairy" },
+  IceCream: { gr: "Παγωτά", en: "Ice Cream" },
+  Bakery: { gr: "Ψωμιά/Αρτοποιίας", en: "Bakery" },
+  Frozen: { gr: "Κατεψυγμένα Τρόφιμα", en: "Frozen Foods" },
 };
 const CATEGORY_OPTIONS = Object.keys(CATEGORY_LABELS);
 
@@ -178,7 +181,7 @@ export default function SupplierCRMPage() {
                         value={s?.category ?? ""}
                         disabled={categoryBusyId === s?.id}
                         onChange={(e) => s?.id && handleSupplierCategoryChange(s.id, e.target.value)}
-                        className="erp-select text-xs py-1"
+                        className="erp-select text-sm py-2 min-w-[200px]"
                       >
                         <option value="">— {locale === "gr" ? "Χωρίς κατηγορία" : "No category"} —</option>
                         {CATEGORY_OPTIONS.map((c) => (
