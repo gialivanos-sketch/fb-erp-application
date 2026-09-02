@@ -5,6 +5,18 @@ import { PageHeader, Badge, KpiCard } from "@/components/shared";
 import * as db from "@/lib/supabaseData";
 import type { SupplierProduct } from "@/lib/types";
 
+// Business (buyer) letterhead info shown on the printed order form.
+// Left blank for now — a future "Προφίλ → Καρτέλα Επιχείρησης" settings
+// page will let the user fill these in and they'll be read from there
+// instead of hardcoded here.
+const BUSINESS_INFO = {
+  name: "",
+  address: "",
+  phone: "",
+  email: "",
+  taxId: "",
+};
+
 interface OrderItemDraft {
   id?: number;
   supplierId?: number;
@@ -448,25 +460,205 @@ export default function DraftOrderPage() {
             return;
           }
           const supplierName = locale === "gr" ? s.name : (s.nameEn || s.name);
-             const dateStr = new Date(orderDate).toLocaleDateString("el-GR");
+          const dateStr = new Date(orderDate).toLocaleDateString("el-GR");
           const subject = (locale === "gr" ? "Παραγγελία" : "Order") + ` — ${supplierName} — ${dateStr}`;
-          const lines = items.map(
-            (i) => `${i.productName} — ${i.orderedQuantity} ${i.unit} x €${i.basePrice.toFixed(2)} = €${i.grossAmount.toFixed(2)}`
-          );
-          const bodyLines = [
-            (locale === "gr" ? "Παραγγελία προς" : "Order to") + `: ${supplierName}`,
-            (locale === "gr" ? "Ημερομηνία" : "Date") + `: ${dateStr}`,
-            "",
-            ...lines,
-            "",
-            (locale === "gr" ? "Σύνολο" : "Total") + `: €${totalGross.toFixed(2)}`,
-          ];
+          const RULE = "────────────────────────────";
+          const bodyLines: string[] = [];
+
+          bodyLines.push(locale === "gr" ? "ΔΕΛΤΙΟ ΠΑΡΑΓΓΕΛΙΑΣ" : "PURCHASE ORDER");
+          bodyLines.push(RULE);
+          bodyLines.push("");
+          if (BUSINESS_INFO.name) bodyLines.push(BUSINESS_INFO.name);
+          if (BUSINESS_INFO.address) bodyLines.push(BUSINESS_INFO.address);
+          const businessContactLine = [BUSINESS_INFO.phone, BUSINESS_INFO.email, BUSINESS_INFO.taxId ? `ΑΦΜ: ${BUSINESS_INFO.taxId}` : ""].filter(Boolean).join("  •  ");
+          if (businessContactLine) bodyLines.push(businessContactLine);
+          bodyLines.push("");
+          bodyLines.push((locale === "gr" ? "Αρ. Παραγγελίας" : "Order No.") + `: ${orderNum}`);
+          bodyLines.push((locale === "gr" ? "Ημερομηνία" : "Date") + `: ${dateStr}`);
+          if (invoiceNumber) bodyLines.push((locale === "gr" ? "Αρ. Τιμολογίου" : "Invoice No.") + `: ${invoiceNumber}`);
+          if (deliveryNote) bodyLines.push((locale === "gr" ? "Δελτίο Αποστολής" : "Delivery Note") + `: ${deliveryNote}`);
+          bodyLines.push("");
+          bodyLines.push(RULE);
+          bodyLines.push(locale === "gr" ? "ΠΡΟΣ ΠΡΟΜΗΘΕΥΤΗ" : "SUPPLIER");
+          bodyLines.push(RULE);
+          bodyLines.push(supplierName);
+          const supplierContactLine = [s.contactEmail, s.contactPhone, s.address].filter(Boolean).join("  •  ");
+          if (supplierContactLine) bodyLines.push(supplierContactLine);
+          bodyLines.push("");
+          bodyLines.push(RULE);
+          bodyLines.push(locale === "gr" ? "ΕΙΔΗ ΠΑΡΑΓΓΕΛΙΑΣ" : "ORDER ITEMS");
+          bodyLines.push(RULE);
+          items.forEach((i, idx) => {
+            bodyLines.push(`${idx + 1}. ${i.productName}`);
+            bodyLines.push(`   ${i.orderedQuantity} ${i.unit} × €${i.basePrice.toFixed(2)}  =  €${i.grossAmount.toFixed(2)}`);
+          });
+          bodyLines.push("");
+          bodyLines.push(RULE);
+          bodyLines.push((locale === "gr" ? "Καθαρή Αξία" : "Net Amount") + `: €${totalNet.toFixed(2)}`);
+          bodyLines.push((locale === "gr" ? "ΦΠΑ" : "VAT") + `: €${totalVat.toFixed(2)}`);
+          bodyLines.push((locale === "gr" ? "ΓΕΝΙΚΟ ΣΥΝΟΛΟ" : "GRAND TOTAL") + `: €${totalGross.toFixed(2)}`);
+          bodyLines.push(RULE);
+          if (notes) {
+            bodyLines.push("");
+            bodyLines.push((locale === "gr" ? "Σημειώσεις" : "Notes") + `: ${notes}`);
+          }
+
           const body = bodyLines.join("\n");
           window.location.href = `mailto:${s.contactEmail}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
         }} className="erp-btn-secondary">📧 {t("btnSendEmail")}</button>
         </div>
       </div>
+
+      {/* Printable Order Form — a dedicated, professional-looking purchase
+          order document. Hidden on screen; shown only when printing (via
+          window.print(), triggered by the Print/Export PDF buttons above),
+          using the same visibility trick as #printable-recipe-area on the
+          Recipe page. */}
+      <div id="printable-order-area" className="hidden">
+        <style>{`
+          @media print {
+            body:has(#printable-order-area) * { visibility: hidden; }
+            body:has(#printable-order-area) #printable-order-area,
+            body:has(#printable-order-area) #printable-order-area * { visibility: visible; }
+            #printable-order-area {
+              display: block !important;
+              position: absolute; left: 0; top: 0; width: 100%;
+            }
+            @page { size: A4; margin: 12mm; }
+          }
+        `}</style>
+        <div style={{ fontFamily: "Arial, sans-serif", color: "#1e293b", padding: "8px" }}>
+          {/* Letterhead: buyer info (left) + document title & order meta (right) */}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", borderBottom: "3px solid #1e293b", paddingBottom: "12px", marginBottom: "16px" }}>
+            <div>
+              <div style={{ fontSize: "20px", fontWeight: 700 }}>
+                {BUSINESS_INFO.name || (locale === "gr" ? "[Επωνυμία Επιχείρησης]" : "[Business Name]")}
+              </div>
+              {BUSINESS_INFO.address && <div style={{ fontSize: "11px", color: "#64748b" }}>{BUSINESS_INFO.address}</div>}
+              {(BUSINESS_INFO.phone || BUSINESS_INFO.email || BUSINESS_INFO.taxId) && (
+                <div style={{ fontSize: "11px", color: "#64748b" }}>
+                  {[BUSINESS_INFO.phone, BUSINESS_INFO.email, BUSINESS_INFO.taxId ? `ΑΦΜ: ${BUSINESS_INFO.taxId}` : ""].filter(Boolean).join("  •  ")}
+                </div>
+              )}
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <div style={{ fontSize: "18px", fontWeight: 700 }}>
+                {locale === "gr" ? "ΔΕΛΤΙΟ ΠΑΡΑΓΓΕΛΙΑΣ" : "PURCHASE ORDER"}
+              </div>
+              <div style={{ fontSize: "12px", color: "#64748b", marginTop: "4px" }}>
+                {locale === "gr" ? "Αρ. Παραγγελίας" : "Order No."}: <strong>{orderNum}</strong>
+              </div>
+              <div style={{ fontSize: "12px", color: "#64748b" }}>
+                {locale === "gr" ? "Ημερομηνία" : "Date"}: <strong>{new Date(orderDate).toLocaleDateString("el-GR")}</strong>
+              </div>
+              {invoiceNumber && (
+                <div style={{ fontSize: "12px", color: "#64748b" }}>
+                  {locale === "gr" ? "Αρ. Τιμολογίου" : "Invoice No."}: <strong>{invoiceNumber}</strong>
+                </div>
+              )}
+              {deliveryNote && (
+                <div style={{ fontSize: "12px", color: "#64748b" }}>
+                  {locale === "gr" ? "Δελτίο Αποστολής" : "Delivery Note"}: <strong>{deliveryNote}</strong>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Supplier (recipient) block */}
+          <div style={{ marginBottom: "16px" }}>
+            <div style={{ fontSize: "10px", fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "4px" }}>
+              {locale === "gr" ? "Προς Προμηθευτή" : "Supplier"}
+            </div>
+            {(() => {
+              const s = suppliers.find((x) => x.id === selectedSupplier);
+              if (!s) return <div style={{ fontSize: "13px", color: "#94a3b8" }}>—</div>;
+              return (
+                <div style={{ border: "1px solid #e2e8f0", borderRadius: "6px", padding: "10px 14px" }}>
+                  <div style={{ fontSize: "14px", fontWeight: 700 }}>{locale === "gr" ? s.name : (s.nameEn || s.name)}</div>
+                  <div style={{ fontSize: "11px", color: "#64748b" }}>
+                    {[s.contactEmail, s.contactPhone, s.address].filter(Boolean).join("  •  ")}
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+
+          {/* Items table */}
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "11px" }}>
+            <thead>
+              <tr style={{ background: "#1e293b", color: "#fff" }}>
+                <th style={{ padding: "6px 8px", textAlign: "left" }}>#</th>
+                <th style={{ padding: "6px 8px", textAlign: "left" }}>{locale === "gr" ? "Προϊόν" : "Product"}</th>
+                <th style={{ padding: "6px 8px", textAlign: "right" }}>{locale === "gr" ? "Ποσότητα" : "Qty"}</th>
+                <th style={{ padding: "6px 8px", textAlign: "left" }}>{locale === "gr" ? "Μονάδα" : "Unit"}</th>
+                <th style={{ padding: "6px 8px", textAlign: "right" }}>{locale === "gr" ? "Τιμή Μον." : "Unit Price"}</th>
+                <th style={{ padding: "6px 8px", textAlign: "right" }}>{locale === "gr" ? "Έκπτ. %" : "Disc. %"}</th>
+                <th style={{ padding: "6px 8px", textAlign: "right" }}>{locale === "gr" ? "Καθαρό" : "Net"}</th>
+                <th style={{ padding: "6px 8px", textAlign: "right" }}>{locale === "gr" ? "ΦΠΑ" : "VAT"}</th>
+                <th style={{ padding: "6px 8px", textAlign: "right" }}>{locale === "gr" ? "Σύνολο" : "Total"}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((item, idx) => (
+                <tr key={idx} style={{ background: idx % 2 === 0 ? "#fff" : "#f8fafc", borderBottom: "1px solid #e2e8f0" }}>
+                  <td style={{ padding: "5px 8px", color: "#94a3b8" }}>{idx + 1}</td>
+                  <td style={{ padding: "5px 8px", fontWeight: 500 }}>{item.productName}</td>
+                  <td style={{ padding: "5px 8px", textAlign: "right" }}>{item.orderedQuantity}</td>
+                  <td style={{ padding: "5px 8px" }}>{item.unit}</td>
+                  <td style={{ padding: "5px 8px", textAlign: "right" }}>{fmt(item.basePrice)}</td>
+                  <td style={{ padding: "5px 8px", textAlign: "right" }}>{item.discountPercent}%</td>
+                  <td style={{ padding: "5px 8px", textAlign: "right" }}>{fmt(item.netAmount)}</td>
+                  <td style={{ padding: "5px 8px", textAlign: "right" }}>{fmt(item.vatAmount)}</td>
+                  <td style={{ padding: "5px 8px", textAlign: "right", fontWeight: 700 }}>{fmt(item.grossAmount)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          {/* Totals */}
+          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "12px" }}>
+            <table style={{ fontSize: "12px", minWidth: "220px" }}>
+              <tbody>
+                <tr>
+                  <td style={{ padding: "3px 12px 3px 0", color: "#64748b" }}>{locale === "gr" ? "Καθαρή Αξία" : "Net Amount"}</td>
+                  <td style={{ padding: "3px 0", textAlign: "right", fontWeight: 600 }}>{fmt(totalNet)}</td>
+                </tr>
+                <tr>
+                  <td style={{ padding: "3px 12px 3px 0", color: "#64748b" }}>{locale === "gr" ? "ΦΠΑ" : "VAT"}</td>
+                  <td style={{ padding: "3px 0", textAlign: "right", fontWeight: 600 }}>{fmt(totalVat)}</td>
+                </tr>
+                <tr style={{ borderTop: "2px solid #1e293b" }}>
+                  <td style={{ padding: "6px 12px 3px 0", fontWeight: 700 }}>{locale === "gr" ? "Γενικό Σύνολο" : "Grand Total"}</td>
+                  <td style={{ padding: "6px 0 3px", textAlign: "right", fontWeight: 700, fontSize: "15px" }}>{fmt(totalGross)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          {/* Notes */}
+          {notes && (
+            <div style={{ marginTop: "16px", fontSize: "11px" }}>
+              <div style={{ fontWeight: 700, color: "#64748b", marginBottom: "2px" }}>{locale === "gr" ? "Σημειώσεις" : "Notes"}</div>
+              <div>{notes}</div>
+            </div>
+          )}
+
+          {/* Signature area */}
+          <div style={{ display: "flex", justifyContent: "space-between", marginTop: "48px" }}>
+            <div style={{ width: "45%" }}>
+              <div style={{ borderTop: "1px solid #1e293b", paddingTop: "4px", fontSize: "10px", color: "#64748b" }}>
+                {locale === "gr" ? "Υπογραφή Παραδίδοντος" : "Delivered By"}
+              </div>
+            </div>
+            <div style={{ width: "45%" }}>
+              <div style={{ borderTop: "1px solid #1e293b", paddingTop: "4px", fontSize: "10px", color: "#64748b" }}>
+                {locale === "gr" ? "Υπογραφή Παραλαβόντος" : "Received By"}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
- </div>
+    </div>
   );
 }
