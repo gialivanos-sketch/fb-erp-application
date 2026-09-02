@@ -37,6 +37,29 @@ interface OrderItemDraft {
   regionOfOrigin?: string | null;
 }
 
+// One real order per supplier, created automatically when items from more
+// than one supplier are on the sheet at once (e.g. two greengrocers) — a
+// single Order in the database always belongs to exactly one supplier, so
+// "Δημιουργία Παραγγελιών" splits the mixed shopping list into one of
+// these per supplier, each with its own order number, ready to print or
+// email separately.
+interface SavedOrderGroup {
+  orderNumber: string;
+  supplierId: number;
+  supplierName: string;
+  supplierEmail: string | null;
+  supplierPhone: string | null;
+  supplierAddress: string | null;
+  orderDate: string;
+  invoiceNumber: string;
+  deliveryNote: string;
+  notes: string;
+  items: OrderItemDraft[];
+  totalNet: number;
+  totalVat: number;
+  totalGross: number;
+}
+
 export default function DraftOrderPage() {
   const { t, locale, data, refreshAll } = useApp();
   const suppliers = data.suppliers;
@@ -65,6 +88,17 @@ export default function DraftOrderPage() {
   const [viewBySupplier, setViewBySupplier] = useState(false);
   // Saved message
   const [savedMsg, setSavedMsg] = useState("");
+
+  // Orders just created by "Δημιουργία Παραγγελιών" — one per supplier
+  // on the sheet, each with its own Print/Email action below.
+  const [savedGroups, setSavedGroups] = useState<SavedOrderGroup[]>([]);
+  // Which saved group's printable form is currently populated — set
+  // right before window.print() so the hidden #printable-order-area
+  // shows that ONE supplier's order, not the whole mixed shopping list.
+  const [printingGroup, setPrintingGroup] = useState<SavedOrderGroup | null>(null);
+  useEffect(() => {
+    if (printingGroup) window.print();
+  }, [printingGroup]);
 
   // Business (buyer) letterhead info — loaded once from the
   // business_profile settings row (filled in via Profile → Business
@@ -211,32 +245,123 @@ export default function DraftOrderPage() {
     return Array.from(map.entries()).map(([sid, group]) => ({ supplierId: sid, ...group }));
   }, [items, suppliers, selectedSupplier, locale]);
 
+  // Splits the current sheet into one real order PER SUPPLIER (a single
+  // order in the database always belongs to exactly one supplier — see
+  // SavedOrderGroup above) and saves each one. This is what fixes mixed
+  // shopping lists: 100 tomatoes from Πετρούτσα + 1 blueberry pack from
+  // Εγγλέζος on the same sheet now become two separate orders, each
+  // showing only that supplier's own items on its printout/email.
   async function saveOrder() {
-    if (!selectedSupplier || items.length === 0) return;
+    if (items.length === 0) return;
+    const missingSupplier = groupedBySupplier.some((g) => !g.supplierId);
+    if (missingSupplier) {
+      setSavedMsg(
+        locale === "gr"
+          ? "⚠️ Κάποια είδη δεν έχουν προμηθευτή — επιλέξτε το προϊόν από τη λίστα αναζήτησης (δείχνει τον προμηθευτή) ή διαλέξτε προμηθευτή στο πεδίο πάνω πριν το προσθέσετε χειροκίνητα."
+          : "⚠️ Some items have no supplier — pick the product from the search results (it shows the supplier), or set the supplier field above before adding it manually."
+      );
+      return;
+    }
     setSaving(true);
     try {
-      await db.createOrderWithItems(
-        {
-          orderNumber: orderNum, supplierId: selectedSupplier, orderDate,
-          invoiceNumber: invoiceNumber || null, deliveryNoteNumber: deliveryNote || null, notes: notes || null,
-          totalNet: totalNet.toFixed(2), totalVat: totalVat.toFixed(2), totalGross: totalGross.toFixed(2),
-        },
-        items.map((i) => ({
-          productName: i.productName, orderedQuantity: i.orderedQuantity, unit: i.unit, basePrice: i.basePrice,
-          vatPercent: i.vatPercent, discountPercent: i.discountPercent, netAmount: i.netAmount,
-          vatAmount: i.vatAmount, grossAmount: i.grossAmount, supplierProductId: i.supplierProductId ?? null,
-        }))
-      );
+      const baseNum = orders.length + 1;
+      const results: SavedOrderGroup[] = [];
+      for (let i = 0; i < groupedBySupplier.length; i++) {
+        const group = groupedBySupplier[i];
+        const groupOrderNumber = "ORD-" + String(baseNum + i).padStart(5, "0");
+        const groupNet = group.items.reduce((s, it) => s + it.netAmount, 0);
+        const groupVat = group.items.reduce((s, it) => s + it.vatAmount, 0);
+        const groupGross = group.items.reduce((s, it) => s + it.grossAmount, 0);
+        await db.createOrderWithItems(
+          {
+            orderNumber: groupOrderNumber, supplierId: group.supplierId, orderDate,
+            invoiceNumber: invoiceNumber || null, deliveryNoteNumber: deliveryNote || null, notes: notes || null,
+            totalNet: groupNet.toFixed(2), totalVat: groupVat.toFixed(2), totalGross: groupGross.toFixed(2),
+          },
+          group.items.map((it) => ({
+            productName: it.productName, orderedQuantity: it.orderedQuantity, unit: it.unit, basePrice: it.basePrice,
+            vatPercent: it.vatPercent, discountPercent: it.discountPercent, netAmount: it.netAmount,
+            vatAmount: it.vatAmount, grossAmount: it.grossAmount, supplierProductId: it.supplierProductId ?? null,
+          }))
+        );
+        const s = suppliers.find((x) => x.id === group.supplierId);
+        results.push({
+          orderNumber: groupOrderNumber, supplierId: group.supplierId, supplierName: group.supplierName,
+          supplierEmail: s?.contactEmail ?? null, supplierPhone: s?.contactPhone ?? null, supplierAddress: s?.address ?? null,
+          orderDate, invoiceNumber, deliveryNote, notes,
+          items: group.items, totalNet: groupNet, totalVat: groupVat, totalGross: groupGross,
+        });
+      }
       await refreshAll();
+      setSavedGroups(results);
       setItems([]);
       setInvoiceNumber(""); setDeliveryNote(""); setNotes("");
-      setSavedMsg(locale === "gr" ? "✅ Παραγγελία αποθηκεύτηκε!" : "✅ Order saved!");
-      setTimeout(() => setSavedMsg(""), 2500);
+      setSavedMsg(
+        results.length === 1
+          ? (locale === "gr" ? "✅ Παραγγελία αποθηκεύτηκε!" : "✅ Order saved!")
+          : (locale === "gr" ? `✅ Δημιουργήθηκαν ${results.length} παραγγελίες, μία ανά προμηθευτή:` : `✅ Created ${results.length} orders, one per supplier:`) +
+            " " + results.map((r) => `${r.supplierName} (${r.orderNumber})`).join(" · ")
+      );
+      setTimeout(() => setSavedMsg(""), 6000);
     } catch (err) {
       setSavedMsg(locale === "gr" ? "⚠️ Αποτυχία αποθήκευσης: " + String(err) : "⚠️ Failed to save: " + String(err));
     } finally {
       setSaving(false);
     }
+  }
+
+  // Email for ONE saved supplier order (called from its card below) — the
+  // per-supplier equivalent of the old single "Αποστολή Email" button.
+  function sendGroupEmail(g: SavedOrderGroup) {
+    if (!g.supplierEmail) {
+      alert(locale === "gr" ? "⚠️ Δεν βρέθηκε email προμηθευτή" : "⚠️ No supplier email found");
+      return;
+    }
+    const dateStr = new Date(g.orderDate).toLocaleDateString("el-GR");
+    const subject = (locale === "gr" ? "Παραγγελία" : "Order") + ` — ${g.supplierName} — ${dateStr}`;
+    const RULE = "────────────────────────────";
+    const bodyLines: string[] = [];
+
+    bodyLines.push(locale === "gr" ? "ΔΕΛΤΙΟ ΠΑΡΑΓΓΕΛΙΑΣ" : "PURCHASE ORDER");
+    bodyLines.push(RULE);
+    bodyLines.push("");
+    if (businessProfile.name) bodyLines.push(businessProfile.name);
+    if (businessProfile.address) bodyLines.push(businessProfile.address);
+    const businessContactLine = [businessProfile.phone, businessProfile.email, businessProfile.taxId ? `ΑΦΜ: ${businessProfile.taxId}` : ""].filter(Boolean).join("  •  ");
+    if (businessContactLine) bodyLines.push(businessContactLine);
+    bodyLines.push("");
+    bodyLines.push((locale === "gr" ? "Αρ. Παραγγελίας" : "Order No.") + `: ${g.orderNumber}`);
+    bodyLines.push((locale === "gr" ? "Ημερομηνία" : "Date") + `: ${dateStr}`);
+    if (g.invoiceNumber) bodyLines.push((locale === "gr" ? "Αρ. Τιμολογίου" : "Invoice No.") + `: ${g.invoiceNumber}`);
+    if (g.deliveryNote) bodyLines.push((locale === "gr" ? "Δελτίο Αποστολής" : "Delivery Note") + `: ${g.deliveryNote}`);
+    bodyLines.push("");
+    bodyLines.push(RULE);
+    bodyLines.push(locale === "gr" ? "ΠΡΟΣ ΠΡΟΜΗΘΕΥΤΗ" : "SUPPLIER");
+    bodyLines.push(RULE);
+    bodyLines.push(g.supplierName);
+    const supplierContactLine = [g.supplierEmail, g.supplierPhone, g.supplierAddress].filter(Boolean).join("  •  ");
+    if (supplierContactLine) bodyLines.push(supplierContactLine);
+    bodyLines.push("");
+    bodyLines.push(RULE);
+    bodyLines.push(locale === "gr" ? "ΕΙΔΗ ΠΑΡΑΓΓΕΛΙΑΣ" : "ORDER ITEMS");
+    bodyLines.push(RULE);
+    g.items.forEach((i, idx) => {
+      bodyLines.push(`${idx + 1}. ${i.productName}`);
+      bodyLines.push(`   ${i.orderedQuantity} ${i.unit} × €${i.basePrice.toFixed(2)}  =  €${i.grossAmount.toFixed(2)}`);
+    });
+    bodyLines.push("");
+    bodyLines.push(RULE);
+    bodyLines.push((locale === "gr" ? "Καθαρή Αξία" : "Net Amount") + `: €${g.totalNet.toFixed(2)}`);
+    bodyLines.push((locale === "gr" ? "ΦΠΑ" : "VAT") + `: €${g.totalVat.toFixed(2)}`);
+    bodyLines.push((locale === "gr" ? "ΓΕΝΙΚΟ ΣΥΝΟΛΟ" : "GRAND TOTAL") + `: €${g.totalGross.toFixed(2)}`);
+    bodyLines.push(RULE);
+    if (g.notes) {
+      bodyLines.push("");
+      bodyLines.push((locale === "gr" ? "Σημειώσεις" : "Notes") + `: ${g.notes}`);
+    }
+
+    const body = bodyLines.join("\n");
+    window.location.href = `mailto:${g.supplierEmail}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
   }
 
   function handleExportPDF() {
@@ -271,11 +396,18 @@ export default function DraftOrderPage() {
               <input type="text" value={orderNum} readOnly className="erp-input bg-slate-50 font-mono" />
             </div>
             <div>
-              <label className="erp-label">{t("fieldSupplier")}</label>
+              <label className="erp-label">
+                {locale === "gr" ? "Προμηθευτής (προεπιλογή)" : "Supplier (default)"}
+              </label>
               <select value={selectedSupplier} onChange={(e) => setSelectedSupplier(Number(e.target.value))} className="erp-select">
                 <option value={0}>—</option>
                 {suppliers.map((s) => <option key={s.id} value={s.id}>{locale === "gr" ? s.name : (s.nameEn || s.name)}</option>)}
               </select>
+              <div className="text-xs text-slate-400 mt-1">
+                {locale === "gr"
+                  ? "Χρησιμοποιείται μόνο για είδη που προσθέτεις χειροκίνητα, χωρίς να τα διαλέξεις από την αναζήτηση. Κάθε προμηθευτής θα γίνει ξεχωριστή παραγγελία."
+                  : "Only used for items you add manually without picking them from search. Each supplier becomes its own separate order."}
+              </div>
             </div>
             <div>
               <label className="erp-label">{t("fieldOrderDate")}</label>
@@ -473,73 +605,56 @@ export default function DraftOrderPage() {
             </div>
           )}
 
-          {/* Action Buttons */}
+          {/* Action Buttons — Save always splits the sheet into one order
+              PER SUPPLIER (see saveOrder above); Print/Email happen per
+              supplier from the results panel below, never for the whole
+              mixed list at once. */}
           <div className="flex flex-wrap gap-2 mt-4 pt-4 border-t">
-            <button onClick={saveOrder} className="erp-btn-primary" disabled={items.length === 0 || !selectedSupplier || saving}>
-              {saving ? "…" : "💾"} {t("btnSaveOrder")}
+            <button onClick={saveOrder} className="erp-btn-primary" disabled={items.length === 0 || saving}>
+              {saving ? "…" : "💾"} {locale === "gr" ? "Δημιουργία Παραγγελιών" : "Create Orders"}
             </button>
-            <button onClick={() => window.print()} className="erp-btn-secondary">🖨️ {t("btnPrint")}</button>
-                   <button onClick={() => {
-          const s = suppliers.find((s) => s.id === selectedSupplier);
-          if (!s?.contactEmail) {
-            alert(locale === "gr" ? "⚠️ Δεν βρέθηκε email προμηθευτή" : "⚠️ No supplier email found");
-            return;
-          }
-          const supplierName = locale === "gr" ? s.name : (s.nameEn || s.name);
-          const dateStr = new Date(orderDate).toLocaleDateString("el-GR");
-          const subject = (locale === "gr" ? "Παραγγελία" : "Order") + ` — ${supplierName} — ${dateStr}`;
-          const RULE = "────────────────────────────";
-          const bodyLines: string[] = [];
-
-          bodyLines.push(locale === "gr" ? "ΔΕΛΤΙΟ ΠΑΡΑΓΓΕΛΙΑΣ" : "PURCHASE ORDER");
-          bodyLines.push(RULE);
-          bodyLines.push("");
-          if (businessProfile.name) bodyLines.push(businessProfile.name);
-          if (businessProfile.address) bodyLines.push(businessProfile.address);
-          const businessContactLine = [businessProfile.phone, businessProfile.email, businessProfile.taxId ? `ΑΦΜ: ${businessProfile.taxId}` : ""].filter(Boolean).join("  •  ");
-          if (businessContactLine) bodyLines.push(businessContactLine);
-          bodyLines.push("");
-          bodyLines.push((locale === "gr" ? "Αρ. Παραγγελίας" : "Order No.") + `: ${orderNum}`);
-          bodyLines.push((locale === "gr" ? "Ημερομηνία" : "Date") + `: ${dateStr}`);
-          if (invoiceNumber) bodyLines.push((locale === "gr" ? "Αρ. Τιμολογίου" : "Invoice No.") + `: ${invoiceNumber}`);
-          if (deliveryNote) bodyLines.push((locale === "gr" ? "Δελτίο Αποστολής" : "Delivery Note") + `: ${deliveryNote}`);
-          bodyLines.push("");
-          bodyLines.push(RULE);
-          bodyLines.push(locale === "gr" ? "ΠΡΟΣ ΠΡΟΜΗΘΕΥΤΗ" : "SUPPLIER");
-          bodyLines.push(RULE);
-          bodyLines.push(supplierName);
-          const supplierContactLine = [s.contactEmail, s.contactPhone, s.address].filter(Boolean).join("  •  ");
-          if (supplierContactLine) bodyLines.push(supplierContactLine);
-          bodyLines.push("");
-          bodyLines.push(RULE);
-          bodyLines.push(locale === "gr" ? "ΕΙΔΗ ΠΑΡΑΓΓΕΛΙΑΣ" : "ORDER ITEMS");
-          bodyLines.push(RULE);
-          items.forEach((i, idx) => {
-            bodyLines.push(`${idx + 1}. ${i.productName}`);
-            bodyLines.push(`   ${i.orderedQuantity} ${i.unit} × €${i.basePrice.toFixed(2)}  =  €${i.grossAmount.toFixed(2)}`);
-          });
-          bodyLines.push("");
-          bodyLines.push(RULE);
-          bodyLines.push((locale === "gr" ? "Καθαρή Αξία" : "Net Amount") + `: €${totalNet.toFixed(2)}`);
-          bodyLines.push((locale === "gr" ? "ΦΠΑ" : "VAT") + `: €${totalVat.toFixed(2)}`);
-          bodyLines.push((locale === "gr" ? "ΓΕΝΙΚΟ ΣΥΝΟΛΟ" : "GRAND TOTAL") + `: €${totalGross.toFixed(2)}`);
-          bodyLines.push(RULE);
-          if (notes) {
-            bodyLines.push("");
-            bodyLines.push((locale === "gr" ? "Σημειώσεις" : "Notes") + `: ${notes}`);
-          }
-
-          const body = bodyLines.join("\n");
-          window.location.href = `mailto:${s.contactEmail}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-        }} className="erp-btn-secondary">📧 {t("btnSendEmail")}</button>
+          </div>
         </div>
       </div>
 
+      {/* Results: one card per supplier order just created — print or
+          email each one separately (e.g. Εγγλέζος first, then Πετρούτσα,
+          or the other way round). */}
+      {savedGroups.length > 0 && (
+        <div className="erp-card mb-6">
+          <div className="erp-card-header">
+            📬 {locale === "gr" ? "Αποστολή ανά Προμηθευτή" : "Send per Supplier"}
+          </div>
+          <div className="p-4 space-y-3">
+            <div className="text-sm text-slate-500 mb-1">
+              {locale === "gr"
+                ? "Οι παραγγελίες δημιουργήθηκαν, μία για κάθε προμηθευτή. Τύπωσε ή στείλε email σε καθεμία ξεχωριστά:"
+                : "Orders were created, one per supplier. Print or email each one separately:"}
+            </div>
+            {savedGroups.map((g) => (
+              <div key={g.orderNumber} className="border border-slate-200 rounded-lg p-3 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <div className="font-semibold text-slate-800">🏢 {g.supplierName}</div>
+                  <div className="text-xs text-slate-500">
+                    {g.orderNumber} · {g.items.length} {locale === "gr" ? "είδη" : "items"} · {fmt(g.totalGross)}
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={() => setPrintingGroup(g)} className="erp-btn-secondary text-sm">🖨️ {t("btnPrint")}</button>
+                  <button onClick={() => sendGroupEmail(g)} className="erp-btn-secondary text-sm">📧 {t("btnSendEmail")}</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Printable Order Form — a dedicated, professional-looking purchase
-          order document. Hidden on screen; shown only when printing (via
-          window.print(), triggered by the Print/Export PDF buttons above),
-          using the same visibility trick as #printable-recipe-area on the
-          Recipe page. */}
+          order document for ONE supplier's order (whichever card's
+          "Εκτύπωση" button was clicked, held in printingGroup). Hidden on
+          screen; shown only when printing (window.print(), triggered by
+          the effect above right after setPrintingGroup), using the same
+          visibility trick as #printable-recipe-area on the Recipe page. */}
       <div id="printable-order-area" className="hidden">
         <style>{`
           @media print {
@@ -553,148 +668,143 @@ export default function DraftOrderPage() {
             @page { size: A4; margin: 12mm; }
           }
         `}</style>
-        <div style={{ fontFamily: "Arial, sans-serif", color: "#1e293b", padding: "8px" }}>
-          {/* Letterhead: buyer info (left) + document title & order meta (right) */}
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", borderBottom: "3px solid #1e293b", paddingBottom: "12px", marginBottom: "16px" }}>
-            <div style={{ display: "flex", alignItems: "flex-start", gap: "12px" }}>
-              {businessProfile.logoDataUrl && (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={businessProfile.logoDataUrl}
-                  alt=""
-                  style={{ maxHeight: "56px", maxWidth: "110px", objectFit: "contain" }}
-                />
-              )}
-              <div>
-                <div style={{ fontSize: "20px", fontWeight: 700 }}>
-                  {businessProfile.name || (locale === "gr" ? "[Επωνυμία Επιχείρησης]" : "[Business Name]")}
+        {printingGroup && (
+          <div style={{ fontFamily: "Arial, sans-serif", color: "#1e293b", padding: "8px" }}>
+            {/* Letterhead: buyer info (left) + document title & order meta (right) */}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", borderBottom: "3px solid #1e293b", paddingBottom: "12px", marginBottom: "16px" }}>
+              <div style={{ display: "flex", alignItems: "flex-start", gap: "12px" }}>
+                {businessProfile.logoDataUrl && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={businessProfile.logoDataUrl}
+                    alt=""
+                    style={{ maxHeight: "56px", maxWidth: "110px", objectFit: "contain" }}
+                  />
+                )}
+                <div>
+                  <div style={{ fontSize: "20px", fontWeight: 700 }}>
+                    {businessProfile.name || (locale === "gr" ? "[Επωνυμία Επιχείρησης]" : "[Business Name]")}
+                  </div>
+                  {businessProfile.address && <div style={{ fontSize: "11px", color: "#64748b" }}>{businessProfile.address}</div>}
+                  {(businessProfile.phone || businessProfile.email || businessProfile.taxId) && (
+                    <div style={{ fontSize: "11px", color: "#64748b" }}>
+                      {[businessProfile.phone, businessProfile.email, businessProfile.taxId ? `ΑΦΜ: ${businessProfile.taxId}` : ""].filter(Boolean).join("  •  ")}
+                    </div>
+                  )}
                 </div>
-                {businessProfile.address && <div style={{ fontSize: "11px", color: "#64748b" }}>{businessProfile.address}</div>}
-                {(businessProfile.phone || businessProfile.email || businessProfile.taxId) && (
-                  <div style={{ fontSize: "11px", color: "#64748b" }}>
-                    {[businessProfile.phone, businessProfile.email, businessProfile.taxId ? `ΑΦΜ: ${businessProfile.taxId}` : ""].filter(Boolean).join("  •  ")}
+              </div>
+              <div style={{ textAlign: "right" }}>
+                <div style={{ fontSize: "18px", fontWeight: 700 }}>
+                  {locale === "gr" ? "ΔΕΛΤΙΟ ΠΑΡΑΓΓΕΛΙΑΣ" : "PURCHASE ORDER"}
+                </div>
+                <div style={{ fontSize: "12px", color: "#64748b", marginTop: "4px" }}>
+                  {locale === "gr" ? "Αρ. Παραγγελίας" : "Order No."}: <strong>{printingGroup.orderNumber}</strong>
+                </div>
+                <div style={{ fontSize: "12px", color: "#64748b" }}>
+                  {locale === "gr" ? "Ημερομηνία" : "Date"}: <strong>{new Date(printingGroup.orderDate).toLocaleDateString("el-GR")}</strong>
+                </div>
+                {printingGroup.invoiceNumber && (
+                  <div style={{ fontSize: "12px", color: "#64748b" }}>
+                    {locale === "gr" ? "Αρ. Τιμολογίου" : "Invoice No."}: <strong>{printingGroup.invoiceNumber}</strong>
+                  </div>
+                )}
+                {printingGroup.deliveryNote && (
+                  <div style={{ fontSize: "12px", color: "#64748b" }}>
+                    {locale === "gr" ? "Δελτίο Αποστολής" : "Delivery Note"}: <strong>{printingGroup.deliveryNote}</strong>
                   </div>
                 )}
               </div>
             </div>
-            <div style={{ textAlign: "right" }}>
-              <div style={{ fontSize: "18px", fontWeight: 700 }}>
-                {locale === "gr" ? "ΔΕΛΤΙΟ ΠΑΡΑΓΓΕΛΙΑΣ" : "PURCHASE ORDER"}
-              </div>
-              <div style={{ fontSize: "12px", color: "#64748b", marginTop: "4px" }}>
-                {locale === "gr" ? "Αρ. Παραγγελίας" : "Order No."}: <strong>{orderNum}</strong>
-              </div>
-              <div style={{ fontSize: "12px", color: "#64748b" }}>
-                {locale === "gr" ? "Ημερομηνία" : "Date"}: <strong>{new Date(orderDate).toLocaleDateString("el-GR")}</strong>
-              </div>
-              {invoiceNumber && (
-                <div style={{ fontSize: "12px", color: "#64748b" }}>
-                  {locale === "gr" ? "Αρ. Τιμολογίου" : "Invoice No."}: <strong>{invoiceNumber}</strong>
-                </div>
-              )}
-              {deliveryNote && (
-                <div style={{ fontSize: "12px", color: "#64748b" }}>
-                  {locale === "gr" ? "Δελτίο Αποστολής" : "Delivery Note"}: <strong>{deliveryNote}</strong>
-                </div>
-              )}
-            </div>
-          </div>
 
-          {/* Supplier (recipient) block */}
-          <div style={{ marginBottom: "16px" }}>
-            <div style={{ fontSize: "10px", fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "4px" }}>
-              {locale === "gr" ? "Προς Προμηθευτή" : "Supplier"}
-            </div>
-            {(() => {
-              const s = suppliers.find((x) => x.id === selectedSupplier);
-              if (!s) return <div style={{ fontSize: "13px", color: "#94a3b8" }}>—</div>;
-              return (
-                <div style={{ border: "1px solid #e2e8f0", borderRadius: "6px", padding: "10px 14px" }}>
-                  <div style={{ fontSize: "14px", fontWeight: 700 }}>{locale === "gr" ? s.name : (s.nameEn || s.name)}</div>
-                  <div style={{ fontSize: "11px", color: "#64748b" }}>
-                    {[s.contactEmail, s.contactPhone, s.address].filter(Boolean).join("  •  ")}
-                  </div>
+            {/* Supplier (recipient) block */}
+            <div style={{ marginBottom: "16px" }}>
+              <div style={{ fontSize: "10px", fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "4px" }}>
+                {locale === "gr" ? "Προς Προμηθευτή" : "Supplier"}
+              </div>
+              <div style={{ border: "1px solid #e2e8f0", borderRadius: "6px", padding: "10px 14px" }}>
+                <div style={{ fontSize: "14px", fontWeight: 700 }}>{printingGroup.supplierName}</div>
+                <div style={{ fontSize: "11px", color: "#64748b" }}>
+                  {[printingGroup.supplierEmail, printingGroup.supplierPhone, printingGroup.supplierAddress].filter(Boolean).join("  •  ")}
                 </div>
-              );
-            })()}
-          </div>
+              </div>
+            </div>
 
-          {/* Items table */}
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "11px" }}>
-            <thead>
-              <tr style={{ background: "#1e293b", color: "#fff" }}>
-                <th style={{ padding: "6px 8px", textAlign: "left" }}>#</th>
-                <th style={{ padding: "6px 8px", textAlign: "left" }}>{locale === "gr" ? "Προϊόν" : "Product"}</th>
-                <th style={{ padding: "6px 8px", textAlign: "right" }}>{locale === "gr" ? "Ποσότητα" : "Qty"}</th>
-                <th style={{ padding: "6px 8px", textAlign: "left" }}>{locale === "gr" ? "Μονάδα" : "Unit"}</th>
-                <th style={{ padding: "6px 8px", textAlign: "right" }}>{locale === "gr" ? "Τιμή Μον." : "Unit Price"}</th>
-                <th style={{ padding: "6px 8px", textAlign: "right" }}>{locale === "gr" ? "Έκπτ. %" : "Disc. %"}</th>
-                <th style={{ padding: "6px 8px", textAlign: "right" }}>{locale === "gr" ? "Καθαρό" : "Net"}</th>
-                <th style={{ padding: "6px 8px", textAlign: "right" }}>{locale === "gr" ? "ΦΠΑ" : "VAT"}</th>
-                <th style={{ padding: "6px 8px", textAlign: "right" }}>{locale === "gr" ? "Σύνολο" : "Total"}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((item, idx) => (
-                <tr key={idx} style={{ background: idx % 2 === 0 ? "#fff" : "#f8fafc", borderBottom: "1px solid #e2e8f0" }}>
-                  <td style={{ padding: "5px 8px", color: "#94a3b8" }}>{idx + 1}</td>
-                  <td style={{ padding: "5px 8px", fontWeight: 500 }}>{item.productName}</td>
-                  <td style={{ padding: "5px 8px", textAlign: "right" }}>{item.orderedQuantity}</td>
-                  <td style={{ padding: "5px 8px" }}>{item.unit}</td>
-                  <td style={{ padding: "5px 8px", textAlign: "right" }}>{fmt(item.basePrice)}</td>
-                  <td style={{ padding: "5px 8px", textAlign: "right" }}>{item.discountPercent}%</td>
-                  <td style={{ padding: "5px 8px", textAlign: "right" }}>{fmt(item.netAmount)}</td>
-                  <td style={{ padding: "5px 8px", textAlign: "right" }}>{fmt(item.vatAmount)}</td>
-                  <td style={{ padding: "5px 8px", textAlign: "right", fontWeight: 700 }}>{fmt(item.grossAmount)}</td>
+            {/* Items table */}
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "11px" }}>
+              <thead>
+                <tr style={{ background: "#1e293b", color: "#fff" }}>
+                  <th style={{ padding: "6px 8px", textAlign: "left" }}>#</th>
+                  <th style={{ padding: "6px 8px", textAlign: "left" }}>{locale === "gr" ? "Προϊόν" : "Product"}</th>
+                  <th style={{ padding: "6px 8px", textAlign: "right" }}>{locale === "gr" ? "Ποσότητα" : "Qty"}</th>
+                  <th style={{ padding: "6px 8px", textAlign: "left" }}>{locale === "gr" ? "Μονάδα" : "Unit"}</th>
+                  <th style={{ padding: "6px 8px", textAlign: "right" }}>{locale === "gr" ? "Τιμή Μον." : "Unit Price"}</th>
+                  <th style={{ padding: "6px 8px", textAlign: "right" }}>{locale === "gr" ? "Έκπτ. %" : "Disc. %"}</th>
+                  <th style={{ padding: "6px 8px", textAlign: "right" }}>{locale === "gr" ? "Καθαρό" : "Net"}</th>
+                  <th style={{ padding: "6px 8px", textAlign: "right" }}>{locale === "gr" ? "ΦΠΑ" : "VAT"}</th>
+                  <th style={{ padding: "6px 8px", textAlign: "right" }}>{locale === "gr" ? "Σύνολο" : "Total"}</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-
-          {/* Totals */}
-          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "12px" }}>
-            <table style={{ fontSize: "12px", minWidth: "220px" }}>
+              </thead>
               <tbody>
-                <tr>
-                  <td style={{ padding: "3px 12px 3px 0", color: "#64748b" }}>{locale === "gr" ? "Καθαρή Αξία" : "Net Amount"}</td>
-                  <td style={{ padding: "3px 0", textAlign: "right", fontWeight: 600 }}>{fmt(totalNet)}</td>
-                </tr>
-                <tr>
-                  <td style={{ padding: "3px 12px 3px 0", color: "#64748b" }}>{locale === "gr" ? "ΦΠΑ" : "VAT"}</td>
-                  <td style={{ padding: "3px 0", textAlign: "right", fontWeight: 600 }}>{fmt(totalVat)}</td>
-                </tr>
-                <tr style={{ borderTop: "2px solid #1e293b" }}>
-                  <td style={{ padding: "6px 12px 3px 0", fontWeight: 700 }}>{locale === "gr" ? "Γενικό Σύνολο" : "Grand Total"}</td>
-                  <td style={{ padding: "6px 0 3px", textAlign: "right", fontWeight: 700, fontSize: "15px" }}>{fmt(totalGross)}</td>
-                </tr>
+                {printingGroup.items.map((item, idx) => (
+                  <tr key={idx} style={{ background: idx % 2 === 0 ? "#fff" : "#f8fafc", borderBottom: "1px solid #e2e8f0" }}>
+                    <td style={{ padding: "5px 8px", color: "#94a3b8" }}>{idx + 1}</td>
+                    <td style={{ padding: "5px 8px", fontWeight: 500 }}>{item.productName}</td>
+                    <td style={{ padding: "5px 8px", textAlign: "right" }}>{item.orderedQuantity}</td>
+                    <td style={{ padding: "5px 8px" }}>{item.unit}</td>
+                    <td style={{ padding: "5px 8px", textAlign: "right" }}>{fmt(item.basePrice)}</td>
+                    <td style={{ padding: "5px 8px", textAlign: "right" }}>{item.discountPercent}%</td>
+                    <td style={{ padding: "5px 8px", textAlign: "right" }}>{fmt(item.netAmount)}</td>
+                    <td style={{ padding: "5px 8px", textAlign: "right" }}>{fmt(item.vatAmount)}</td>
+                    <td style={{ padding: "5px 8px", textAlign: "right", fontWeight: 700 }}>{fmt(item.grossAmount)}</td>
+                  </tr>
+                ))}
               </tbody>
             </table>
-          </div>
 
-          {/* Notes */}
-          {notes && (
-            <div style={{ marginTop: "16px", fontSize: "11px" }}>
-              <div style={{ fontWeight: 700, color: "#64748b", marginBottom: "2px" }}>{locale === "gr" ? "Σημειώσεις" : "Notes"}</div>
-              <div>{notes}</div>
+            {/* Totals */}
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "12px" }}>
+              <table style={{ fontSize: "12px", minWidth: "220px" }}>
+                <tbody>
+                  <tr>
+                    <td style={{ padding: "3px 12px 3px 0", color: "#64748b" }}>{locale === "gr" ? "Καθαρή Αξία" : "Net Amount"}</td>
+                    <td style={{ padding: "3px 0", textAlign: "right", fontWeight: 600 }}>{fmt(printingGroup.totalNet)}</td>
+                  </tr>
+                  <tr>
+                    <td style={{ padding: "3px 12px 3px 0", color: "#64748b" }}>{locale === "gr" ? "ΦΠΑ" : "VAT"}</td>
+                    <td style={{ padding: "3px 0", textAlign: "right", fontWeight: 600 }}>{fmt(printingGroup.totalVat)}</td>
+                  </tr>
+                  <tr style={{ borderTop: "2px solid #1e293b" }}>
+                    <td style={{ padding: "6px 12px 3px 0", fontWeight: 700 }}>{locale === "gr" ? "Γενικό Σύνολο" : "Grand Total"}</td>
+                    <td style={{ padding: "6px 0 3px", textAlign: "right", fontWeight: 700, fontSize: "15px" }}>{fmt(printingGroup.totalGross)}</td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
-          )}
 
-          {/* Signature area */}
-          <div style={{ display: "flex", justifyContent: "space-between", marginTop: "48px" }}>
-            <div style={{ width: "45%" }}>
-              <div style={{ borderTop: "1px solid #1e293b", paddingTop: "4px", fontSize: "10px", color: "#64748b" }}>
-                {locale === "gr" ? "Υπογραφή Παραδίδοντος" : "Delivered By"}
+            {/* Notes */}
+            {printingGroup.notes && (
+              <div style={{ marginTop: "16px", fontSize: "11px" }}>
+                <div style={{ fontWeight: 700, color: "#64748b", marginBottom: "2px" }}>{locale === "gr" ? "Σημειώσεις" : "Notes"}</div>
+                <div>{printingGroup.notes}</div>
+              </div>
+            )}
+
+            {/* Signature area */}
+            <div style={{ display: "flex", justifyContent: "space-between", marginTop: "48px" }}>
+              <div style={{ width: "45%" }}>
+                <div style={{ borderTop: "1px solid #1e293b", paddingTop: "4px", fontSize: "10px", color: "#64748b" }}>
+                  {locale === "gr" ? "Υπογραφή Παραδίδοντος" : "Delivered By"}
+                </div>
+              </div>
+              <div style={{ width: "45%" }}>
+                <div style={{ borderTop: "1px solid #1e293b", paddingTop: "4px", fontSize: "10px", color: "#64748b" }}>
+                  {locale === "gr" ? "Υπογραφή Παραλαβόντος" : "Received By"}
+                </div>
               </div>
             </div>
-            <div style={{ width: "45%" }}>
-              <div style={{ borderTop: "1px solid #1e293b", paddingTop: "4px", fontSize: "10px", color: "#64748b" }}>
-                {locale === "gr" ? "Υπογραφή Παραλαβόντος" : "Received By"}
-              </div>
-            </div>
           </div>
-        </div>
+        )}
       </div>
-    </div>
     </div>
   );
 }
