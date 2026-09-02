@@ -420,6 +420,28 @@ export async function deleteOrderItem(id: number): Promise<void> {
   if (error) throw error;
 }
 
+// Adds a brand-new line item to an EXISTING order (used by the
+// "Restore & Correction" flow in Orders Archive, so a product missed
+// off the original order can be added when correcting it).
+export async function addOrderItem(orderId: number, item: {
+  productName: string; orderedQuantity: number; deliveredQuantity?: number; unit: string;
+  basePrice: number; vatPercent: number; discountPercent: number;
+  netAmount: number; vatAmount: number; grossAmount: number; supplierProductId?: number | null;
+}): Promise<number> {
+  const { data, error } = await requireClient()
+    .from("order_items")
+    .insert({
+      order_id: orderId, supplier_product_id: item.supplierProductId ?? null, product_name: item.productName,
+      ordered_quantity: item.orderedQuantity, delivered_quantity: item.deliveredQuantity ?? item.orderedQuantity,
+      unit: item.unit, base_price: item.basePrice, vat_percent: item.vatPercent, discount_percent: item.discountPercent,
+      net_amount: item.netAmount, vat_amount: item.vatAmount, gross_amount: item.grossAmount,
+    })
+    .select("id")
+    .single();
+  if (error) throw error;
+  return (data as { id: number }).id;
+}
+
 // ------------------------------------------------------------
 // SUPPLIER PAYMENTS
 // ------------------------------------------------------------
