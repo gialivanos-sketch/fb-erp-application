@@ -920,7 +920,7 @@ export default function RecipePage() {
                     <tr>
                       <th>#</th>
                       <th className="min-w-[220px]">{t("fieldProduct")}</th>
-                      <th>{t("fieldQuantity")}</th>
+                      <th className="min-w-[160px]">{t("fieldQuantity")}</th>
                       <th>{t("fieldUnit")}</th>
                       <th>{locale === "gr" ? "Τιμή Μερίδας" : "Portion Price"}</th>
                       <th>{locale === "gr" ? `Ποσότητα (${targetPortions || 0} μερ.)` : `Qty (${targetPortions || 0} ptn)`}</th>
@@ -942,7 +942,7 @@ export default function RecipePage() {
                           <td className="text-xs text-slate-400">{i + 1}</td>
                           <td className="min-w-[220px] font-medium">{item.ingredientName}</td>
                           <td>
-                            <div className="flex items-center gap-1">
+                            <div className="flex items-center gap-1 flex-nowrap">
                               <input
                                 key={displayUnit}
                                 type="number" defaultValue={dispQty}
@@ -951,13 +951,13 @@ export default function RecipePage() {
                                   const baseVal = toggleable ? convertQty(displayVal, displayUnit, item.unit) : displayVal;
                                   updateIngredientRow(item.id, "quantity", Number(baseVal.toFixed(4)));
                                 }}
-                                className="erp-input text-xs py-1 w-20" step="0.001"
+                                className="erp-input text-xs py-1 w-24 flex-shrink-0" style={{ minWidth: "6rem" }} step="0.001"
                               />
                               {toggleable && (
                                 <select
                                   value={displayUnit}
                                   onChange={(e) => setRowUnitDisplay(prev => ({ ...prev, [item.id]: e.target.value as "kg" | "g" }))}
-                                  className="erp-input text-xs py-1 w-14"
+                                  className="erp-input text-xs py-1 w-16 flex-shrink-0"
                                 >
                                   <option value="kg">kg</option>
                                   <option value="g">g</option>
