@@ -100,6 +100,28 @@ export async function deleteSupplier(id: number): Promise<void> {
   if (error) throw error;
 }
 
+/** Sets one supplier's own category (Καρτέλα Προμηθευτών). After saving,
+ * the caller typically follows up with applySupplierCategoryToUncategorizedProducts
+ * so that supplier's still-uncategorized products pick it up too. */
+export async function updateSupplierCategory(id: number, category: string): Promise<void> {
+  const { error } = await requireClient().from("suppliers").update({ category }).eq("id", id);
+  if (error) throw error;
+}
+
+/** Bulk-fills `category` on every one of this supplier's products that
+ * doesn't have one set yet (empty or null) — never overwrites a category
+ * a product already has, so a manual per-product override always sticks.
+ * Returns how many product rows were updated. */
+export async function applySupplierCategoryToUncategorizedProducts(supplierId: number, category: string): Promise<number> {
+  const { error, count } = await requireClient()
+    .from("supplier_products")
+    .update({ category }, { count: "exact" })
+    .eq("supplier_id", supplierId)
+    .or("category.is.null,category.eq.");
+  if (error) throw error;
+  return count ?? 0;
+}
+
 export async function deleteOldQuotes(supplierId: number | null): Promise<number> {
   // Supplier products don't carry a per-row date, so "old quotes" means:
   // delete non-contract quotes for the given supplier (or every supplier
