@@ -19,6 +19,7 @@ import type {
   AppUser, Supplier, SupplierProduct, Order, OrderItem, SupplierPayment,
   StockTaking, StockTakingItem, InventorySnapshot, Ingredient, Recipe,
   RecipeIngredient, Menu, MenuRecipe, PrepListItem, Unit, IngestionLog, UserRole,
+  BusinessProfile,
 } from "./types";
 
 function requireClient() {
@@ -1226,6 +1227,45 @@ export async function logIngestion(entry: { fileName: string; fileType: string; 
   const { error } = await requireClient().from("ingestion_logs").insert({
     file_name: entry.fileName, file_type: entry.fileType, records_parsed: entry.recordsParsed,
     records_inserted: entry.recordsInserted, status: entry.status, errors: entry.errors ?? null,
+  });
+  if (error) throw error;
+}
+
+// ------------------------------------------------------------
+// BUSINESS PROFILE (single settings row — the company's own
+// letterhead info + logo, shown on printed/emailed purchase
+// orders). id is always 1; the row is created the first time
+// someone saves the Business Profile page, so a fresh install
+// with no row yet is a normal, expected state (fetch returns
+// null, and the page shows an empty form).
+// ------------------------------------------------------------
+export async function fetchBusinessProfile(): Promise<BusinessProfile | null> {
+  const { data, error } = await requireClient()
+    .from("business_profile")
+    .select("name, address, phone, email, tax_id, logo_data_url")
+    .eq("id", 1)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+  return {
+    name: data.name ?? "",
+    address: data.address ?? "",
+    phone: data.phone ?? "",
+    email: data.email ?? "",
+    taxId: data.tax_id ?? "",
+    logoDataUrl: data.logo_data_url ?? null,
+  };
+}
+
+export async function saveBusinessProfile(profile: BusinessProfile): Promise<void> {
+  const { error } = await requireClient().from("business_profile").upsert({
+    id: 1,
+    name: profile.name || null,
+    address: profile.address || null,
+    phone: profile.phone || null,
+    email: profile.email || null,
+    tax_id: profile.taxId || null,
+    logo_data_url: profile.logoDataUrl || null,
   });
   if (error) throw error;
 }
