@@ -252,6 +252,20 @@ export interface IngestionLog {
 }
 
 // ============================================================
+// Business Profile — the company's own letterhead info, shown on
+// printed/emailed purchase orders. A single settings row (not part
+// of AppDatabase — fetched on demand by the pages that need it).
+// ============================================================
+export interface BusinessProfile {
+  name: string;
+  address: string;
+  phone: string;
+  email: string;
+  taxId: string;
+  logoDataUrl: string | null;
+}
+
+// ============================================================
 // The full app database shape persisted to LocalStorage
 // ============================================================
 export interface AppDatabase {
