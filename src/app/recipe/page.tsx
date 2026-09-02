@@ -4,7 +4,7 @@ import { useLanguage } from "@/lib/context";
 import { PageHeader, Badge, Modal } from "@/components/shared";
 import type { Recipe, RecipeIngredient } from "@/lib/types";
 import * as db from "@/lib/supabaseData";
-import { parseSpreadsheetFile, rowsToObjects, pick, exportRowsToExcel, exportSheetsToExcel } from "@/lib/csv";
+import { parseSpreadsheetFile, rowsToObjects, pick, exportRowsToExcel, exportRecipeFormsPretty, type PrettyRecipeSheet } from "@/lib/csv";
 
 const ALLERGEN_LIST = ["gluten","dairy","eggs","fish","shellfish","nuts","peanuts","soy","sesame","celery","mustard","lupin","molluscs","sulphites"];
 
@@ -458,69 +458,69 @@ export default function RecipePage() {
     exportRowsToExcel(rows, filename, locale === "gr" ? "Συνταγές" : "Recipes");
   }
 
-  // Χτίζει τις γραμμές ΜΙΑΣ συνταγής με ακριβώς την ίδια δομή/σειρά
-  // πληροφορίας που έχει η φόρμα συνταγής (στοιχεία, αλλεργιογόνα,
-  // τεχνικός οδηγός, πίνακας υλικών, κοστολόγηση) -- για το φύλλο της
-  // στη μαζική εξαγωγή "Εξαγωγή Φορμών".
-  function buildRecipeFormRows(r: Recipe): (string | number)[][] {
+  // Χτίζει το "όμορφο" φύλλο ΜΙΑΣ συνταγής (τίτλος, κουτί στοιχείων,
+  // πίνακας υλικών, κοστολόγηση, τεχνικός οδηγός) για τη μαζική εξαγωγή
+  // "Εξαγωγή Φορμών" -- έτοιμο να τυπωθεί και να δοθεί σε μάγειρα.
+  function buildPrettyRecipeSheet(r: Recipe, idx: number): PrettyRecipeSheet {
     const gr = locale === "gr";
     const portions = Number(r.portionYield || 1) || 1;
-    const rows: (string | number)[][] = [];
-    rows.push([gr ? "Συνταγή" : "Recipe", r.name]);
-    if (r.nameEn) rows.push([gr ? "Αγγλικό Όνομα" : "English Name", r.nameEn]);
-    rows.push([gr ? "Μερίδες" : "Portions", Number(r.portionYield || 0), r.portionUnit]);
-    rows.push([gr ? "Κόστος Εργασίας" : "Labor Cost", Number(r.laborCost || 0)]);
-    rows.push([gr ? "Γενικά Έξοδα" : "Overhead Cost", Number(r.overheadCost || 0)]);
-    rows.push([gr ? "Περιθώριο Κέρδους %" : "Profit Margin %", Number(r.profitMarginPercent || 0)]);
-    rows.push([gr ? "Θερμίδες / Μερίδα" : "Calories / Portion", Number(r.caloriesPerPortion || 0)]);
-    rows.push([gr ? "Γραμμάρια / Μερίδα" : "Grams / Portion", Number(r.gramsPerPortion || 0)]);
     let allergens: string[] = [];
     try {
       allergens = typeof r.allergens === "string" ? JSON.parse(r.allergens || "[]") : ((r.allergens as unknown as string[]) || []);
     } catch {
       allergens = [];
     }
-    rows.push([gr ? "Αλλεργιογόνα" : "Allergens", allergens.join(", ")]);
-    rows.push([]);
-    if (r.technicalGuide) {
-      rows.push([gr ? "Τεχνικός Οδηγός" : "Technical Guide"]);
-      for (const line of r.technicalGuide.split("\n")) rows.push([line]);
-      rows.push([]);
-    }
-    rows.push([
-      "#", gr ? "Υλικό" : "Ingredient", gr ? "Ποσότητα" : "Quantity", gr ? "Μονάδα" : "Unit",
-      gr ? "Τιμή Μερίδας" : "Portion Price", gr ? "Σύνολο" : "Total",
-    ]);
-    (r.ingredients || []).forEach((item, i) => {
-      rows.push([
-        i + 1, item.ingredientName, Number(item.quantity || 0), item.unit,
-        Number((Number(item.totalCost || 0) / portions).toFixed(3)), Number(item.totalCost || 0),
-      ]);
-    });
-    rows.push([]);
-    rows.push([gr ? "Κόστος Υλικών" : "Raw Material Cost", Number(r.totalRawMaterialCost || 0)]);
-    rows.push([gr ? "Συνολικό Κόστος" : "Total Cost", Number(r.totalCost || 0)]);
-    rows.push([gr ? "Τιμή Πώλησης" : "Selling Price", Number(r.sellingPrice || 0)]);
-    rows.push([gr ? "Τιμή Μενού (ΦΠΑ)" : "Menu Price (VAT)", Number(r.menuPriceVat || 0)]);
-    return rows;
+    return {
+      sheetName: r.name || (gr ? `Συνταγή ${idx + 1}` : `Recipe ${idx + 1}`),
+      title: r.name || (gr ? `Συνταγή ${idx + 1}` : `Recipe ${idx + 1}`),
+      subtitle: r.nameEn || undefined,
+      infoPairs: [
+        { label: gr ? "Μερίδες" : "Portions", value: `${Number(r.portionYield || 0)} ${r.portionUnit}` },
+        { label: gr ? "Θερμίδες / Μερίδα" : "Calories / Portion", value: Number(r.caloriesPerPortion || 0) },
+        { label: gr ? "Γραμμάρια / Μερίδα" : "Grams / Portion", value: `${Number(r.gramsPerPortion || 0)} g` },
+        { label: gr ? "Κόστος Εργασίας" : "Labor Cost", value: `€${Number(r.laborCost || 0).toFixed(2)}` },
+        { label: gr ? "Γενικά Έξοδα" : "Overhead Cost", value: `€${Number(r.overheadCost || 0).toFixed(2)}` },
+        { label: gr ? "Περιθώριο Κέρδους %" : "Profit Margin %", value: `${Number(r.profitMarginPercent || 0)}%` },
+      ],
+      allergensLine: allergens.length ? `${gr ? "Αλλεργιογόνα" : "Allergens"}: ${allergens.join(", ")}` : undefined,
+      ingredientRows: (r.ingredients || []).map((item) => ({
+        name: item.ingredientName,
+        quantity: Number(item.quantity || 0),
+        unit: item.unit,
+        portionPrice: `€${(Number(item.totalCost || 0) / portions).toFixed(3)}`,
+        total: `€${Number(item.totalCost || 0).toFixed(2)}`,
+      })),
+      costingPairs: [
+        { label: gr ? "Κόστος Υλικών" : "Raw Material Cost", value: `€${Number(r.totalRawMaterialCost || 0).toFixed(2)}` },
+        { label: gr ? "Συνολικό Κόστος" : "Total Cost", value: `€${Number(r.totalCost || 0).toFixed(2)}` },
+        { label: gr ? "Τιμή Πώλησης" : "Selling Price", value: `€${Number(r.sellingPrice || 0).toFixed(2)}` },
+        { label: gr ? "Τιμή Μενού (ΦΠΑ)" : "Menu Price (VAT)", value: `€${Number(r.menuPriceVat || 0).toFixed(2)}` },
+      ],
+      technicalGuide: r.technicalGuide || undefined,
+    };
   }
 
-  // Μαζική εξαγωγή -- μία ΠΛΗΡΗΣ φόρμα συνταγής ανά φύλλο Excel, για τις
-  // επιλεγμένες συνταγές (ή όλες, αν καμία δεν είναι επιλεγμένη).
-  function exportRecipesFormsToExcel() {
+  // Μαζική εξαγωγή -- μία ΠΛΗΡΗΣ, όμορφη φόρμα συνταγής ανά φύλλο Excel
+  // (έτοιμη για εκτύπωση), για τις επιλεγμένες συνταγές (ή όλες, αν
+  // καμία δεν είναι επιλεγμένη).
+  async function exportRecipesFormsToExcel() {
     const toExport = selectedIds.size > 0 ? recipes.filter((r) => selectedIds.has(r.id)) : recipes;
     if (toExport.length === 0) return;
-    const usedNames = new Set<string>();
-    const sheets = toExport.map((r, idx) => {
-      let base = (r.name || (locale === "gr" ? `Συνταγή ${idx + 1}` : `Recipe ${idx + 1}`)).replace(/[\\/*?:[\]]/g, " ").trim().slice(0, 28) || `Sheet ${idx + 1}`;
-      let name = base;
-      let n = 2;
-      while (usedNames.has(name)) { name = `${base} ${n}`; n++; }
-      usedNames.add(name);
-      return { name, rows: buildRecipeFormRows(r) };
-    });
+    const sheets = toExport.map((r, idx) => buildPrettyRecipeSheet(r, idx));
     const filename = locale === "gr" ? "συνταγές-φόρμες" : "recipe-forms";
-    exportSheetsToExcel(sheets, filename);
+    try {
+      await exportRecipeFormsPretty(sheets, filename, {
+        num: "#",
+        ingredient: locale === "gr" ? "Υλικό" : "Ingredient",
+        quantity: locale === "gr" ? "Ποσότητα" : "Quantity",
+        unit: locale === "gr" ? "Μονάδα" : "Unit",
+        portionPrice: locale === "gr" ? "Τιμή Μερίδας" : "Portion Price",
+        total: locale === "gr" ? "Σύνολο" : "Total",
+        technicalGuideTitle: locale === "gr" ? "Τεχνικός Οδηγός" : "Technical Guide",
+      });
+    } catch (err) {
+      alert(locale === "gr" ? "Αποτυχία εξαγωγής: " + String(err) : "Export failed: " + String(err));
+    }
   }
 
   function openForEdit(r: Recipe) {
@@ -921,7 +921,7 @@ export default function RecipePage() {
                       <th>#</th>
                       <th className="min-w-[220px]">{t("fieldProduct")}</th>
                       <th className="min-w-[160px]">{t("fieldQuantity")}</th>
-                      <th>{t("fieldUnit")}</th>
+                      <th className="min-w-[80px]">{t("fieldUnit")}</th>
                       <th>{locale === "gr" ? "Τιμή Μερίδας" : "Portion Price"}</th>
                       <th>{locale === "gr" ? `Ποσότητα (${targetPortions || 0} μερ.)` : `Qty (${targetPortions || 0} ptn)`}</th>
                       <th>{locale === "gr" ? `Κόστος (${targetPortions || 0} μερ.)` : `Cost (${targetPortions || 0} ptn)`}</th>
@@ -942,30 +942,29 @@ export default function RecipePage() {
                           <td className="text-xs text-slate-400">{i + 1}</td>
                           <td className="min-w-[220px] font-medium">{item.ingredientName}</td>
                           <td>
-                            <div className="flex items-center gap-1 flex-nowrap">
-                              <input
-                                key={displayUnit}
-                                type="number" defaultValue={dispQty}
-                                onBlur={(e) => {
-                                  const displayVal = Number(e.target.value);
-                                  const baseVal = toggleable ? convertQty(displayVal, displayUnit, item.unit) : displayVal;
-                                  updateIngredientRow(item.id, "quantity", Number(baseVal.toFixed(4)));
-                                }}
-                                className="erp-input text-xs py-1 w-24 flex-shrink-0" style={{ minWidth: "6rem" }} step="0.001"
-                              />
-                              {toggleable && (
-                                <select
-                                  value={displayUnit}
-                                  onChange={(e) => setRowUnitDisplay(prev => ({ ...prev, [item.id]: e.target.value as "kg" | "g" }))}
-                                  className="erp-input text-xs py-1 w-16 flex-shrink-0"
-                                >
-                                  <option value="kg">kg</option>
-                                  <option value="g">g</option>
-                                </select>
-                              )}
-                            </div>
+                            <input
+                              key={displayUnit}
+                              type="number" defaultValue={dispQty}
+                              onBlur={(e) => {
+                                const displayVal = Number(e.target.value);
+                                const baseVal = toggleable ? convertQty(displayVal, displayUnit, item.unit) : displayVal;
+                                updateIngredientRow(item.id, "quantity", Number(baseVal.toFixed(4)));
+                              }}
+                              className="erp-input text-xs py-1 w-24" style={{ minWidth: "6rem" }} step="0.001"
+                            />
                           </td>
-                          <td>{displayUnit}</td>
+                          <td>
+                            {toggleable ? (
+                              <select
+                                value={displayUnit}
+                                onChange={(e) => setRowUnitDisplay(prev => ({ ...prev, [item.id]: e.target.value as "kg" | "g" }))}
+                                className="erp-input text-xs py-1 w-16"
+                              >
+                                <option value="kg">kg</option>
+                                <option value="g">g</option>
+                              </select>
+                            ) : displayUnit}
+                          </td>
                           <td>€{pricePerPortion(item).toFixed(3)}</td>
                           <td>{dispBatchQty.toFixed(toggleable && displayUnit === "g" ? 0 : 3)} {displayUnit}</td>
                           <td className="font-semibold">€{batchPrice(item).toFixed(2)}</td>
