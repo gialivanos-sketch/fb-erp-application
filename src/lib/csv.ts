@@ -11,6 +11,7 @@
 //    identically regardless of which file type was uploaded.
 // ============================================================
 import * as XLSX from "xlsx";
+import { Workbook } from "exceljs";
 
 export interface ParsedTable {
   headers: string[];
@@ -237,4 +238,193 @@ export function exportSheetsToExcel(sheets: { name: string; rows: (string | numb
     XLSX.utils.book_append_sheet(workbook, worksheet, name);
   }
   XLSX.writeFile(workbook, filename.endsWith(".xlsx") ? filename : `${filename}.xlsx`);
+}
+
+// ============================================================
+// "Όμορφη" (τυπωμένη) εξαγωγή φόρμας συνταγής -- χρησιμοποιεί το
+// exceljs αντί για το xlsx (SheetJS), επειδή το SheetJS δεν
+// υποστηρίζει στυλ κελιών (μπόλντ, χρώματα, περιθώρια) στη δωρεάν
+// έκδοσή του. Στόχος: κάθε φύλλο να μοιάζει με πραγματική κάρτα
+// συνταγής, έτοιμη να τυπωθεί και να δοθεί σε μάγειρα -- τίτλος,
+// κουτί με τα βασικά στοιχεία, πίνακας υλικών με έγχρωμη κεφαλίδα
+// και ζέβρα-γραμμές, κοστολόγηση, και τεχνικός οδηγός.
+// ============================================================
+export interface PrettyRecipeSheet {
+  sheetName: string;
+  title: string;
+  subtitle?: string;
+  infoPairs: { label: string; value: string | number }[];
+  allergensLine?: string;
+  ingredientRows: { name: string; quantity: number; unit: string; portionPrice: string; total: string }[];
+  costingPairs: { label: string; value: string }[];
+  technicalGuide?: string;
+}
+
+export interface PrettyRecipeLabels {
+  num: string;
+  ingredient: string;
+  quantity: string;
+  unit: string;
+  portionPrice: string;
+  total: string;
+  technicalGuideTitle: string;
+}
+
+const HEADER_FILL = "FF334155"; // slate-700
+const LABEL_FILL = "FFF1F5F9"; // slate-100
+const ZEBRA_FILL = "FFF8FAFC"; // slate-50
+const ALLERGEN_COLOR = "FFB91C1C"; // red-700
+
+export async function exportRecipeFormsPretty(
+  sheets: PrettyRecipeSheet[],
+  filename: string,
+  labels: PrettyRecipeLabels
+): Promise<void> {
+  const workbook = new Workbook();
+  workbook.creator = "F&B ERP";
+  const usedNames = new Set<string>();
+
+  for (const s of sheets) {
+    let base = s.sheetName.replace(/[\\/*?:[\]]/g, " ").trim().slice(0, 28) || "Sheet";
+    let name = base;
+    let n = 2;
+    while (usedNames.has(name)) {
+      name = `${base.slice(0, 25)} ${n}`;
+      n++;
+    }
+    usedNames.add(name);
+
+    const sheet = workbook.addWorksheet(name, {
+      views: [{ showGridLines: false }],
+      pageSetup: { orientation: "portrait", paperSize: 9, fitToPage: true, fitToWidth: 1, fitToHeight: 0 },
+    });
+    sheet.columns = [
+      { width: 5 }, { width: 30 }, { width: 12 }, { width: 9 }, { width: 14 }, { width: 12 },
+    ];
+
+    let row = 1;
+
+    // Τίτλος -- σκούρη ζώνη σαν letterhead
+    sheet.mergeCells(`A${row}:F${row}`);
+    const titleCell = sheet.getCell(`A${row}`);
+    titleCell.value = s.title;
+    titleCell.font = { size: 18, bold: true, color: { argb: "FFFFFFFF" } };
+    titleCell.alignment = { horizontal: "center", vertical: "middle" };
+    titleCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: HEADER_FILL } };
+    sheet.getRow(row).height = 30;
+    row++;
+
+    if (s.subtitle) {
+      sheet.mergeCells(`A${row}:F${row}`);
+      const subCell = sheet.getCell(`A${row}`);
+      subCell.value = s.subtitle;
+      subCell.font = { italic: true, size: 11, color: { argb: "FF64748B" } };
+      subCell.alignment = { horizontal: "center" };
+      row++;
+    }
+    row++;
+
+    // Κουτί βασικών στοιχείων -- 3 ζεύγη ετικέτα/τιμή ανά γραμμή
+    for (let i = 0; i < s.infoPairs.length; i += 3) {
+      const triple = s.infoPairs.slice(i, i + 3);
+      const cols: [string, string][] = [["A", "B"], ["C", "D"], ["E", "F"]];
+      triple.forEach((pair, idx) => {
+        const [labelCol, valueCol] = cols[idx];
+        const labelCell = sheet.getCell(`${labelCol}${row}`);
+        labelCell.value = pair.label;
+        labelCell.font = { bold: true, size: 9, color: { argb: "FF475569" } };
+        labelCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: LABEL_FILL } };
+        labelCell.alignment = { vertical: "middle" };
+        const valueCell = sheet.getCell(`${valueCol}${row}`);
+        valueCell.value = pair.value;
+        valueCell.font = { bold: true, size: 11 };
+        valueCell.alignment = { vertical: "middle" };
+      });
+      row++;
+    }
+    row++;
+
+    if (s.allergensLine) {
+      sheet.mergeCells(`A${row}:F${row}`);
+      const c = sheet.getCell(`A${row}`);
+      c.value = s.allergensLine;
+      c.font = { italic: true, bold: true, color: { argb: ALLERGEN_COLOR } };
+      row += 2;
+    }
+
+    // Πίνακας υλικών
+    const headerLabels = [labels.num, labels.ingredient, labels.quantity, labels.unit, labels.portionPrice, labels.total];
+    const headerRow = sheet.getRow(row);
+    headerLabels.forEach((h, i) => {
+      const cell = headerRow.getCell(i + 1);
+      cell.value = h;
+      cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: HEADER_FILL } };
+      cell.alignment = { horizontal: "center", vertical: "middle" };
+      cell.border = { top: { style: "thin" }, bottom: { style: "thin" }, left: { style: "thin" }, right: { style: "thin" } };
+    });
+    headerRow.height = 20;
+    row++;
+
+    s.ingredientRows.forEach((item, i) => {
+      const dataRow = sheet.getRow(row);
+      const values: (string | number)[] = [i + 1, item.name, item.quantity, item.unit, item.portionPrice, item.total];
+      values.forEach((v, ci) => {
+        const cell = dataRow.getCell(ci + 1);
+        cell.value = v;
+        cell.border = { top: { style: "hair" }, bottom: { style: "hair" }, left: { style: "hair" }, right: { style: "hair" } };
+        cell.alignment = { horizontal: ci >= 2 ? "right" : ci === 0 ? "center" : "left", vertical: "middle" };
+        if (i % 2 === 1) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: ZEBRA_FILL } };
+      });
+      row++;
+    });
+    row += 2;
+
+    // Κοστολόγηση -- ίδιο στυλ ζεύγους με το κουτί βασικών στοιχείων
+    for (let i = 0; i < s.costingPairs.length; i += 3) {
+      const triple = s.costingPairs.slice(i, i + 3);
+      const cols: [string, string][] = [["A", "B"], ["C", "D"], ["E", "F"]];
+      triple.forEach((pair, idx) => {
+        const [labelCol, valueCol] = cols[idx];
+        const labelCell = sheet.getCell(`${labelCol}${row}`);
+        labelCell.value = pair.label;
+        labelCell.font = { bold: true, size: 9, color: { argb: "FF475569" } };
+        labelCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: LABEL_FILL } };
+        const valueCell = sheet.getCell(`${valueCol}${row}`);
+        valueCell.value = pair.value;
+        valueCell.font = { bold: true, size: 11, color: { argb: "FF15803D" } };
+      });
+      row++;
+    }
+    row++;
+
+    // Τεχνικός οδηγός -- μία γραμμή ανά σειρά κειμένου, ώστε να
+    // εκτυπώνεται καθαρά χωρίς να βασιζόμαστε στο auto-height.
+    if (s.technicalGuide) {
+      sheet.mergeCells(`A${row}:F${row}`);
+      const titleCell2 = sheet.getCell(`A${row}`);
+      titleCell2.value = labels.technicalGuideTitle;
+      titleCell2.font = { bold: true, size: 12 };
+      titleCell2.border = { bottom: { style: "thin" } };
+      row++;
+      for (const line of s.technicalGuide.split("\n")) {
+        sheet.mergeCells(`A${row}:F${row}`);
+        const lineCell = sheet.getCell(`A${row}`);
+        lineCell.value = line;
+        lineCell.alignment = { wrapText: true, vertical: "top" };
+        row++;
+      }
+    }
+  }
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename.endsWith(".xlsx") ? filename : `${filename}.xlsx`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
