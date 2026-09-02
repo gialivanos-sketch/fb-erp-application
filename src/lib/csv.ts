@@ -324,22 +324,21 @@ export async function exportRecipeFormsPretty(
     }
     row++;
 
-    // Κουτί βασικών στοιχείων -- 3 ζεύγη ετικέτα/τιμή ανά γραμμή
-    for (let i = 0; i < s.infoPairs.length; i += 3) {
-      const triple = s.infoPairs.slice(i, i + 3);
-      const cols: [string, string][] = [["A", "B"], ["C", "D"], ["E", "F"]];
-      triple.forEach((pair, idx) => {
-        const [labelCol, valueCol] = cols[idx];
-        const labelCell = sheet.getCell(`${labelCol}${row}`);
-        labelCell.value = pair.label;
-        labelCell.font = { bold: true, size: 9, color: { argb: "FF475569" } };
-        labelCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: LABEL_FILL } };
-        labelCell.alignment = { vertical: "middle" };
-        const valueCell = sheet.getCell(`${valueCol}${row}`);
-        valueCell.value = pair.value;
-        valueCell.font = { bold: true, size: 11 };
-        valueCell.alignment = { vertical: "middle" };
-      });
+    // Κουτί βασικών στοιχείων -- ΜΙΑ ετικέτα/τιμή ανά γραμμή, με merge
+    // (ετικέτα σε A:C, τιμή σε D:F), ώστε να μη κόβεται ποτέ το κείμενο
+    // ανεξάρτητα από το πλάτος της κάθε στήλης.
+    for (const pair of s.infoPairs) {
+      sheet.mergeCells(`A${row}:C${row}`);
+      const labelCell = sheet.getCell(`A${row}`);
+      labelCell.value = pair.label;
+      labelCell.font = { bold: true, size: 10, color: { argb: "FF475569" } };
+      labelCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: LABEL_FILL } };
+      labelCell.alignment = { vertical: "middle" };
+      sheet.mergeCells(`D${row}:F${row}`);
+      const valueCell = sheet.getCell(`D${row}`);
+      valueCell.value = pair.value;
+      valueCell.font = { bold: true, size: 11 };
+      valueCell.alignment = { vertical: "middle" };
       row++;
     }
     row++;
@@ -380,20 +379,18 @@ export async function exportRecipeFormsPretty(
     });
     row += 2;
 
-    // Κοστολόγηση -- ίδιο στυλ ζεύγους με το κουτί βασικών στοιχείων
-    for (let i = 0; i < s.costingPairs.length; i += 3) {
-      const triple = s.costingPairs.slice(i, i + 3);
-      const cols: [string, string][] = [["A", "B"], ["C", "D"], ["E", "F"]];
-      triple.forEach((pair, idx) => {
-        const [labelCol, valueCol] = cols[idx];
-        const labelCell = sheet.getCell(`${labelCol}${row}`);
-        labelCell.value = pair.label;
-        labelCell.font = { bold: true, size: 9, color: { argb: "FF475569" } };
-        labelCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: LABEL_FILL } };
-        const valueCell = sheet.getCell(`${valueCol}${row}`);
-        valueCell.value = pair.value;
-        valueCell.font = { bold: true, size: 11, color: { argb: "FF15803D" } };
-      });
+    // Κοστολόγηση -- ίδιο στυλ (μία γραμμή ανά ζεύγος, με merge) με το
+    // κουτί βασικών στοιχείων.
+    for (const pair of s.costingPairs) {
+      sheet.mergeCells(`A${row}:C${row}`);
+      const labelCell = sheet.getCell(`A${row}`);
+      labelCell.value = pair.label;
+      labelCell.font = { bold: true, size: 10, color: { argb: "FF475569" } };
+      labelCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: LABEL_FILL } };
+      sheet.mergeCells(`D${row}:F${row}`);
+      const valueCell = sheet.getCell(`D${row}`);
+      valueCell.value = pair.value;
+      valueCell.font = { bold: true, size: 11, color: { argb: "FF15803D" } };
       row++;
     }
     row++;
