@@ -7,6 +7,7 @@ import { RoleGuard } from "./RoleGuard";
 
 const procurementLinks = [
   { key: "navSupplierQuotes", href: "/supplier-quotes", icon: "📊" },
+  { key: "navSkuMapping", href: "/sku-mapping", icon: "🏷️" },
   { key: "navDraftOrder", href: "/draft-order", icon: "📝" },
   { key: "navSupplierCRM", href: "/supplier-crm", icon: "🏢" },
   { key: "navPayments", href: "/payments", icon: "💳" },
@@ -17,7 +18,6 @@ const procurementLinks = [
 ];
 
 const kitchenLinks = [
-  { key: "navIngredients", href: "/ingredients", icon: "🥘" },
   { key: "navRecipe", href: "/recipe", icon: "👨‍🍳" },
   { key: "navRecipeIngredients", href: "/recipe-ingredients", icon: "🧂" },
   { key: "navRecipeCosting", href: "/recipe-costing", icon: "💰" },
