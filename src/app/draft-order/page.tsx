@@ -3,18 +3,20 @@ import { useState, useMemo, useRef, useEffect } from "react";
 import { useApp } from "@/lib/context";
 import { PageHeader, Badge, KpiCard } from "@/components/shared";
 import * as db from "@/lib/supabaseData";
-import type { SupplierProduct } from "@/lib/types";
+import type { SupplierProduct, BusinessProfile } from "@/lib/types";
 
-// Business (buyer) letterhead info shown on the printed order form.
-// Left blank for now — a future "Προφίλ → Καρτέλα Επιχείρησης" settings
-// page will let the user fill these in and they'll be read from there
-// instead of hardcoded here.
-const BUSINESS_INFO = {
+// Business (buyer) letterhead info shown on the printed order form and
+// in the "Αποστολή Email" body. Filled in from the "Προφίλ → Καρτέλα
+// Επιχείρησης" settings page (src/app/profile/page.tsx) — this is just
+// the empty fallback shown before that page's data has loaded (or if
+// the business profile hasn't been filled in yet).
+const EMPTY_BUSINESS_INFO: BusinessProfile = {
   name: "",
   address: "",
   phone: "",
   email: "",
   taxId: "",
+  logoDataUrl: null,
 };
 
 interface OrderItemDraft {
@@ -63,6 +65,25 @@ export default function DraftOrderPage() {
   const [viewBySupplier, setViewBySupplier] = useState(false);
   // Saved message
   const [savedMsg, setSavedMsg] = useState("");
+
+  // Business (buyer) letterhead info — loaded once from the
+  // business_profile settings row (filled in via Profile → Business
+  // Card). Falls back to blank until it loads, same as before.
+  const [businessProfile, setBusinessProfile] = useState<BusinessProfile>(EMPTY_BUSINESS_INFO);
+  useEffect(() => {
+    let cancelled = false;
+    db.fetchBusinessProfile()
+      .then((profile) => {
+        if (!cancelled && profile) setBusinessProfile(profile);
+      })
+      .catch(() => {
+        // No business profile saved yet, or Supabase not configured —
+        // keep showing the blank fallback rather than blocking the page.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // ---- "Μηχανή Αναζήτησης SKU": live cross-supplier lookup dropdown ----
   // Now a real Postgres full-text query (see searchSupplierProducts in
@@ -471,9 +492,9 @@ export default function DraftOrderPage() {
           bodyLines.push(locale === "gr" ? "ΔΕΛΤΙΟ ΠΑΡΑΓΓΕΛΙΑΣ" : "PURCHASE ORDER");
           bodyLines.push(RULE);
           bodyLines.push("");
-          if (BUSINESS_INFO.name) bodyLines.push(BUSINESS_INFO.name);
-          if (BUSINESS_INFO.address) bodyLines.push(BUSINESS_INFO.address);
-          const businessContactLine = [BUSINESS_INFO.phone, BUSINESS_INFO.email, BUSINESS_INFO.taxId ? `ΑΦΜ: ${BUSINESS_INFO.taxId}` : ""].filter(Boolean).join("  •  ");
+          if (businessProfile.name) bodyLines.push(businessProfile.name);
+          if (businessProfile.address) bodyLines.push(businessProfile.address);
+          const businessContactLine = [businessProfile.phone, businessProfile.email, businessProfile.taxId ? `ΑΦΜ: ${businessProfile.taxId}` : ""].filter(Boolean).join("  •  ");
           if (businessContactLine) bodyLines.push(businessContactLine);
           bodyLines.push("");
           bodyLines.push((locale === "gr" ? "Αρ. Παραγγελίας" : "Order No.") + `: ${orderNum}`);
@@ -533,16 +554,26 @@ export default function DraftOrderPage() {
         <div style={{ fontFamily: "Arial, sans-serif", color: "#1e293b", padding: "8px" }}>
           {/* Letterhead: buyer info (left) + document title & order meta (right) */}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", borderBottom: "3px solid #1e293b", paddingBottom: "12px", marginBottom: "16px" }}>
-            <div>
-              <div style={{ fontSize: "20px", fontWeight: 700 }}>
-                {BUSINESS_INFO.name || (locale === "gr" ? "[Επωνυμία Επιχείρησης]" : "[Business Name]")}
-              </div>
-              {BUSINESS_INFO.address && <div style={{ fontSize: "11px", color: "#64748b" }}>{BUSINESS_INFO.address}</div>}
-              {(BUSINESS_INFO.phone || BUSINESS_INFO.email || BUSINESS_INFO.taxId) && (
-                <div style={{ fontSize: "11px", color: "#64748b" }}>
-                  {[BUSINESS_INFO.phone, BUSINESS_INFO.email, BUSINESS_INFO.taxId ? `ΑΦΜ: ${BUSINESS_INFO.taxId}` : ""].filter(Boolean).join("  •  ")}
-                </div>
+            <div style={{ display: "flex", alignItems: "flex-start", gap: "12px" }}>
+              {businessProfile.logoDataUrl && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={businessProfile.logoDataUrl}
+                  alt=""
+                  style={{ maxHeight: "56px", maxWidth: "110px", objectFit: "contain" }}
+                />
               )}
+              <div>
+                <div style={{ fontSize: "20px", fontWeight: 700 }}>
+                  {businessProfile.name || (locale === "gr" ? "[Επωνυμία Επιχείρησης]" : "[Business Name]")}
+                </div>
+                {businessProfile.address && <div style={{ fontSize: "11px", color: "#64748b" }}>{businessProfile.address}</div>}
+                {(businessProfile.phone || businessProfile.email || businessProfile.taxId) && (
+                  <div style={{ fontSize: "11px", color: "#64748b" }}>
+                    {[businessProfile.phone, businessProfile.email, businessProfile.taxId ? `ΑΦΜ: ${businessProfile.taxId}` : ""].filter(Boolean).join("  •  ")}
+                  </div>
+                )}
+              </div>
             </div>
             <div style={{ textAlign: "right" }}>
               <div style={{ fontSize: "18px", fontWeight: 700 }}>
