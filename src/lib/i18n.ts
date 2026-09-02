@@ -229,6 +229,7 @@ export const translations: Record<string, { gr: string; en: string }> = {
 
   // User Management & Access Control
   navUserManagement: { gr: "Διαχείριση Χρηστών", en: "User Management" },
+  navBusinessProfile: { gr: "Καρτέλα Επιχείρησης", en: "Business Profile" },
   sectionAdmin: { gr: "ΔΙΑΧΕΙΡΙΣΗ", en: "ADMINISTRATION" },
   headerUserManagement: { gr: "Διαχείριση Χρηστών & Ρόλων", en: "User & Role Management" },
   headerExcelIngestion: { gr: "Εισαγωγή Δεδομένων Excel", en: "Excel Data Ingestion" },
