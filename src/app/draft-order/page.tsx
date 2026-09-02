@@ -294,21 +294,22 @@ export default function DraftOrderPage() {
                   autoComplete="off"
                 />
                 {showLookup && (
-                  <div className="absolute z-30 mt-1 w-[min(90vw,640px)] max-h-96 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-2xl">
-                    <div className="px-3 py-2 bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                  <div className="absolute z-30 mt-1 w-[min(95vw,760px)] max-h-[28rem] overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-2xl">
+                    <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-200 text-sm font-semibold text-slate-500 uppercase tracking-wide">
                       {lookupLoading
                         ? (locale === "gr" ? "Αναζήτηση…" : "Searching…")
                         : locale === "gr"
                           ? `${effectiveResults.length} προσφορές — ταξινομημένες από χαμηλότερη τιμή`
                           : `${effectiveResults.length} matching offers — sorted by lowest price`}
                     </div>
-                    <table className="w-full text-xs">
+                    <table className="w-full text-sm">
                       <thead>
-                        <tr className="text-slate-400 text-left border-b border-slate-100">
-                          <th className="px-3 py-1.5 font-medium">{t("fieldSupplier")}</th>
-                          <th className="px-3 py-1.5 font-medium">{locale === "gr" ? "Τιμή" : "Price"}</th>
-                          <th className="px-3 py-1.5 font-medium">{t("fieldQualityGrade")}</th>
-                          <th className="px-3 py-1.5 font-medium">{t("fieldRegion")}</th>
+                        <tr className="text-slate-400 text-left border-b border-slate-100 text-xs uppercase tracking-wide">
+                          <th className="px-4 py-2 font-semibold">{t("fieldProduct")}</th>
+                          <th className="px-4 py-2 font-semibold">{t("fieldSupplier")}</th>
+                          <th className="px-4 py-2 font-semibold">{locale === "gr" ? "Τιμή" : "Price"}</th>
+                          <th className="px-4 py-2 font-semibold">{t("fieldQualityGrade")}</th>
+                          <th className="px-4 py-2 font-semibold">{t("fieldRegion")}</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -316,22 +317,24 @@ export default function DraftOrderPage() {
                           <tr
                             key={p.id}
                             onClick={() => selectLookupProduct(p)}
-                            className={`cursor-pointer hover:bg-blue-50 border-b border-slate-50 ${idx === 0 ? "bg-emerald-50/60" : ""}`}
+                            className={`cursor-pointer hover:bg-blue-50 border-b border-slate-100 ${idx === 0 ? "bg-emerald-50/60" : ""}`}
                           >
-                            <td className="px-3 py-2">
-                              <div className="font-medium text-slate-700">{locale === "gr" ? p.supplierName : (p.supplierNameEn || p.supplierName)}</div>
-                              <div className="text-slate-400">{locale === "gr" ? p.productName : (p.productNameEn || p.productName)}</div>
+                            <td className="px-4 py-3">
+                              <div className="font-semibold text-slate-800 text-base leading-snug">{locale === "gr" ? p.productName : (p.productNameEn || p.productName)}</div>
                             </td>
-                            <td className="px-3 py-2">
-                              <span className={`font-semibold ${idx === 0 ? "text-emerald-700" : "text-slate-700"}`}>
+                            <td className="px-4 py-3">
+                              <div className="text-slate-600">{locale === "gr" ? p.supplierName : (p.supplierNameEn || p.supplierName)}</div>
+                            </td>
+                            <td className="px-4 py-3">
+                              <span className={`font-bold text-base ${idx === 0 ? "text-emerald-700" : "text-slate-700"}`}>
                                 {fmt(Number(p.basePrice))}/{p.unit}
                               </span>
-                              {idx === 0 && <div><Badge color="green">{t("lowestPrice")}</Badge></div>}
+                              {idx === 0 && <div className="mt-1"><Badge color="green">{t("lowestPrice")}</Badge></div>}
                             </td>
-                            <td className="px-3 py-2">
+                            <td className="px-4 py-3">
                               <Badge color={p.qualityGrade === "Grade A" ? "green" : "amber"}>{p.qualityGrade || "—"}</Badge>
                             </td>
-                            <td className="px-3 py-2 text-slate-500">{p.regionOfOrigin || "—"}</td>
+                            <td className="px-4 py-3 text-slate-500">{p.regionOfOrigin || "—"}</td>
                           </tr>
                         ))}
                       </tbody>
