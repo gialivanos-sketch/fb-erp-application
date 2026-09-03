@@ -11,6 +11,19 @@ interface SkuGroup {
   entries: ProductSkuMapEntry[];
 }
 
+// Αφαιρεί τόνους/διαλυτικά και κάνει κεφαλαία, ώστε η αναζήτηση να
+// ταιριάζει ανεξάρτητα από τόνους (ίδιο helper με τη σελίδα Παραγγελίας
+// Πρόχειρου -- βλέπε src/app/draft-order/page.tsx).
+const GREEK_ACCENT_MAP: Record<string, string> = {
+  "Ά": "Α", "Έ": "Ε", "Ή": "Η", "Ί": "Ι", "Ϊ": "Ι", "Ό": "Ο", "Ύ": "Υ", "Ϋ": "Υ", "Ώ": "Ω",
+  "ά": "α", "έ": "ε", "ή": "η", "ί": "ι", "ϊ": "ι", "ΐ": "ι", "ό": "ο", "ύ": "υ", "ϋ": "υ", "ΰ": "υ", "ώ": "ω",
+};
+function normalizeGreek(s: string): string {
+  let out = "";
+  for (const ch of s) out += GREEK_ACCENT_MAP[ch] ?? ch;
+  return out.toUpperCase();
+}
+
 export default function SkuMappingPage() {
   const { locale, data } = useApp();
   const supplierProducts = data.supplierProducts;
@@ -19,6 +32,7 @@ export default function SkuMappingPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [filterGroup, setFilterGroup] = useState("");
   const [busyId, setBusyId] = useState<number | null>(null);
   const [msg, setMsg] = useState("");
 
@@ -94,21 +108,32 @@ export default function SkuMappingPage() {
   // hundreds of rows x hundreds of SKUs, per-row <select> elements freeze the page).
   const skuLabelToCode = useMemo(() => new Map(skuOptions.map((o) => [o.label, o.sku])), [skuOptions]);
 
+  // Λίστα ομάδων (finalGroup), για το φίλτρο "Ομάδα" -- επιτρέπει να
+  // δεις αμέσως όλα τα SKU μιας συγκεκριμένης ομάδας χωρίς να
+  // πληκτρολογήσεις τίποτα.
+  const groupOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const g of groups) if (g.finalGroup) set.add(g.finalGroup);
+    return Array.from(set).sort((a, b) => a.localeCompare(b, "el"));
+  }, [groups]);
+
   const filteredGroups = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return groups;
-    return groups.filter(
-      (g) =>
-        g.sku.toLowerCase().includes(q) ||
-        g.finalGroup.toLowerCase().includes(q) ||
-        g.entries.some((e) => e.productName.toLowerCase().includes(q))
-    );
-  }, [groups, search]);
+    const q = normalizeGreek(search.trim());
+    return groups.filter((g) => {
+      if (filterGroup && g.finalGroup !== filterGroup) return false;
+      if (!q) return true;
+      return (
+        normalizeGreek(g.sku).includes(q) ||
+        normalizeGreek(g.finalGroup).includes(q) ||
+        g.entries.some((e) => normalizeGreek(e.productName).includes(q))
+      );
+    });
+  }, [groups, search, filterGroup]);
 
   const filteredUnmapped = useMemo(() => {
-    const q = search.trim().toLowerCase();
+    const q = normalizeGreek(search.trim());
     if (!q) return unmappedProducts;
-    return unmappedProducts.filter((n) => n.toLowerCase().includes(q));
+    return unmappedProducts.filter((n) => normalizeGreek(n).includes(q));
   }, [unmappedProducts, search]);
 
   function flash(text: string) {
@@ -290,7 +315,7 @@ export default function SkuMappingPage() {
         <KpiCard label={locale === "gr" ? "Μη Αντιστοιχισμένα" : "Unmapped"} value={unmappedProducts.length} color="amber" icon="❓" />
       </div>
 
-      <FilterBar onClear={() => setSearch("")} clearLabel={locale === "gr" ? "Καθαρισμός" : "Clear"}>
+      <FilterBar onClear={() => { setSearch(""); setFilterGroup(""); }} clearLabel={locale === "gr" ? "Καθαρισμός" : "Clear"}>
         <div>
           <label className="erp-label">{locale === "gr" ? "Αναζήτηση (SKU, ομάδα ή προϊόν)" : "Search (SKU, group, or product)"}</label>
           <input
@@ -300,6 +325,13 @@ export default function SkuMappingPage() {
             className="filter-input"
             placeholder={locale === "gr" ? "π.χ. ντομάτα, SKU-0348..." : "e.g. tomato, SKU-0348..."}
           />
+        </div>
+        <div>
+          <label className="erp-label">{locale === "gr" ? "Ομάδα" : "Group"}</label>
+          <select value={filterGroup} onChange={(e) => setFilterGroup(e.target.value)} className="erp-select">
+            <option value="">{locale === "gr" ? "Όλες οι ομάδες" : "All groups"}</option>
+            {groupOptions.map((g) => <option key={g} value={g}>{g}</option>)}
+          </select>
         </div>
       </FilterBar>
 
