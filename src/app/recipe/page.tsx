@@ -747,7 +747,7 @@ export default function RecipePage() {
         isOpen={editing}
         onClose={() => setEditing(false)}
         title={selectedRecipe ? (locale === "gr" ? "Επεξεργασία Συνταγής" : "Edit Recipe") : (locale === "gr" ? "Νέα Συνταγή" : "New Recipe")}
-        size="2xl"
+        size="full"
       >
         <div id="printable-recipe-area">
           {/* Print CSS — συμπυκνώνει τη συνταγή ώστε να χωράει σε 1
