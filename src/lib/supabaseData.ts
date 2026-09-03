@@ -598,9 +598,26 @@ function mapIngredient(row: {
 }
 
 export async function fetchIngredients(): Promise<Ingredient[]> {
-  const { data, error } = await requireClient().from("ingredients").select("id, sku, name, name_en, current_stock, unit, base_price, conversion_factor, conversion_per_unit, mapped_supplier_product_id, wastage_factor, calories, is_active, created_at").order("name", { ascending: true });
-  if (error) throw error;
-  return (data ?? []).map(mapIngredient);
+  const client = requireClient();
+  // Η Supabase γυρνάει ΤΟ ΠΟΛΥ 1000 γραμμές ανά αίτημα (default) -- με
+  // περισσότερα από 1000 υλικά στο μητρώο (π.χ. 2800+) χρειάζεται
+  // σελιδοποίηση με .range(), αλλιώς λείπουν υλικά τόσο από τη λίστα
+  // στη σελίδα «Υλικά» όσο και από την αναζήτηση κατά τη σύνθεση
+  // συνταγής (ίδιο ζήτημα που είχαμε διορθώσει και για recipe_ingredients).
+  const PAGE_SIZE = 1000;
+  const rows: Parameters<typeof mapIngredient>[0][] = [];
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data, error } = await client
+      .from("ingredients")
+      .select("id, sku, name, name_en, current_stock, unit, base_price, conversion_factor, conversion_per_unit, mapped_supplier_product_id, wastage_factor, calories, is_active, created_at")
+      .order("name", { ascending: true })
+      .range(from, from + PAGE_SIZE - 1);
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+    rows.push(...(data as unknown as Parameters<typeof mapIngredient>[0][]));
+    if (data.length < PAGE_SIZE) break;
+  }
+  return rows.map(mapIngredient);
 }
 
 export interface IngredientCurrentPrice {
