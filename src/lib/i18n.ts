@@ -255,6 +255,27 @@ export const translations: Record<string, { gr: string; en: string }> = {
   ingestionHistory: { gr: "Ιστορικό Εισαγωγών", en: "Ingestion History" },
   confirmRoleChange: { gr: "Αλλαγή ρόλου χρήστη; Οι περιορισμοί πρόσβασης θα εφαρμοστούν άμεσα.", en: "Change user role? Access restrictions apply immediately." },
   loggedInAs: { gr: "Συνδεδεμένος ως", en: "Logged in as" },
+
+  // Φίλτρα + μαζική διαγραφή στη σελίδα Υλικών
+  filterUnit: { gr: "Μονάδα", en: "Unit" },
+  filterAllUnits: { gr: "Όλες οι μονάδες", en: "All units" },
+  filterActiveStatus: { gr: "Κατάσταση", en: "Status" },
+  filterAllStatuses: { gr: "Όλα", en: "All" },
+  filterActiveOnly: { gr: "Μόνο Ενεργά", en: "Active only" },
+  filterInactiveOnly: { gr: "Μόνο Ανενεργά", en: "Inactive only" },
+  filterUsage: { gr: "Χρήση σε Συνταγές", en: "Recipe Usage" },
+  filterUsageAll: { gr: "Όλα", en: "All" },
+  filterUsageUnused: { gr: "Χωρίς χρήση σε συνταγή", en: "Not used in any recipe" },
+  filterUsageUsed: { gr: "Χρησιμοποιούνται", en: "Used in a recipe" },
+  filterZeroPrice: { gr: "Μόνο χωρίς τιμή (€0,00)", en: "Only with no price (€0.00)" },
+  badgeUnused: { gr: "Αχρησιμοποίητο", en: "Unused" },
+  selectAllFiltered: { gr: "Επιλογή όλων (φιλτραρισμένα)", en: "Select all (filtered)" },
+  selectedCount: { gr: "επιλεγμένα", en: "selected" },
+  btnDeleteSelected: { gr: "🗑️ Διαγραφή Επιλεγμένων", en: "🗑️ Delete Selected" },
+  confirmBulkDelete: { gr: "Διαγραφή των επιλεγμένων υλικών; Αν κάποιο χρησιμοποιείται ήδη σε συνταγή, θα παραλειφθεί με ασφάλεια.", en: "Delete the selected ingredients? Any already used in a recipe will be safely skipped." },
+  bulkDeleteResult: { gr: "Διαγράφηκαν", en: "Deleted" },
+  bulkDeleteSkipped: { gr: "παραλείφθηκαν (χρησιμοποιούνται σε συνταγή)", en: "skipped (in use by a recipe)" },
+  showingOf: { gr: "από", en: "of" },
 }
 
 export function t(locale: Locale, key: string): string {
