@@ -8,6 +8,20 @@ import { parseSpreadsheetFile, rowsToObjects, pick, exportRowsToExcel, exportRec
 
 const ALLERGEN_LIST = ["gluten","dairy","eggs","fish","shellfish","nuts","peanuts","soy","sesame","celery","mustard","lupin","molluscs","sulphites"];
 
+// Αφαιρεί τόνους/διαλυτικά και κάνει κεφαλαία, ώστε η αναζήτηση υλικού
+// να ταιριάζει ανεξάρτητα από τόνους (ίδιο helper με τη σελίδα Παραγγελίας
+// Πρόχειρου -- βλέπε src/app/draft-order/page.tsx). Χωρίς αυτό, η
+// αναζήτηση υλικού εδώ έβρισκε μόνο ακριβές ταίριασμα τόνων.
+const GREEK_ACCENT_MAP: Record<string, string> = {
+  "Ά": "Α", "Έ": "Ε", "Ή": "Η", "Ί": "Ι", "Ϊ": "Ι", "Ό": "Ο", "Ύ": "Υ", "Ϋ": "Υ", "Ώ": "Ω",
+  "ά": "α", "έ": "ε", "ή": "η", "ί": "ι", "ϊ": "ι", "ΐ": "ι", "ό": "ο", "ύ": "υ", "ϋ": "υ", "ΰ": "υ", "ώ": "ω",
+};
+function normalizeGreek(s: string): string {
+  let out = "";
+  for (const ch of s) out += GREEK_ACCENT_MAP[ch] ?? ch;
+  return out.toUpperCase();
+}
+
 interface RecipeFormState {
   name: string;
   nameEn: string;
@@ -63,21 +77,36 @@ export default function RecipePage() {
   // ρητού αιτήματος του χρήστη να ακυρωθεί ο χωρισμός σε σελίδες).
   const [ingredientSearchTerm, setIngredientSearchTerm] = useState("");
   const [showIngredientSearch, setShowIngredientSearch] = useState(false);
+  // Φίλτρο μονάδας δίπλα στην αναζήτηση υλικού -- χρήσιμο για να
+  // περιορίσεις γρήγορα ανάμεσα σε >2800 υλικά χωρίς να χρειάζεται να
+  // πληκτρολογήσεις ολόκληρο το όνομα.
+  const [ingredientUnitFilter, setIngredientUnitFilter] = useState("");
   const [savingIngredientRowId, setSavingIngredientRowId] = useState<number | "new" | null>(null);
   const [refreshingPrices, setRefreshingPrices] = useState(false);
   const [priceRefreshMsg, setPriceRefreshMsg] = useState("");
   const ingredientSearchRef = useRef<HTMLDivElement>(null);
 
+  const ingredientUnits = useMemo(() => {
+    const set = new Set<string>();
+    for (const ing of allIngredients) if (ing.unit) set.add(ing.unit);
+    return Array.from(set).sort();
+  }, [allIngredients]);
+
+  // Αναζήτηση ανεξάρτητη τόνων (βλέπε normalizeGreek) -- έτσι
+  // "ΝΤΟΜΑΤΑ" βρίσκει και "ντομάτα" και το αντίστροφο, χωρίς να
+  // χρειάζεται να πληκτρολογηθούν ακριβώς οι ίδιοι τόνοι.
   const ingredientSearchResults = useMemo(() => {
-    const q = ingredientSearchTerm.trim().toLowerCase();
-    if (!q) return [];
+    const q = normalizeGreek(ingredientSearchTerm.trim());
+    if (!q && !ingredientUnitFilter) return [];
     return allIngredients
       .filter((ing) => {
-        const name = (locale === "gr" ? ing.name : (ing.nameEn || ing.name)).toLowerCase();
-        return name.includes(q) || ing.sku.toLowerCase().includes(q);
+        if (ingredientUnitFilter && ing.unit !== ingredientUnitFilter) return false;
+        if (!q) return true;
+        const name = normalizeGreek(locale === "gr" ? ing.name : (ing.nameEn || ing.name));
+        return name.includes(q) || normalizeGreek(ing.sku).includes(q);
       })
-      .slice(0, 20);
-  }, [ingredientSearchTerm, allIngredients, locale]);
+      .slice(0, 30);
+  }, [ingredientSearchTerm, ingredientUnitFilter, allIngredients, locale]);
 
   // Γραμμάρια/μερίδα υπολογισμένα ΑΠΟ τα ίδια τα υλικά της συνταγής
   // (άθροισμα των kg/g υλικών, διά τις μερίδες) — ενημερωτικά, δίπλα
@@ -930,7 +959,16 @@ export default function RecipePage() {
                 {priceRefreshMsg && (
                   <span className="text-xs font-semibold text-emerald-700">{priceRefreshMsg}</span>
                 )}
-                <div className="relative" ref={ingredientSearchRef}>
+                <div className="relative flex items-center gap-1.5" ref={ingredientSearchRef}>
+                  <select
+                    value={ingredientUnitFilter}
+                    onChange={(e) => { setIngredientUnitFilter(e.target.value); setShowIngredientSearch(true); }}
+                    className="erp-select text-xs py-1.5 w-20"
+                    title={t("filterUnit")}
+                  >
+                    <option value="">{locale === "gr" ? "Μονάδα" : "Unit"}</option>
+                    {ingredientUnits.map((u) => <option key={u} value={u}>{u}</option>)}
+                  </select>
                   <input
                     type="text"
                     value={ingredientSearchTerm}
@@ -940,7 +978,7 @@ export default function RecipePage() {
                     className="erp-input text-xs py-1.5 w-56"
                     autoComplete="off"
                   />
-                  {showIngredientSearch && ingredientSearchTerm.trim() && (
+                  {showIngredientSearch && (ingredientSearchTerm.trim() || ingredientUnitFilter) && (
                     <div className="absolute right-0 z-30 mt-1 w-80 max-h-72 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-2xl">
                       {ingredientSearchResults.length === 0 ? (
                         <div className="px-3 py-3 text-xs text-slate-400 text-center">
