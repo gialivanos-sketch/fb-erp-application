@@ -64,6 +64,8 @@ export default function RecipePage() {
   const [ingredientSearchTerm, setIngredientSearchTerm] = useState("");
   const [showIngredientSearch, setShowIngredientSearch] = useState(false);
   const [savingIngredientRowId, setSavingIngredientRowId] = useState<number | "new" | null>(null);
+  const [refreshingPrices, setRefreshingPrices] = useState(false);
+  const [priceRefreshMsg, setPriceRefreshMsg] = useState("");
   const ingredientSearchRef = useRef<HTMLDivElement>(null);
 
   const ingredientSearchResults = useMemo(() => {
@@ -329,6 +331,42 @@ export default function RecipePage() {
       alert(locale === "gr" ? "Αποτυχία ενημέρωσης: " + String(err) : "Failed to update: " + String(err));
     } finally {
       setSavingIngredientRowId(null);
+    }
+  }
+
+  // Ξαναφέρνει την πραγματική τιμή (get_ingredient_current_price) για ΚΑΘΕ
+  // υλικό ήδη προστεθειμένο σε αυτή τη συνταγή -- χρήσιμο για συνταγές
+  // που έγιναν πριν λειτουργήσει η δυναμική τιμοδότηση (τότε είχαν
+  // αποθηκευτεί με €0,00), ή απλά για να ξαναπάρεις τις πιο πρόσφατες
+  // τιμές χωρίς να ξαναπροσθέσεις κάθε υλικό ένα-ένα.
+  async function refreshAllPrices() {
+    if (recipeItems.length === 0) return;
+    setRefreshingPrices(true);
+    let updated = 0;
+    let failed = 0;
+    try {
+      for (const item of recipeItems) {
+        if (item.id == null || item.ingredientId == null) continue;
+        try {
+          const price = await db.getIngredientCurrentPrice(item.ingredientId);
+          if (price) {
+            const newTotal = Number((Number(item.quantity) * price.unitCost).toFixed(2));
+            await db.updateRecipeIngredient(item.id, { unitCost: price.unitCost, totalCost: newTotal });
+            updated++;
+          }
+        } catch {
+          failed++;
+        }
+      }
+      await refreshAll();
+      setPriceRefreshMsg(
+        locale === "gr"
+          ? `✅ Ενημερώθηκαν ${updated} τιμές${failed > 0 ? ` (${failed} απέτυχαν)` : ""}`
+          : `✅ ${updated} prices refreshed${failed > 0 ? ` (${failed} failed)` : ""}`
+      );
+      setTimeout(() => setPriceRefreshMsg(""), 4000);
+    } finally {
+      setRefreshingPrices(false);
     }
   }
 
@@ -818,11 +856,13 @@ export default function RecipePage() {
                     <button
                       type="button"
                       onClick={() => setForm(prev => ({ ...prev, gramsPerPortion: computedGramsPerPortion.toFixed(0) }))}
-                      className="text-[11px] text-blue-600 hover:underline mt-0.5"
+                      className="mt-1.5 w-full flex items-center justify-between gap-2 px-3 py-2 bg-amber-50 border border-amber-300 rounded-lg text-sm font-semibold text-amber-800 hover:bg-amber-100 transition-colors"
                     >
-                      {locale === "gr"
-                        ? `Υπολογισμένο από τα υλικά: ${computedGramsPerPortion.toFixed(0)} g (χρήση)`
-                        : `Computed from ingredients: ${computedGramsPerPortion.toFixed(0)} g (use)`}
+                      <span>
+                        {locale === "gr" ? "Υπολογισμένο από τα υλικά:" : "Computed from ingredients:"}{" "}
+                        {computedGramsPerPortion.toFixed(0)} g
+                      </span>
+                      <span className="text-xs underline">{locale === "gr" ? "Χρήση αυτού" : "Use this"}</span>
                     </button>
                   )}
                 </div>
@@ -855,7 +895,7 @@ export default function RecipePage() {
                 <div><div className="text-xs text-slate-500">{locale === "gr" ? "Συνολικό Κόστος" : "Total Cost"}</div><div className="font-bold">€{Number(form.totalCost).toFixed(2)}</div></div>
                 <div><div className="text-xs text-slate-500">{locale === "gr" ? "Τιμή Πώλησης" : "Selling Price"}</div><div className="font-bold text-emerald-700">€{Number(form.sellingPrice).toFixed(2)}</div></div>
                 <div><div className="text-xs text-slate-500">{locale === "gr" ? "Τιμή Μενού (ΦΠΑ)" : "Menu Price (VAT)"}</div><div className="font-bold text-blue-700">€{Number(form.menuPriceVat).toFixed(2)}</div></div>
-                <div><div className="text-xs text-slate-500">{locale === "gr" ? "Συνολικά Γραμμάρια" : "Total Grams"}</div><div className="font-bold">{(Number(form.gramsPerPortion) * Number(form.portionYield || 1)).toFixed(0)} g</div></div>
+                <div><div className="text-xs text-slate-500">{locale === "gr" ? `Συνολικά Γραμμάρια (${targetPortions || 0} μερ.)` : `Total Grams (${targetPortions || 0} ptn)`}</div><div className="font-bold">{(Number(form.gramsPerPortion) * Number(targetPortions || form.portionYield || 1)).toFixed(0)} g</div></div>
                 <div><div className="text-xs text-slate-500">{locale === "gr" ? `Κόστος Υλικών (${targetPortions || 0} μερ.)` : `Raw Cost (${targetPortions || 0} ptn)`}</div><div className="font-bold">€{((Number(form.totalRawMaterialCost) / (Number(form.portionYield || 1) || 1)) * Number(targetPortions || 0)).toFixed(2)}</div></div>
               </div>
             </div>
@@ -876,6 +916,20 @@ export default function RecipePage() {
                   />
                   <span className="text-slate-500">{locale === "gr" ? "μερίδες" : "portions"}</span>
                 </div>
+                {recipeItems.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={refreshAllPrices}
+                    disabled={refreshingPrices}
+                    className="erp-btn-secondary text-xs py-1.5"
+                    title={locale === "gr" ? "Ξαναφέρνει την πραγματική τιμή για όλα τα υλικά αυτής της συνταγής" : "Re-fetches the real price for every ingredient in this recipe"}
+                  >
+                    {refreshingPrices ? "…" : "🔄"} {locale === "gr" ? "Ανανέωση Τιμών" : "Refresh Prices"}
+                  </button>
+                )}
+                {priceRefreshMsg && (
+                  <span className="text-xs font-semibold text-emerald-700">{priceRefreshMsg}</span>
+                )}
                 <div className="relative" ref={ingredientSearchRef}>
                   <input
                     type="text"
