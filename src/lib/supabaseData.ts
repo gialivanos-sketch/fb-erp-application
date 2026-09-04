@@ -21,6 +21,7 @@ import type {
   RecipeIngredient, Menu, MenuRecipe, PrepListItem, Unit, IngestionLog, UserRole,
   BusinessProfile,
 } from "./types";
+import { parsePrice } from "./csv";
 
 function requireClient() {
   if (!supabase) throw new Error("Supabase δεν έχει ρυθμιστεί — δείτε src/lib/supabaseClient.ts");
@@ -29,6 +30,24 @@ function requireClient() {
 
 const numToStr = (n: number | null | undefined): string => (n == null ? "0" : String(n));
 const strToNum = (s: string | null | undefined): number => (s == null || s === "" ? 0 : Number(s));
+
+// Αφαιρεί τόνους/διαλυτικά, κάνει κεφαλαία και συμπτύσσει πολλαπλά κενά σε
+// ένα -- ίδιας λογικής helper με αυτόν που ήδη υπάρχει (αντιγραμμένος) στη
+// σελίδα Υλικών και στην Παραγγελία Πρόχειρου. Χρησιμοποιείται ΜΟΝΟ για το
+// ταίριασμα ονόματος υλικού στη μαζική εισαγωγή συνταγών παρακάτω, ώστε
+// "Κρέμα Γάλακτος 35%" και "ΚΡΕΜΑ ΓΑΛΑΚΤΟΣ  35%" (τόνοι/κεφαλαία/διπλό κενό
+// διαφορετικά) να ταιριάζουν με το ΙΔΙΟ υπάρχον υλικό αντί να δημιουργείται
+// νέο σχεδόν-διπλότυπο κάθε φορά που το όνομα γράφτηκε λίγο διαφορετικά στο
+// αρχείο εισαγωγής.
+const IMPORT_GREEK_ACCENT_MAP: Record<string, string> = {
+  "Ά": "Α", "Έ": "Ε", "Ή": "Η", "Ί": "Ι", "Ϊ": "Ι", "Ό": "Ο", "Ύ": "Υ", "Ϋ": "Υ", "Ώ": "Ω",
+  "ά": "α", "έ": "ε", "ή": "η", "ί": "ι", "ϊ": "ι", "ΐ": "ι", "ό": "ο", "ύ": "υ", "ϋ": "υ", "ΰ": "υ", "ώ": "ω",
+};
+function normalizeIngredientNameForImport(s: string): string {
+  let out = "";
+  for (const ch of (s ?? "").trim()) out += IMPORT_GREEK_ACCENT_MAP[ch] ?? ch;
+  return out.toUpperCase().replace(/\s+/g, " ");
+}
 
 // ------------------------------------------------------------
 // USERS
@@ -993,18 +1012,26 @@ export async function bulkImportRecipesWithIngredients(rows: RecipeImportRow[]):
     .from("ingredients")
     .select("id, name, name_en, unit, base_price, wastage_factor");
   if (fetchError) throw fetchError;
-  const ingredientByName = new Map((existingIngredients ?? []).map((i) => [i.name.trim().toLowerCase(), i]));
+  // ΣΗΜΑΝΤΙΚΟ: ταίριασμα με κανονικοποιημένο (χωρίς τόνους/κεφαλαία/διπλά
+  // κενά) όνομα, όχι ακριβές lowercase -- διαφορετικά ένα υλικό γραμμένο
+  // λίγο διαφορετικά στο αρχείο εισαγωγής (τόνος, κεφαλαίο, διπλό κενό)
+  // περνούσε σαν "νέο" υλικό αντί να ταιριάξει με το ήδη υπάρχον
+  // (ήδη τιμολογημένο/ομαδοποιημένο) -- αυτό δημιουργούσε σχεδόν-διπλότυπα
+  // υλικά (π.χ. πολλαπλά "ΚΡΕΜΑ ΓΑΛΑΚΤΟΣ 35%").
+  const ingredientByName = new Map(
+    (existingIngredients ?? []).map((i) => [normalizeIngredientNameForImport(i.name), i])
+  );
 
   // ---- Step 2: find every ingredient name used anywhere in the file
   // that ISN'T already in the register, and bulk-create them all in one
   // insert. New ingredients get a generated SKU and the unit taken from
   // wherever that ingredient name first appears in the file. ----
-  const newIngredientNames = new Map<string, string>(); // lowercased key -> original-cased name
+  const newIngredientNames = new Map<string, string>(); // normalized key -> original-cased name
   const newIngredientUnits = new Map<string, string>();
   for (const row of rows) {
     const name = row.ingredientName?.trim();
     if (!name) continue;
-    const key = name.toLowerCase();
+    const key = normalizeIngredientNameForImport(name);
     if (ingredientByName.has(key) || newIngredientNames.has(key)) continue;
     newIngredientNames.set(key, name);
     newIngredientUnits.set(key, row.unit?.trim() || "kg");
@@ -1031,7 +1058,7 @@ export async function bulkImportRecipesWithIngredients(rows: RecipeImportRow[]):
       .select("id, name, name_en, unit, base_price, wastage_factor");
     if (createIngError) throw createIngError;
     for (const ing of createdIngredients ?? []) {
-      ingredientByName.set(ing.name.trim().toLowerCase(), ing);
+      ingredientByName.set(normalizeIngredientNameForImport(ing.name), ing);
     }
   }
 
@@ -1073,12 +1100,22 @@ export async function bulkImportRecipesWithIngredients(rows: RecipeImportRow[]):
     .select("id, name");
   if (createRecError) throw createRecError;
 
-  // Supabase returns created rows in insertion order for a single insert
-  // call, so pairing by index with recipesToCreate is safe here.
+  // ΣΗΜΑΝΤΙΚΗ ΔΙΟΡΘΩΣΗ: ΔΕΝ ταιριάζουμε πλέον τα δημιουργημένα recipes με
+  // τα recipesToCreate βάσει ΘΕΣΗΣ (index) στον πίνακα. Η υπόθεση "η
+  // Supabase/PostgREST επιστρέφει τις γραμμές ενός μαζικού insert με την
+  // ΙΔΙΑ σειρά που δόθηκαν" ΔΕΝ είναι εγγυημένη -- ένα μαζικό insert σε
+  // Postgres/PostgREST μπορεί να επιστρέψει τις γραμμές σε ΔΙΑΦΟΡΕΤΙΚΗ
+  // σειρά (π.χ. αν υπάρχει trigger, RLS policy με subquery, κτλ). Αν
+  // αυτό συμβεί, το ΛΑΘΟΣ recipe_id ταιριάζει με κάθε όνομα συνταγής, και
+  // ΟΛΑ τα υλικά της μιας συνταγής καταλήγουν να αποθηκεύονται κάτω από
+  // την ΑΛΛΗ συνταγή -- ακριβώς το σύμπτωμα "τα υλικά μέσα στη συνταγή
+  // δεν είναι αυτής της συνταγής, είναι ό,τι να 'ναι" που παρατηρήθηκε.
+  // Αντ' αυτού, ταιριάζουμε με το ΟΝΟΜΑ που επιστρέφει η ίδια η βάση για
+  // κάθε δημιουργημένη γραμμή -- ανεξάρτητο από τη σειρά επιστροφής.
   const recipeIdByKey = new Map<string, number>();
-  (createdRecipes ?? []).forEach((r, idx) => {
-    const originalKey = recipesToCreate[idx].name.trim().toLowerCase();
-    recipeIdByKey.set(originalKey, r.id as number);
+  (createdRecipes ?? []).forEach((r) => {
+    const key = String(r.name ?? "").trim().toLowerCase();
+    recipeIdByKey.set(key, r.id as number);
   });
 
   // ---- Step 4: build every recipe_ingredients row across every recipe,
@@ -1104,9 +1141,14 @@ export async function bulkImportRecipesWithIngredients(rows: RecipeImportRow[]):
     if (recipeId == null) continue;
     let recipeCost = 0;
     for (const row of group.rows) {
-      const ingKey = row.ingredientName.trim().toLowerCase();
+      const ingKey = normalizeIngredientNameForImport(row.ingredientName);
       const matched = ingredientByName.get(ingKey);
-      const quantity = strToNum(row.quantity);
+      // parsePrice() κάνει ό,τι κάνει ήδη για τιμές: μετατρέπει "7,5"
+      // (ελληνικό δεκαδικό κόμμα) σε "7.5" πριν το Number(). Πριν αυτή την
+      // αλλαγή η ποσότητα περνούσε ΚΑΤΕΥΘΕΙΑΝ από strToNum -> Number(), το
+      // οποίο επιστρέφει NaN για "7,5" (το κόμμα δεν αναγνωρίζεται) --
+      // ασυνέπεια με το πεδίο τιμής, που ήδη καθαριζόταν σωστά.
+      const quantity = strToNum(parsePrice(row.quantity));
       const unitCost = Number(matched?.base_price ?? 0);
       const totalCost = quantity * unitCost;
       recipeCost += totalCost;
