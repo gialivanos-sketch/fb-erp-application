@@ -276,6 +276,18 @@ export const translations: Record<string, { gr: string; en: string }> = {
   bulkDeleteResult: { gr: "Διαγράφηκαν", en: "Deleted" },
   bulkDeleteSkipped: { gr: "παραλείφθηκαν (χρησιμοποιούνται σε συνταγή)", en: "skipped (in use by a recipe)" },
   showingOf: { gr: "από", en: "of" },
+
+  // Φίλτρο/σήμανση "Ομαδοποίηση SKU" στη σελίδα Υλικών -- δείχνει ποια
+  // υλικά ΔΕΝ έχουν ούτε άμεση σύνδεση με προϊόν προμηθευτή, ούτε δική
+  // τους καταχώρηση στην Ομαδοποίηση Ειδών (SKU Mapping), άρα δεν
+  // μπορούν να βρουν αυτόματη τιμή από ιστορικό παραγγελιών.
+  filterGrouping: { gr: "Ομαδοποίηση SKU", en: "SKU Grouping" },
+  filterGroupingAll: { gr: "Όλα", en: "All" },
+  filterGroupingUngrouped: { gr: "Χωρίς Ομάδα SKU", en: "No SKU group" },
+  filterGroupingGrouped: { gr: "Με Ομάδα SKU", en: "Has SKU group" },
+  badgeNoSkuGroup: { gr: "Χωρίς Ομάδα SKU", en: "No SKU group" },
+  kpiNoSkuGroup: { gr: "Χωρίς Ομάδα SKU", en: "No SKU group" },
+  kpiNoSkuGroupSubtitle: { gr: "Δεν βρίσκουν τιμή αυτόματα — άνοιξε την Ομαδοποίηση Ειδών", en: "Can't auto-price — open SKU Grouping" },
 }
 
 export function t(locale: Locale, key: string): string {
