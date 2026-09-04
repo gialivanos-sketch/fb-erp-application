@@ -1047,15 +1047,14 @@ export default function RecipePage() {
                     className="erp-input text-xs py-1.5 w-56"
                     autoComplete="off"
                   />
+                  {/* top-full παρακάτω είναι απαραίτητο, ΟΧΙ προαιρετικό στολίδι:
+                      αυτό το div είναι flex item μέσα στο "flex items-center"
+                      γονικό div (μαζί με το select και το input) -- χωρίς ρητό
+                      top, ένα absolute στοιχείο πέφτει στη "στατική" θέση του
+                      ΜΕΣΑ στη σειρά flex (δηλ. δίπλα στο input, όχι από κάτω),
+                      γι' αυτό εμφανιζόταν "κρεμασμένο" πάνω από τον πίνακα
+                      αντί ακριβώς κάτω από το πλαίσιο αναζήτησης. */}
                   {showIngredientSearch && (ingredientSearchTerm.trim() || ingredientUnitFilter) && (
-                    {/* top-full είναι απαραίτητο εδώ, ΟΧΙ προαιρετικό στολίδι:
-                        αυτό το div είναι flex item μέσα στο "flex items-center"
-                        γονικό div (μαζί με το select και το input) -- χωρίς
-                        ρητό top, ένα absolute στοιχείο πέφτει στη "στατική"
-                        θέση του ΜΕΣΑ στη σειρά flex (δηλ. δίπλα στο input,
-                        όχι από κάτω), γι' αυτό εμφανιζόταν "κρεμασμένο" πάνω
-                        από τον πίνακα αντί ακριβώς κάτω από το πλαίσιο
-                        αναζήτησης. */}
                     <div className="absolute left-0 top-full z-30 mt-1 w-80 max-h-72 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-2xl">
                       {ingredientSearchResults.length === 0 ? (
                         <div className="px-3 py-3 text-xs text-slate-400 text-center">
