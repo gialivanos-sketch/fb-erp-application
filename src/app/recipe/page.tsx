@@ -1048,7 +1048,15 @@ export default function RecipePage() {
                     autoComplete="off"
                   />
                   {showIngredientSearch && (ingredientSearchTerm.trim() || ingredientUnitFilter) && (
-                    <div className="absolute left-0 z-30 mt-1 w-80 max-h-72 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-2xl">
+                    {/* top-full είναι απαραίτητο εδώ, ΟΧΙ προαιρετικό στολίδι:
+                        αυτό το div είναι flex item μέσα στο "flex items-center"
+                        γονικό div (μαζί με το select και το input) -- χωρίς
+                        ρητό top, ένα absolute στοιχείο πέφτει στη "στατική"
+                        θέση του ΜΕΣΑ στη σειρά flex (δηλ. δίπλα στο input,
+                        όχι από κάτω), γι' αυτό εμφανιζόταν "κρεμασμένο" πάνω
+                        από τον πίνακα αντί ακριβώς κάτω από το πλαίσιο
+                        αναζήτησης. */}
+                    <div className="absolute left-0 top-full z-30 mt-1 w-80 max-h-72 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-2xl">
                       {ingredientSearchResults.length === 0 ? (
                         <div className="px-3 py-3 text-xs text-slate-400 text-center">
                           {locale === "gr" ? "Δεν βρέθηκαν υλικά" : "No ingredients found"}
