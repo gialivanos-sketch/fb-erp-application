@@ -85,6 +85,13 @@ export default function RecipePage() {
   const [refreshingPrices, setRefreshingPrices] = useState(false);
   const [priceRefreshMsg, setPriceRefreshMsg] = useState("");
   const ingredientSearchRef = useRef<HTMLDivElement>(null);
+  // Πόσα υλικά είχε η συνταγή την τελευταία φορά που φορτώθηκε/αποθηκεύτηκε
+  // -- baseline για το παρακάτω useEffect, ώστε να ξέρει πότε ΠΡΑΓΜΑΤΙΚΑ
+  // προστέθηκε ή αφαιρέθηκε υλικό (και να ενημερώσει αυτόματα τα
+  // "Γραμμάρια / Μερίδα"), αντί να το κάνει και όταν απλά ανοίγεις μια
+  // ήδη αποθηκευμένη συνταγή (όπου η χειροκίνητη τιμή μπορεί σκόπιμα να
+  // διαφέρει από το άθροισμα -- π.χ. λόγω απώλειας βάρους στο μαγείρεμα).
+  const lastIngredientCountRef = useRef<number | null>(null);
 
   const ingredientUnits = useMemo(() => {
     const set = new Set<string>();
@@ -122,6 +129,23 @@ export default function RecipePage() {
     return totalGrams / portions;
   }, [recipeItems, form.portionYield]);
 
+  // Αυτόματη ενημέρωση "Γραμμάρια / Μερίδα" ΜΟΝΟ όταν πραγματικά
+  // προστέθηκε ή αφαιρέθηκε υλικό (ο αριθμός γραμμών άλλαξε σε σχέση
+  // με το baseline) -- ΟΧΙ όταν απλά άνοιξε μια ήδη αποθηκευμένη
+  // συνταγή (loadRecipe/newRecipe ορίζουν το baseline ίσο με το τρέχον
+  // πλήθος ΠΡΙΝ αυτό το effect προλάβει να τρέξει), ώστε να μην
+  // σβήνεται μια χειροκίνητη τιμή που σκόπιμα διαφέρει (π.χ. λόγω
+  // απώλειας βάρους στο μαγείρεμα). Το χειροκίνητο πεδίο παραμένει
+  // πάντα επεξεργάσιμο μετά — απλά δεν χρειάζεται πια το κλικ σε
+  // "Χρήση αυτού" κάθε φορά που προστίθεται/αφαιρείται μια γραμμή.
+  useEffect(() => {
+    if (lastIngredientCountRef.current === null) return;
+    if (recipeItems.length !== lastIngredientCountRef.current) {
+      lastIngredientCountRef.current = recipeItems.length;
+      setForm((prev) => ({ ...prev, gramsPerPortion: computedGramsPerPortion.toFixed(0) }));
+    }
+  }, [recipeItems.length, computedGramsPerPortion]);
+
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
       if (ingredientSearchRef.current && !ingredientSearchRef.current.contains(e.target as Node)) {
@@ -155,6 +179,7 @@ export default function RecipePage() {
     setRecipeItems([]);
     setTargetPortions("1");
     setRowUnitDisplay({});
+    lastIngredientCountRef.current = 0;
   }
 
   function loadRecipe(r: Recipe) {
@@ -174,6 +199,7 @@ export default function RecipePage() {
     setRecipeItems(r.ingredients || []);
     setTargetPortions(r.portionYield || "1");
     setRowUnitDisplay({});
+    lastIngredientCountRef.current = (r.ingredients || []).length;
   }
 
   function calculateCosting() {
@@ -967,31 +993,41 @@ export default function RecipePage() {
               συνταγής, κατόπιν ρητού αιτήματος του χρήστη. */}
           {selectedRecipe && (
             <div className="erp-card mb-6">
-              <div className="erp-card-header flex items-center justify-between flex-wrap gap-2">
-                <h3 className="font-semibold">🧂 {locale === "gr" ? "Υλικά Συνταγής" : "Recipe Ingredients"}</h3>
-                <div className="flex items-center gap-1 text-xs bg-blue-50 rounded-lg px-2 py-1.5">
-                  <span className="text-slate-500">{locale === "gr" ? "Υπολογισμός για" : "Calculate for"}</span>
-                  <input
-                    type="number" value={targetPortions}
-                    onChange={(e) => setTargetPortions(e.target.value)}
-                    className="erp-input text-xs py-1 w-16 text-center" step="any"
-                  />
-                  <span className="text-slate-500">{locale === "gr" ? "μερίδες" : "portions"}</span>
+              <div className="erp-card-header flex flex-col gap-2">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <h3 className="font-semibold">🧂 {locale === "gr" ? "Υλικά Συνταγής" : "Recipe Ingredients"}</h3>
+                  <div className="flex items-center gap-1 text-xs bg-blue-50 rounded-lg px-2 py-1.5">
+                    <span className="text-slate-500">{locale === "gr" ? "Υπολογισμός για" : "Calculate for"}</span>
+                    <input
+                      type="number" value={targetPortions}
+                      onChange={(e) => setTargetPortions(e.target.value)}
+                      className="erp-input text-xs py-1 w-16 text-center" step="any"
+                    />
+                    <span className="text-slate-500">{locale === "gr" ? "μερίδες" : "portions"}</span>
+                  </div>
+                  {recipeItems.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={refreshAllPrices}
+                      disabled={refreshingPrices}
+                      className="erp-btn-secondary text-xs py-1.5"
+                      title={locale === "gr" ? "Ξαναφέρνει την πραγματική τιμή για όλα τα υλικά αυτής της συνταγής" : "Re-fetches the real price for every ingredient in this recipe"}
+                    >
+                      {refreshingPrices ? "…" : "🔄"} {locale === "gr" ? "Ανανέωση Τιμών" : "Refresh Prices"}
+                    </button>
+                  )}
+                  {priceRefreshMsg && (
+                    <span className="text-xs font-semibold text-emerald-700">{priceRefreshMsg}</span>
+                  )}
                 </div>
-                {recipeItems.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={refreshAllPrices}
-                    disabled={refreshingPrices}
-                    className="erp-btn-secondary text-xs py-1.5"
-                    title={locale === "gr" ? "Ξαναφέρνει την πραγματική τιμή για όλα τα υλικά αυτής της συνταγής" : "Re-fetches the real price for every ingredient in this recipe"}
-                  >
-                    {refreshingPrices ? "…" : "🔄"} {locale === "gr" ? "Ανανέωση Τιμών" : "Refresh Prices"}
-                  </button>
-                )}
-                {priceRefreshMsg && (
-                  <span className="text-xs font-semibold text-emerald-700">{priceRefreshMsg}</span>
-                )}
+                {/* Ξεχωριστή γραμμή, ΟΧΙ μέσα στο ίδιο flex-wrap row με τα
+                    παραπάνω -- όταν τίτλος/μερίδες/κουμπί/μήνυμα μαζί δεν
+                    χωρούσαν σε μία γραμμή, αυτό το κουτί "τυλιγόταν" σε
+                    απρόβλεπτη θέση και το αναδυόμενο dropdown αποτελεσμάτων
+                    (που είναι απόλυτα τοποθετημένο ΚΑΤΩ από αυτό) εμφανιζόταν
+                    "κρεμασμένο" κάπου αλλού στη σελίδα, χωρίς να φαίνεται
+                    καθόλου το ίδιο το πλαίσιο αναζήτησης. Με δική του γραμμή,
+                    έχει πάντα σταθερό, προβλέψιμο πλάτος. */}
                 <div className="relative flex items-center gap-1.5" ref={ingredientSearchRef}>
                   <select
                     value={ingredientUnitFilter}
@@ -1012,7 +1048,7 @@ export default function RecipePage() {
                     autoComplete="off"
                   />
                   {showIngredientSearch && (ingredientSearchTerm.trim() || ingredientUnitFilter) && (
-                    <div className="absolute right-0 z-30 mt-1 w-80 max-h-72 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-2xl">
+                    <div className="absolute left-0 z-30 mt-1 w-80 max-h-72 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-2xl">
                       {ingredientSearchResults.length === 0 ? (
                         <div className="px-3 py-3 text-xs text-slate-400 text-center">
                           {locale === "gr" ? "Δεν βρέθηκαν υλικά" : "No ingredients found"}
@@ -1088,7 +1124,24 @@ export default function RecipePage() {
                                 <option value="kg">kg</option>
                                 <option value="g">g</option>
                               </select>
-                            ) : displayUnit}
+                            ) : (
+                              // Μονάδες εκτός kg/g (π.χ. ΤΕΜ, L, ml) δεν είχαν
+                              // ΚΑΝΕΝΑ τρόπο διόρθωσης -- έμεναν σαν απλό,
+                              // μη-επεξεργάσιμο κείμενο. Τώρα είναι πάντα
+                              // επεξεργάσιμο πεδίο, ώστε να διορθώνεται
+                              // χειροκίνητα μια λάθος μονάδα (π.χ. από
+                              // παλιά/χαλασμένη εισαγωγή δεδομένων).
+                              <input
+                                key={item.unit}
+                                type="text"
+                                defaultValue={item.unit}
+                                onBlur={(e) => {
+                                  const newUnit = e.target.value.trim();
+                                  if (newUnit && newUnit !== item.unit) updateIngredientRow(item.id, "unit", newUnit);
+                                }}
+                                className="erp-input text-xs py-1 w-16"
+                              />
+                            )}
                           </td>
                           <td>€{pricePerPortion(item).toFixed(3)}</td>
                           <td>{dispBatchQty.toFixed(toggleable && displayUnit === "g" ? 0 : 3)} {displayUnit}</td>
