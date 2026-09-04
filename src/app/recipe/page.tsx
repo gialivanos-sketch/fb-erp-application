@@ -324,15 +324,29 @@ export default function RecipePage() {
       let unitCost = Number(ing.basePrice);
       try {
         const price = await db.getIngredientCurrentPrice(ing.id);
-        if (price) unitCost = price.unitCost;
+        // Μόνο αν βρέθηκε ΠΡΑΓΜΑΤΙΚΗ τιμή αντικαθιστούμε τη χειροκίνητη --
+        // αν το υλικό δεν έχει καθόλου ιστορικό παραγγελιών (π.χ. είναι
+        // σπιτικό παρασκεύασμα που δεν αγοράζεται ποτέ έτοιμο, όχι κάτι
+        // που λείπει από λάθος), κρατάμε τη χειροκίνητη «Τιμή Μονάδας»
+        // από τη Σελίδα Με Υλικά αντί να τη μηδενίζουμε.
+        if (price && price.priceSource !== "none") unitCost = price.unitCost;
       } catch {
         // εφεδρικά η στατική τιμή, αν αποτύχει το αίτημα δυναμικής τιμής
       }
-      await db.addRecipeIngredient(selectedRecipe.id, {
-        ingredientId: ing.id, ingredientName: locale === "gr" ? ing.name : (ing.nameEn || ing.name),
+      const newRowName = locale === "gr" ? ing.name : (ing.nameEn || ing.name);
+      const newId = await db.addRecipeIngredient(selectedRecipe.id, {
+        ingredientId: ing.id, ingredientName: newRowName,
         quantity: 0, unit: ing.unit, unitCost, totalCost: 0,
         wastageFactor: Number(ing.wastageFactor), requiresPrep: false, prepNotes: "",
       });
+      setRecipeItems((prev) => [
+        ...prev,
+        {
+          id: newId, ingredientId: ing.id, ingredientName: newRowName,
+          quantity: 0, unit: ing.unit, unitCost, totalCost: 0,
+          wastageFactor: Number(ing.wastageFactor), requiresPrep: false, prepNotes: "",
+        },
+      ]);
       await refreshAll();
       setIngredientSearchTerm("");
       setShowIngredientSearch(false);
@@ -355,6 +369,7 @@ export default function RecipePage() {
     setSavingIngredientRowId(rowId);
     try {
       await db.updateRecipeIngredient(rowId, patch);
+      setRecipeItems((prev) => prev.map((i) => (i.id === rowId ? { ...i, ...patch } : i)));
       await refreshAll();
     } catch (err) {
       alert(locale === "gr" ? "Αποτυχία ενημέρωσης: " + String(err) : "Failed to update: " + String(err));
@@ -368,20 +383,32 @@ export default function RecipePage() {
   // που έγιναν πριν λειτουργήσει η δυναμική τιμοδότηση (τότε είχαν
   // αποθηκευτεί με €0,00), ή απλά για να ξαναπάρεις τις πιο πρόσφατες
   // τιμές χωρίς να ξαναπροσθέσεις κάθε υλικό ένα-ένα.
+  //
+  // Ενημερώνει ΜΟΝΟ όσα υλικά βρήκαν πραγματική τιμή (order_history ή
+  // supplier_offer) -- αν ένα υλικό δεν έχει ΚΑΘΟΛΟΥ ιστορικό παραγγελιών
+  // (π.χ. σπιτικό παρασκεύασμα, δεν αγοράζεται ποτέ έτοιμο), η ήδη
+  // αποθηκευμένη τιμή του (χειροκίνητη ή προηγούμενη) ΔΕΝ πειράζεται --
+  // πριν μηδενιζόταν αυτόματα, πράγμα που κατέστρεφε τη μοναδική έγκυρη
+  // τιμή που θα μπορούσε ποτέ να έχει ένα τέτοιο υλικό.
   async function refreshAllPrices() {
     if (recipeItems.length === 0) return;
     setRefreshingPrices(true);
     let updated = 0;
+    let skipped = 0;
     let failed = 0;
     try {
       for (const item of recipeItems) {
         if (item.id == null || item.ingredientId == null) continue;
         try {
           const price = await db.getIngredientCurrentPrice(item.ingredientId);
-          if (price) {
+          if (price && price.priceSource !== "none") {
             const newTotal = Number((Number(item.quantity) * price.unitCost).toFixed(2));
             await db.updateRecipeIngredient(item.id, { unitCost: price.unitCost, totalCost: newTotal });
+            const rowId = item.id;
+            setRecipeItems((prev) => prev.map((i) => (i.id === rowId ? { ...i, unitCost: price.unitCost, totalCost: newTotal } : i)));
             updated++;
+          } else {
+            skipped++;
           }
         } catch {
           failed++;
@@ -390,8 +417,8 @@ export default function RecipePage() {
       await refreshAll();
       setPriceRefreshMsg(
         locale === "gr"
-          ? `✅ Ενημερώθηκαν ${updated} τιμές${failed > 0 ? ` (${failed} απέτυχαν)` : ""}`
-          : `✅ ${updated} prices refreshed${failed > 0 ? ` (${failed} failed)` : ""}`
+          ? `✅ Ενημερώθηκαν ${updated} τιμές${skipped > 0 ? ` (${skipped} χωρίς ιστορικό — δεν πειράχτηκαν)` : ""}${failed > 0 ? ` (${failed} απέτυχαν)` : ""}`
+          : `✅ ${updated} prices refreshed${skipped > 0 ? ` (${skipped} had no history — left untouched)` : ""}${failed > 0 ? ` (${failed} failed)` : ""}`
       );
       setTimeout(() => setPriceRefreshMsg(""), 4000);
     } finally {
@@ -403,6 +430,12 @@ export default function RecipePage() {
     setSavingIngredientRowId(rowId);
     try {
       await db.deleteRecipeIngredient(rowId);
+      // Το refreshAll() πιο κάτω ενημερώνει μόνο το καθολικό cache
+      // (data.recipes) -- ΔΕΝ ξαναγράφει μόνο του το τοπικό recipeItems
+      // που δείχνει αυτός ο πίνακας, οπότε χωρίς αυτή τη γραμμή η
+      // γραμμή υλικού έμενε ορατή μέχρι να κλείσεις/ξανανοίξεις τη
+      // συνταγή, παρόλο που η διαγραφή είχε ήδη γίνει στη βάση.
+      setRecipeItems((prev) => prev.filter((i) => i.id !== rowId));
       await refreshAll();
     } catch (err) {
       alert(locale === "gr" ? "Αποτυχία διαγραφής: " + String(err) : "Failed to delete: " + String(err));
