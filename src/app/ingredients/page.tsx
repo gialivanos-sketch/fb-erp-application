@@ -1,5 +1,5 @@
 "use client";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useLanguage } from "@/lib/context";
 import { PageHeader, FilterBar, KpiCard, Badge, Modal } from "@/components/shared";
 import * as db from "@/lib/supabaseData";
@@ -25,6 +25,7 @@ export default function IngredientsPage() {
   const [filterStatus, setFilterStatus] = useState<"all" | "active" | "inactive">("all");
   const [filterUsage, setFilterUsage] = useState<"all" | "unused" | "used">("all");
   const [filterZeroPrice, setFilterZeroPrice] = useState(false);
+  const [filterGrouping, setFilterGrouping] = useState<"all" | "ungrouped" | "grouped">("all");
   const [showNew, setShowNew] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
@@ -53,6 +54,48 @@ export default function IngredientsPage() {
     return Array.from(set).sort();
   }, [ingredients]);
 
+  // Ονόματα (κανονικοποιημένα, χωρίς τόνους) που ήδη ανήκουν σε κάποια
+  // Ομάδα SKU (product_sku_map) -- ΔΕΝ είναι μέρος του καθολικού data
+  // context (μόνο η σελίδα Ομαδοποίηση Ειδών το φόρτωνε μέχρι τώρα),
+  // οπότε το φέρνουμε ξεχωριστά εδώ, μία φορά. Χρησιμοποιείται μόνο
+  // για να επισημάνει ποια υλικά δεν έχουν ακόμα ομαδοποιηθεί -- δεν
+  // αλλάζει καμία τιμή, απλή ένδειξη.
+  const [skuMapNames, setSkuMapNames] = useState<Set<string> | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    db.fetchProductSkuMap()
+      .then((rows) => {
+        if (cancelled) return;
+        setSkuMapNames(new Set(rows.map((r) => normalizeGreek(r.productName))));
+      })
+      .catch(() => {
+        if (!cancelled) setSkuMapNames(new Set());
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  // "Χωρίς Ομάδα SKU": το υλικό δεν έχει ΟΥΤΕ άμεση σύνδεση με προϊόν
+  // προμηθευτή (mappedSupplierProductId) ΟΥΤΕ δική του καταχώρηση στην
+  // Ομαδοποίηση Ειδών (το ίδιο του το όνομα, κανονικοποιημένο, μέσα σε
+  // κάποιο SKU group) -- άρα δεν μπορεί να βρει τιμή αυτόματα από
+  // ιστορικό παραγγελιών/προσφορών με τον πιο αξιόπιστο τρόπο. Δεν
+  // αντικαθιστά τον πραγματικό υπολογισμό τιμής (get_ingredient_current_price
+  // στη βάση, που έχει επιπλέον fallback με κατά-προσέγγιση ταίριασμα
+  // ονόματος) -- είναι μια γρήγορη, τοπική ένδειξη για να ξέρεις ποιο
+  // υλικό αξίζει να ελέγξεις/ομαδοποιήσεις χειροκίνητα.
+  const isUngrouped = useMemo(() => {
+    return (i: (typeof ingredients)[number]) => {
+      if (!i || skuMapNames == null) return false;
+      if (i.mappedSupplierProductId != null) return false;
+      return !skuMapNames.has(normalizeGreek(i.name ?? ""));
+    };
+  }, [skuMapNames]);
+
+  const ungroupedCount = useMemo(() => {
+    if (skuMapNames == null) return 0;
+    return ingredients.filter((i) => isUngrouped(i)).length;
+  }, [ingredients, skuMapNames, isUngrouped]);
+
   const filtered = useMemo(() => {
     const q = normalizeGreek(search.trim());
     return ingredients.filter((i) => {
@@ -67,9 +110,11 @@ export default function IngredientsPage() {
       if (filterUsage === "unused" && isUsed) return false;
       if (filterUsage === "used" && !isUsed) return false;
       if (filterZeroPrice && Number(i?.basePrice ?? 0) !== 0) return false;
+      if (filterGrouping === "ungrouped" && !isUngrouped(i)) return false;
+      if (filterGrouping === "grouped" && isUngrouped(i)) return false;
       return true;
     });
-  }, [ingredients, search, filterUnit, filterStatus, filterUsage, filterZeroPrice, usedIngredientIds]);
+  }, [ingredients, search, filterUnit, filterStatus, filterUsage, filterZeroPrice, filterGrouping, usedIngredientIds, isUngrouped]);
 
   const activeCount = ingredients.filter(i => i?.isActive).length;
   const unusedCount = ingredients.filter(i => i?.id != null && !usedIngredientIds.has(i.id)).length;
@@ -78,7 +123,7 @@ export default function IngredientsPage() {
   const fmt = (n: number) => `€${n.toFixed(2)}`;
 
   function clearFilters() {
-    setSearch(""); setFilterUnit(""); setFilterStatus("all"); setFilterUsage("all"); setFilterZeroPrice(false);
+    setSearch(""); setFilterUnit(""); setFilterStatus("all"); setFilterUsage("all"); setFilterZeroPrice(false); setFilterGrouping("all");
   }
 
   function toggleOne(id: number) {
@@ -167,10 +212,11 @@ export default function IngredientsPage() {
         <button onClick={() => setShowNew(true)} className="erp-btn-primary">➕ {t("addNewIngredient")}</button>
       </PageHeader>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4 mb-6">
         <KpiCard label={locale === "gr" ? "Σύνολο Υλικών" : "Total Ingredients"} value={ingredients.length} color="blue" icon="🥘" />
         <KpiCard label={locale === "gr" ? "Ενεργά" : "Active"} value={activeCount} color="green" icon="✅" />
         <KpiCard label={locale === "gr" ? "Αχρησιμοποίητα" : "Unused"} value={unusedCount} color="red" icon="🗑️" subtitle={locale === "gr" ? "Καμία συνταγή δεν τα χρησιμοποιεί" : "No recipe uses them"} />
+        <KpiCard label={t("kpiNoSkuGroup")} value={skuMapNames == null ? "…" : ungroupedCount} color="amber" icon="🏷️" subtitle={t("kpiNoSkuGroupSubtitle")} />
         <KpiCard label={locale === "gr" ? "Αξία Αποθέματος" : "Stock Value"} value={fmt(totalStockValue)} color="amber" icon="💰" />
         <KpiCard label={locale === "gr" ? "Σύνολο Θερμίδων" : "Total Calories"} value={totalCalories.toLocaleString()} color="red" icon="🔥" />
       </div>
@@ -198,6 +244,14 @@ export default function IngredientsPage() {
             <option value="all">{t("filterUsageAll")}</option>
             <option value="unused">{t("filterUsageUnused")}</option>
             <option value="used">{t("filterUsageUsed")}</option>
+          </select>
+        </div>
+        <div>
+          <label className="erp-label">{t("filterGrouping")}</label>
+          <select value={filterGrouping} onChange={(e) => setFilterGrouping(e.target.value as typeof filterGrouping)} className="erp-select">
+            <option value="all">{t("filterGroupingAll")}</option>
+            <option value="ungrouped">{t("filterGroupingUngrouped")}</option>
+            <option value="grouped">{t("filterGroupingGrouped")}</option>
           </select>
         </div>
         <div className="flex items-end pb-2">
@@ -256,7 +310,20 @@ export default function IngredientsPage() {
                     <td>{i?.wastageFactor ?? 0}%</td>
                     <td>{i?.calories || 0}</td>
                     <td><Badge color={i?.isActive ? "green" : "red"}>{i?.isActive ? "✓" : "✕"}</Badge></td>
-                    <td>{!isUsed && <Badge color="amber">{t("badgeUnused")}</Badge>}</td>
+                    <td>
+                      <div className="flex flex-col gap-1 items-start">
+                        {!isUsed && <Badge color="amber">{t("badgeUnused")}</Badge>}
+                        {i != null && isUngrouped(i) && (
+                          <a
+                            href="/sku-mapping"
+                            className="no-underline"
+                            title={locale === "gr" ? "Άνοιξε την Ομαδοποίηση Ειδών για να το συνδέσεις" : "Open SKU Grouping to link it"}
+                          >
+                            <Badge color="amber">🏷️ {t("badgeNoSkuGroup")}</Badge>
+                          </a>
+                        )}
+                      </div>
+                    </td>
                     <td>
                       <button onClick={() => i?.id && deleteIngredient(i.id)} disabled={deletingId === i?.id} className="text-red-400 hover:text-red-600 text-xs">
                         {deletingId === i?.id ? "…" : t("btnDelete")}
