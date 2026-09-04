@@ -115,6 +115,44 @@ export default function RecipePage() {
       .slice(0, 30);
   }, [ingredientSearchTerm, ingredientUnitFilter, allIngredients, locale]);
 
+  // Πραγματική τιμή (όχι η στατική "Τιμή Μονάδας") για κάθε υλικό που
+  // εμφανίζεται ΤΩΡΑ στα αποτελέσματα αναζήτησης -- χωρίς αυτό, δύο
+  // σχεδόν-ίδια υλικά (π.χ. πολλά "ΚΡΕΜΑ ΓΑΛΑΚΤΟΣ 35%" από παλιά μαζική
+  // εισαγωγή) φαίνονται πανομοιότυπα στη λίστα, και δεν υπάρχει τρόπος
+  // να ξέρεις ΠΡΙΝ το προσθέσεις ποιο από όλα έχει πραγματικά τιμή.
+  // Με μικρή καθυστέρηση (debounce) ώστε να μη γίνεται ένα αίτημα ανά
+  // πάτημα πλήκτρου, και με "reqId" ώστε μια παλιά/αργή απάντηση να μην
+  // αντικαταστήσει αποτελέσματα μιας νεότερης αναζήτησης.
+  const [resultPrices, setResultPrices] = useState<Record<number, db.IngredientCurrentPrice | "loading" | "error">>({});
+  const searchPriceReqIdRef = useRef(0);
+  useEffect(() => {
+    if (ingredientSearchResults.length === 0) return;
+    const reqId = ++searchPriceReqIdRef.current;
+    const ids = ingredientSearchResults.map((r) => r.id);
+    setResultPrices((prev) => {
+      const next: typeof prev = {};
+      for (const id of ids) next[id] = prev[id] ?? "loading";
+      return next;
+    });
+    const timer = setTimeout(() => {
+      Promise.all(
+        ids.map((id) =>
+          db.getIngredientCurrentPrice(id)
+            .then((p) => [id, p] as const)
+            .catch(() => [id, null] as const)
+        )
+      ).then((entries) => {
+        if (searchPriceReqIdRef.current !== reqId) return; // ξεπεράστηκε από νεότερη αναζήτηση
+        setResultPrices((prev) => {
+          const next = { ...prev };
+          for (const [id, p] of entries) next[id] = p ?? "error";
+          return next;
+        });
+      });
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [ingredientSearchResults]);
+
   // Γραμμάρια/μερίδα υπολογισμένα ΑΠΟ τα ίδια τα υλικά της συνταγής
   // (άθροισμα των kg/g υλικών, διά τις μερίδες) — ενημερωτικά, δίπλα
   // στο χειροκίνητο πεδίο "Γραμμάρια / Μερίδα".
@@ -1054,14 +1092,20 @@ export default function RecipePage() {
                       ΜΕΣΑ στη σειρά flex (δηλ. δίπλα στο input, όχι από κάτω),
                       γι' αυτό εμφανιζόταν "κρεμασμένο" πάνω από τον πίνακα
                       αντί ακριβώς κάτω από το πλαίσιο αναζήτησης. */}
+                  {/* right-0 (όχι left-0): το πλαίσιο αναζήτησης είναι το ΔΕΞΙ
+                      στοιχείο της σειράς (Μονάδα, μετά αναζήτηση) -- με left-0
+                      το dropdown άνοιγε κάτω από το "Μονάδα" (αριστερά), μακριά
+                      από το σημείο που κοιτάει/γράφει ο χρήστης, ειδικά τώρα
+                      που είναι πιο φαρδύ. Με right-0 ευθυγραμμίζεται με το
+                      δεξί άκρο του πλαισίου αναζήτησης. */}
                   {showIngredientSearch && (ingredientSearchTerm.trim() || ingredientUnitFilter) && (
-                    <div className="absolute left-0 top-full z-30 mt-1 w-80 max-h-72 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-2xl">
+                    <div className="absolute right-0 top-full z-30 mt-1 w-[30rem] max-w-[90vw] max-h-[28rem] overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-2xl">
                       {ingredientSearchResults.length === 0 ? (
-                        <div className="px-3 py-3 text-xs text-slate-400 text-center">
+                        <div className="px-4 py-4 text-sm text-slate-400 text-center">
                           {locale === "gr" ? "Δεν βρέθηκαν υλικά" : "No ingredients found"}
                         </div>
                       ) : (
-                        <table className="w-full text-xs">
+                        <table className="w-full text-sm">
                           <tbody>
                             {ingredientSearchResults.map((ing) => (
                               <tr
@@ -1069,9 +1113,32 @@ export default function RecipePage() {
                                 onClick={() => addIngredientToRecipe(ing)}
                                 className="cursor-pointer hover:bg-blue-50 border-b border-slate-50"
                               >
-                                <td className="px-3 py-2">
+                                <td className="px-4 py-2.5">
                                   <div className="font-medium text-slate-700">{locale === "gr" ? ing.name : (ing.nameEn || ing.name)}</div>
-                                  <div className="text-slate-400">{ing.sku} · €{Number(ing.basePrice).toFixed(2)}/{ing.unit}</div>
+                                  <div className="flex items-center gap-2 flex-wrap text-xs">
+                                    <span className="text-slate-400">{ing.sku}</span>
+                                    {(() => {
+                                      const rp = resultPrices[ing.id];
+                                      if (rp === "loading" || rp === undefined) {
+                                        return <span className="text-slate-300">…</span>;
+                                      }
+                                      if (rp === "error") {
+                                        return <span className="text-slate-400">€{Number(ing.basePrice).toFixed(2)}/{ing.unit}</span>;
+                                      }
+                                      if (rp.priceSource === "none") {
+                                        return (
+                                          <span className="text-amber-600 font-semibold">
+                                            ⚠️ {locale === "gr" ? "χωρίς τιμή" : "no price"}
+                                          </span>
+                                        );
+                                      }
+                                      return (
+                                        <span className="text-emerald-600 font-semibold">
+                                          ✅ €{rp.unitCost.toFixed(2)}/{rp.unit}
+                                        </span>
+                                      );
+                                    })()}
+                                  </div>
                                 </td>
                               </tr>
                             ))}
