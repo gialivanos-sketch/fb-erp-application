@@ -1,5 +1,6 @@
 "use client";
 import { useState, useRef, useMemo, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { useLanguage } from "@/lib/context";
 import { PageHeader, Badge, Modal } from "@/components/shared";
 import type { Recipe, RecipeIngredient } from "@/lib/types";
@@ -85,6 +86,19 @@ export default function RecipePage() {
   const [refreshingPrices, setRefreshingPrices] = useState(false);
   const [priceRefreshMsg, setPriceRefreshMsg] = useState("");
   const ingredientSearchRef = useRef<HTMLDivElement>(null);
+  // ΔΙΟΡΘΩΣΗ: το dropdown αναζήτησης ζει μέσα στο modal "Επεξεργασία
+  // Συνταγής", του οποίου το σώμα έχει overflow-y-auto (scrollable κουτί
+  // περιορισμένου ύψους) -- ένα absolute-positioned dropdown ΜΕΣΑ σε αυτό
+  // το κουτί "κόβεται" στο κάτω άκρο του modal, όσο μεγάλο κι αν το
+  // κάνουμε (γι' αυτό μεγαλώνοντας απλά το width/height δεν έλυνε το
+  // "δεν ανοίγει όλο" -- το πρόβλημα δεν ήταν το μέγεθος, ήταν ότι μέρος
+  // του ήταν σωματικά έξω από το ορατό/scrollable κουτί του modal).
+  // Λύση: το dropdown "τηλεμεταφέρεται" (React portal) απευθείας στο
+  // <body>, ΕΞΩ από το modal, με position:fixed σε συντεταγμένες που
+  // υπολογίζουμε εμείς από τη θέση του πλαισίου αναζήτησης στην οθόνη --
+  // έτσι δεν κόβεται ΠΟΤΕ από το scroll container του modal.
+  const ingredientDropdownRef = useRef<HTMLDivElement>(null);
+  const [searchDropdownPos, setSearchDropdownPos] = useState<{ top: number; right: number } | null>(null);
   // Πόσα υλικά είχε η συνταγή την τελευταία φορά που φορτώθηκε/αποθηκεύτηκε
   // -- baseline για το παρακάτω useEffect, ώστε να ξέρει πότε ΠΡΑΓΜΑΤΙΚΑ
   // προστέθηκε ή αφαιρέθηκε υλικό (και να ενημερώσει αυτόματα τα
@@ -200,13 +214,44 @@ export default function RecipePage() {
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
-      if (ingredientSearchRef.current && !ingredientSearchRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      // ΔΙΟΡΘΩΣΗ: το dropdown είναι πλέον portal-ed στο <body> (βλέπε
+      // ingredientDropdownRef πιο πάνω) -- ΔΕΝ είναι πια DOM-απόγονος του
+      // ingredientSearchRef, οπότε πρέπει να ελέγξουμε ΚΑΙ τα δύο πριν
+      // το κλείσουμε, αλλιώς ένα κλικ ΜΕΣΑ στο ίδιο το dropdown (π.χ. για
+      // να προσθέσεις ένα υλικό) θα το έκλεινε αμέσως σαν "κλικ έξω".
+      const insideInput = ingredientSearchRef.current?.contains(target);
+      const insideDropdown = ingredientDropdownRef.current?.contains(target);
+      if (!insideInput && !insideDropdown) {
         setShowIngredientSearch(false);
       }
     }
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
+
+  // Υπολογίζει/ανανεώνει τη θέση (στην οθόνη) του dropdown αναζήτησης
+  // κάθε φορά που ανοίγει, ΚΑΙ όποτε γίνεται scroll (μέσα στο modal --
+  // το scroll ενός εσωτερικού κουτιού δεν "ανεβαίνει" (bubble) στο
+  // window, αλλά ΠΙΑΝΕΤΑΙ στο capture-phase, γι' αυτό το true παρακάτω)
+  // ή αλλάζει μέγεθος το παράθυρο -- αλλιώς το "τηλεμεταφερμένο" dropdown
+  // θα έμενε κολλημένο στην ΠΑΛΙΑ θέση καθώς κάποιος κάνει scroll.
+  useEffect(() => {
+    if (!showIngredientSearch) { setSearchDropdownPos(null); return; }
+    function updatePos() {
+      const el = ingredientSearchRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      setSearchDropdownPos({ top: rect.bottom + 4, right: Math.max(4, window.innerWidth - rect.right) });
+    }
+    updatePos();
+    window.addEventListener("scroll", updatePos, true);
+    window.addEventListener("resize", updatePos);
+    return () => {
+      window.removeEventListener("scroll", updatePos, true);
+      window.removeEventListener("resize", updatePos);
+    };
+  }, [showIngredientSearch, ingredientSearchTerm, ingredientUnitFilter]);
   // Πλατιά προβολή λίστας: πίνακας με όλες τις συνταγές, checkboxes
   // για πολλαπλή επιλογή (θεμέλιο για μαζικές ενέργειες όπως export
   // ή μαζική διαγραφή). Ξεχωριστό state από το selectedRecipe/editing
@@ -1127,72 +1172,66 @@ export default function RecipePage() {
                     className="erp-input text-xs py-1.5 w-56"
                     autoComplete="off"
                   />
-                  {/* top-full παρακάτω είναι απαραίτητο, ΟΧΙ προαιρετικό στολίδι:
-                      αυτό το div είναι flex item μέσα στο "flex items-center"
-                      γονικό div (μαζί με το select και το input) -- χωρίς ρητό
-                      top, ένα absolute στοιχείο πέφτει στη "στατική" θέση του
-                      ΜΕΣΑ στη σειρά flex (δηλ. δίπλα στο input, όχι από κάτω),
-                      γι' αυτό εμφανιζόταν "κρεμασμένο" πάνω από τον πίνακα
-                      αντί ακριβώς κάτω από το πλαίσιο αναζήτησης. */}
-                  {/* right-0 (όχι left-0): το πλαίσιο αναζήτησης είναι το ΔΕΞΙ
-                      στοιχείο της σειράς (Μονάδα, μετά αναζήτηση) -- με left-0
-                      το dropdown άνοιγε κάτω από το "Μονάδα" (αριστερά), μακριά
-                      από το σημείο που κοιτάει/γράφει ο χρήστης, ειδικά τώρα
-                      που είναι πιο φαρδύ. Με right-0 ευθυγραμμίζεται με το
-                      δεξί άκρο του πλαισίου αναζήτησης. */}
-                  {showIngredientSearch && (ingredientSearchTerm.trim() || ingredientUnitFilter) && (
-                    // ΔΙΟΡΘΩΣΗ: το κουτί και τα γράμματα μέσα ήταν πολύ μικρά για
-                    // να διαβαστούν άνετα -- μεγαλύτερο πλάτος/ύψος, μεγαλύτερη
-                    // γραμματοσειρά (text-base αντί για text-sm στο όνομα, text-sm
-                    // αντί για text-xs στο SKU/τιμή), και πιο άνετο padding ανά γραμμή.
-                    <div className="absolute right-0 top-full z-30 mt-1 w-[38rem] max-w-[95vw] max-h-[34rem] overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-2xl">
-                      {ingredientSearchResults.length === 0 ? (
-                        <div className="px-4 py-4 text-base text-slate-400 text-center">
-                          {locale === "gr" ? "Δεν βρέθηκαν υλικά" : "No ingredients found"}
-                        </div>
-                      ) : (
-                        <table className="w-full text-base">
-                          <tbody>
-                            {ingredientSearchResults.map((ing) => (
-                              <tr
-                                key={ing.id}
-                                onClick={() => addIngredientToRecipe(ing)}
-                                className="cursor-pointer hover:bg-blue-50 border-b border-slate-50"
-                              >
-                                <td className="px-5 py-3.5">
-                                  <div className="font-semibold text-slate-800 text-base">{locale === "gr" ? ing.name : (ing.nameEn || ing.name)}</div>
-                                  <div className="flex items-center gap-3 flex-wrap text-sm mt-1">
-                                    <span className="text-slate-400">{ing.sku}</span>
-                                    {(() => {
-                                      const rp = resultPrices[ing.id];
-                                      if (rp === "loading" || rp === undefined) {
-                                        return <span className="text-slate-300">…</span>;
-                                      }
-                                      if (rp === "error") {
-                                        return <span className="text-slate-400">€{Number(ing.basePrice).toFixed(2)}/{ing.unit}</span>;
-                                      }
-                                      if (rp.priceSource === "none") {
+                  {/* ΔΙΟΡΘΩΣΗ (τελική): το dropdown δεν είναι πια εδώ, μέσα στη
+                      σειρά -- τηλεμεταφέρεται (portal) στο <body> παρακάτω,
+                      ΕΞΩ από το scrollable σώμα του modal, ώστε να ΜΗΝ κόβεται
+                      πια ("δεν ανοίγει όλο") -- βλέπε σχόλιο στο
+                      ingredientDropdownRef πιο πάνω για το γιατί. */}
+                  {showIngredientSearch && (ingredientSearchTerm.trim() || ingredientUnitFilter) && searchDropdownPos &&
+                    createPortal(
+                      <div
+                        ref={ingredientDropdownRef}
+                        className="fixed z-[9999] max-w-[95vw] max-h-[34rem] overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-2xl"
+                        style={{ top: searchDropdownPos.top, right: searchDropdownPos.right, width: "38rem" }}
+                      >
+                        {ingredientSearchResults.length === 0 ? (
+                          <div className="px-4 py-4 text-base text-slate-400 text-center">
+                            {locale === "gr" ? "Δεν βρέθηκαν υλικά" : "No ingredients found"}
+                          </div>
+                        ) : (
+                          <table className="w-full text-base">
+                            <tbody>
+                              {ingredientSearchResults.map((ing) => (
+                                <tr
+                                  key={ing.id}
+                                  onClick={() => addIngredientToRecipe(ing)}
+                                  className="cursor-pointer hover:bg-blue-50 border-b border-slate-50"
+                                >
+                                  <td className="px-5 py-3.5">
+                                    <div className="font-semibold text-slate-800 text-base">{locale === "gr" ? ing.name : (ing.nameEn || ing.name)}</div>
+                                    <div className="flex items-center gap-3 flex-wrap text-sm mt-1">
+                                      <span className="text-slate-400">{ing.sku}</span>
+                                      {(() => {
+                                        const rp = resultPrices[ing.id];
+                                        if (rp === "loading" || rp === undefined) {
+                                          return <span className="text-slate-300">…</span>;
+                                        }
+                                        if (rp === "error") {
+                                          return <span className="text-slate-400">€{Number(ing.basePrice).toFixed(2)}/{ing.unit}</span>;
+                                        }
+                                        if (rp.priceSource === "none") {
+                                          return (
+                                            <span className="text-amber-600 font-semibold">
+                                              ⚠️ {locale === "gr" ? "χωρίς τιμή" : "no price"}
+                                            </span>
+                                          );
+                                        }
                                         return (
-                                          <span className="text-amber-600 font-semibold">
-                                            ⚠️ {locale === "gr" ? "χωρίς τιμή" : "no price"}
+                                          <span className="text-emerald-600 font-semibold">
+                                            ✅ €{rp.unitCost.toFixed(2)}/{rp.unit}
                                           </span>
                                         );
-                                      }
-                                      return (
-                                        <span className="text-emerald-600 font-semibold">
-                                          ✅ €{rp.unitCost.toFixed(2)}/{rp.unit}
-                                        </span>
-                                      );
-                                    })()}
-                                  </div>
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      )}
-                    </div>
-                  )}
+                                      })()}
+                                    </div>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        )}
+                      </div>,
+                      document.body
+                    )}
                 </div>
               </div>
               <div className="overflow-x-auto">
