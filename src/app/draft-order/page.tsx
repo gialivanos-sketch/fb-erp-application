@@ -363,7 +363,7 @@ export default function DraftOrderPage() {
     bodyLines.push(RULE);
     g.items.forEach((i, idx) => {
       bodyLines.push(`${idx + 1}. ${i.productName}`);
-      bodyLines.push(`   ${i.orderedQuantity} ${i.unit} × €${i.basePrice.toFixed(2)}  =  €${i.grossAmount.toFixed(2)}`);
+      bodyLines.push(`   ${i.orderedQuantity} ${i.unit} × €${i.basePrice.toFixed(2)}  =  €${i.netAmount.toFixed(2)}`);
     });
     bodyLines.push("");
     bodyLines.push(RULE);
