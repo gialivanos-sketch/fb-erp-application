@@ -31,6 +31,7 @@ export default function SupplierQuotesPage() {
   const [grade, setGrade] = useState("");
   const [region, setRegion] = useState("");
   const [showBasket, setShowBasket] = useState(false);
+  const [onlyLatest, setOnlyLatest] = useState(true);
   // Import Modal
   const [showImport, setShowImport] = useState(false);
   const [importSupplier, setImportSupplier] = useState(0);
@@ -49,8 +50,28 @@ export default function SupplierQuotesPage() {
   const [deleteMsg, setDeleteMsg] = useState("");
   const [deleting, setDeleting] = useState(false);
 
+  // Every "Εισαγωγή Προσφοράς" upload INSERTS new supplier_products rows —
+  // it never overwrites or replaces older quotes for the same product. So
+  // over time the same product name (from the same supplier) accumulates
+  // many rows, one per upload, with no built-in way to tell which is
+  // current. Here we keep, per (supplier, product name), only the row with
+  // the newest `createdAt` — that is "the latest quote" the user asked for.
+  const latestProducts = useMemo(() => {
+    const latestByKey = new Map<string, SupplierProduct>();
+    for (const p of products) {
+      const key = p.supplierId + "||" + p.productName.trim().toLowerCase();
+      const existing = latestByKey.get(key);
+      if (!existing || new Date(p.createdAt || 0).getTime() > new Date(existing.createdAt || 0).getTime()) {
+        latestByKey.set(key, p);
+      }
+    }
+    return [...latestByKey.values()];
+  }, [products]);
+
+  const baseProducts = onlyLatest ? latestProducts : products;
+
   const filtered = useMemo(() => {
-    let result = [...products];
+    let result = [...baseProducts];
     if (search) {
       const s = search.toLowerCase();
       result = result.filter((p) => p.productName.toLowerCase().includes(s) || (p.productNameEn && p.productNameEn.toLowerCase().includes(s)));
@@ -59,11 +80,17 @@ export default function SupplierQuotesPage() {
     if (grade) result = result.filter((p) => p.qualityGrade === grade);
     if (region) result = result.filter((p) => p.regionOfOrigin === region);
     return result;
-  }, [products, search, category, grade, region]);
+  }, [baseProducts, search, category, grade, region]);
 
-  const categories = [...new Set(products.map((p) => p.category))].sort();
-  const grades = [...new Set(products.map((p) => p.qualityGrade).filter(Boolean))].sort();
-  const regions = [...new Set(products.map((p) => p.regionOfOrigin).filter(Boolean))].sort();
+  const categories = [...new Set(baseProducts.map((p) => p.category))].sort();
+  const grades = [...new Set(baseProducts.map((p) => p.qualityGrade).filter(Boolean))].sort();
+  const regions = [...new Set(baseProducts.map((p) => p.regionOfOrigin).filter(Boolean))].sort();
+  const fmtDate = (iso?: string) => {
+    if (!iso) return "—";
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return "—";
+    return d.toLocaleDateString(locale === "gr" ? "el-GR" : "en-GB", { day: "2-digit", month: "2-digit", year: "numeric" });
+  };
   const totalCartValue = cart.reduce((s, i) => s + Number(i.basePrice) * i.quantity, 0);
   const fmt = (n: number) => "€" + n.toFixed(2);
 
@@ -238,6 +265,15 @@ export default function SupplierQuotesPage() {
             {regions.map((r) => <option key={r} value={r!}>{r}</option>)}
           </select>
         </div>
+        <div>
+          <label className="erp-label">&nbsp;</label>
+          <label className="flex items-center gap-2 h-[38px] px-1 cursor-pointer select-none">
+            <input type="checkbox" checked={onlyLatest} onChange={(e) => setOnlyLatest(e.target.checked)} className="w-4 h-4" />
+            <span className="text-sm font-semibold text-slate-700">
+              {locale === "gr" ? "Μόνο τελευταία προσφορά ανά προϊόν" : "Latest quote per product only"}
+            </span>
+          </label>
+        </div>
       </FilterBar>
 
       <div className="flex gap-6">
@@ -256,6 +292,7 @@ export default function SupplierQuotesPage() {
                     <th>{t("fieldSupplier")}</th>
                     <th>{t("fieldCategory")}</th>
                     <th>{locale === "gr" ? "Τιμή/Μονάδα" : "Price/Unit"}</th>
+                    <th>{locale === "gr" ? "Ημ/νία Προσφοράς" : "Quote Date"}</th>
                     <th>{t("fieldQualityGrade")}</th>
                     <th>{t("fieldRegion")}</th>
                     <th>{locale === "gr" ? "Σύμβαση" : "Contract"}</th>
@@ -264,7 +301,7 @@ export default function SupplierQuotesPage() {
                 </thead>
                 <tbody>
                   {filtered.length === 0 ? (
-                    <tr><td colSpan={9} className="text-center py-8 text-slate-400">{t("noData")}</td></tr>
+                    <tr><td colSpan={10} className="text-center py-8 text-slate-400">{t("noData")}</td></tr>
                   ) : filtered.map((p) => {
                     const same = filtered.filter((x) => x.productName === p.productName);
                     const minPrice = Math.min(...same.map((x) => Number(x.basePrice)));
@@ -289,6 +326,7 @@ export default function SupplierQuotesPage() {
                           {fmt(Number(p.basePrice))}/{p.unit}
                           {isCheapest && <span className="ml-1 text-xs bg-emerald-100 text-emerald-700 px-1 rounded">{t("lowestPrice")}</span>}
                         </td>
+                        <td className="text-sm text-slate-500">{fmtDate(p.createdAt)}</td>
                         <td><Badge color={p.qualityGrade === "Grade A" ? "green" : "amber"}>{p.qualityGrade}</Badge></td>
                         <td className="text-sm">{p.regionOfOrigin}</td>
                         <td>{p.isContractPrice ? <Badge color="blue">🔒</Badge> : <span className="text-slate-300">—</span>}</td>
