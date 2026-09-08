@@ -1141,13 +1141,17 @@ export default function RecipePage() {
                       που είναι πιο φαρδύ. Με right-0 ευθυγραμμίζεται με το
                       δεξί άκρο του πλαισίου αναζήτησης. */}
                   {showIngredientSearch && (ingredientSearchTerm.trim() || ingredientUnitFilter) && (
-                    <div className="absolute right-0 top-full z-30 mt-1 w-[30rem] max-w-[90vw] max-h-[28rem] overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-2xl">
+                    // ΔΙΟΡΘΩΣΗ: το κουτί και τα γράμματα μέσα ήταν πολύ μικρά για
+                    // να διαβαστούν άνετα -- μεγαλύτερο πλάτος/ύψος, μεγαλύτερη
+                    // γραμματοσειρά (text-base αντί για text-sm στο όνομα, text-sm
+                    // αντί για text-xs στο SKU/τιμή), και πιο άνετο padding ανά γραμμή.
+                    <div className="absolute right-0 top-full z-30 mt-1 w-[38rem] max-w-[95vw] max-h-[34rem] overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-2xl">
                       {ingredientSearchResults.length === 0 ? (
-                        <div className="px-4 py-4 text-sm text-slate-400 text-center">
+                        <div className="px-4 py-4 text-base text-slate-400 text-center">
                           {locale === "gr" ? "Δεν βρέθηκαν υλικά" : "No ingredients found"}
                         </div>
                       ) : (
-                        <table className="w-full text-sm">
+                        <table className="w-full text-base">
                           <tbody>
                             {ingredientSearchResults.map((ing) => (
                               <tr
@@ -1155,9 +1159,9 @@ export default function RecipePage() {
                                 onClick={() => addIngredientToRecipe(ing)}
                                 className="cursor-pointer hover:bg-blue-50 border-b border-slate-50"
                               >
-                                <td className="px-4 py-2.5">
-                                  <div className="font-medium text-slate-700">{locale === "gr" ? ing.name : (ing.nameEn || ing.name)}</div>
-                                  <div className="flex items-center gap-2 flex-wrap text-xs">
+                                <td className="px-5 py-3.5">
+                                  <div className="font-semibold text-slate-800 text-base">{locale === "gr" ? ing.name : (ing.nameEn || ing.name)}</div>
+                                  <div className="flex items-center gap-3 flex-wrap text-sm mt-1">
                                     <span className="text-slate-400">{ing.sku}</span>
                                     {(() => {
                                       const rp = resultPrices[ing.id];
