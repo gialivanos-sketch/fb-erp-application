@@ -146,9 +146,28 @@ export default function DraftOrderPage() {
   const trimmedQuery = newProductName.trim();
   const normalizedQuery = normalizeGreek(trimmedQuery);
 
+  // Every "Εισαγωγή Προσφοράς" upload INSERTS a new supplier_products row —
+  // it never replaces the old one for the same product from the same
+  // supplier. So this list otherwise accumulates every quote ever
+  // uploaded (see the ΠΙΠΕΡΙΕΣ ΚΟΚΚΙΝΟ example: two rows, same supplier,
+  // different prices, no way to tell which is current). Keep only the
+  // newest row per (supplier, product name) before searching/sorting, so
+  // this lookup always offers the latest quote.
+  const latestSupplierProducts = useMemo(() => {
+    const latestByKey = new Map<string, SupplierProduct>();
+    for (const p of supplierProducts) {
+      const key = p.supplierId + "||" + p.productName.trim().toLowerCase();
+      const existing = latestByKey.get(key);
+      if (!existing || new Date(p.createdAt || 0).getTime() > new Date(existing.createdAt || 0).getTime()) {
+        latestByKey.set(key, p);
+      }
+    }
+    return [...latestByKey.values()];
+  }, [supplierProducts]);
+
   const effectiveResults = useMemo(() => {
     if (!normalizedQuery) return [];
-    return supplierProducts
+    return latestSupplierProducts
       .filter((p) => p.isActive !== false)
       .filter(
         (p) =>
@@ -156,7 +175,7 @@ export default function DraftOrderPage() {
           normalizeGreek(p.productNameEn || "").includes(normalizedQuery)
       )
       .sort((a, b) => Number(a.basePrice) - Number(b.basePrice));
-  }, [supplierProducts, normalizedQuery]);
+  }, [latestSupplierProducts, normalizedQuery]);
 
   const showLookup = trimmedQuery.length > 0 && effectiveResults.length > 0 && !lookupDismissed;
 
