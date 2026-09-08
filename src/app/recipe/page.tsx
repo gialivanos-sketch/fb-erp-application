@@ -184,6 +184,20 @@ export default function RecipePage() {
     }
   }, [recipeItems.length, computedGramsPerPortion]);
 
+  // ΔΙΟΡΘΩΣΗ: η calculateCosting() (παρακάτω) υπολογίζει "Κόστος Υλικών /
+  // Συνολικό Κόστος / Τιμή Πώλησης / Τιμή Μενού" από τα recipeItems, αλλά
+  // δεν την καλούσε ΚΑΝΕΝΑ σημείο του κώδικα -- τα 4 αυτά πεδία έμεναν
+  // πάντα στην τιμή που είχε φορτωθεί από τη βάση (ή "0" σε νέα συνταγή),
+  // ΑΝΕΞΑΡΤΗΤΑ από το τι έδειχνε ήδη ο πίνακας υλικών από κάτω (γι' αυτό
+  // φαινόταν €0,00 παντού ενώ οι γραμμές υλικών είχαν μη μηδενικό κόστος).
+  // Τώρα ξανατρέχει αυτόματα κάθε φορά που αλλάζουν τα υλικά (προσθήκη,
+  // αφαίρεση, επεξεργασία ποσότητας/τιμής, ανανέωση τιμών) ή τα
+  // χειροκίνητα πεδία εργατικών/γενικών εξόδων/περιθωρίου κέρδους.
+  useEffect(() => {
+    calculateCosting();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recipeItems, form.laborCost, form.overheadCost, form.profitMarginPercent]);
+
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
       if (ingredientSearchRef.current && !ingredientSearchRef.current.contains(e.target as Node)) {
@@ -267,11 +281,27 @@ export default function RecipePage() {
     if (from === to) return baseQty;
     if (from === "kg" && to === "g") return baseQty * 1000;
     if (from === "g" && to === "kg") return baseQty / 1000;
+    if ((from === "lt" || from === "l") && to === "ml") return baseQty * 1000;
+    if (from === "ml" && (to === "lt" || to === "l")) return baseQty / 1000;
     return baseQty;
   }
   function isWeightUnit(u: string): boolean {
     const x = (u || "").toLowerCase();
     return x === "kg" || x === "g";
+  }
+  // ΔΙΟΡΘΩΣΗ: μετατρέπει μια τιμή ΑΝΑ ΜΟΝΑΔΑ (π.χ. €/kg) σε τιμή ανά ΑΛΛΗ
+  // μονάδα (π.χ. €/g) -- ΑΝΤΙΘΕΤΗ κατεύθυνση από την convertQty() παραπάνω
+  // (μια ποσότητα 1kg->1000g πολλαπλασιάζεται επί 1000, αλλά μια τιμή
+  // €/kg->€/g ΔΙΑΙΡΕΙΤΑΙ διά 1000). Πριν αυτή τη διόρθωση, η τιμή μονάδας
+  // που επέστρεφε το get_ingredient_current_price (π.χ. €3,09/κιλό, αφού
+  // στο ιστορικό παραγγελιών η ντομάτα τιμολογείται ανά κονσέρβα 2,5kg)
+  // πολλαπλασιαζόταν ΚΑΤΕΥΘΕΙΑΝ με την ποσότητα της συνταγής σε ΓΡΑΜΜΑΡΙΑ
+  // (π.χ. 200) -- σαν να χρησιμοποιήθηκαν 200 ΚΙΛΑ αντί για 200 ΓΡΑΜΜΑΡΙΑ,
+  // βγάζοντας τερατώδη κόστη (π.χ. €618 αντί για €0,62 πραγματικό κόστος).
+  function convertUnitPrice(pricePerFromUnit: number, fromUnit: string, toUnit: string): number {
+    const factor = convertQty(1, fromUnit, toUnit); // πόσα toUnit είναι 1 fromUnit
+    if (!factor) return pricePerFromUnit;
+    return pricePerFromUnit / factor;
   }
   // Ποσότητα ΑΝΑ ΜΙΑ ΜΕΡΙΔΑ (στη βασική μονάδα του υλικού), με βάση τις
   // αποθηκευμένες μερίδες της συνταγής (form.portionYield).
@@ -393,7 +423,14 @@ export default function RecipePage() {
         // σπιτικό παρασκεύασμα που δεν αγοράζεται ποτέ έτοιμο, όχι κάτι
         // που λείπει από λάθος), κρατάμε τη χειροκίνητη «Τιμή Μονάδας»
         // από τη Σελίδα Με Υλικά αντί να τη μηδενίζουμε.
-        if (price && price.priceSource !== "none") unitCost = price.unitCost;
+        // ΔΙΟΡΘΩΣΗ: το get_ingredient_current_price επιστρέφει την τιμή
+        // στη μονάδα ΤΟΥ ΙΣΤΟΡΙΚΟΥ ΠΑΡΑΓΓΕΛΙΩΝ (π.χ. €/kg), όχι απαραίτητα
+        // στη μονάδα που θα χρησιμοποιηθεί το υλικό στη συνταγή (ing.unit,
+        // π.χ. "gr") -- τη μετατρέπουμε ΕΔΩ, μία φορά, ώστε το unitCost
+        // που αποθηκεύεται να ταιριάζει ΠΑΝΤΑ με τη μονάδα της γραμμής.
+        if (price && price.priceSource !== "none") {
+          unitCost = convertUnitPrice(price.unitCost, price.unit, ing.unit);
+        }
       } catch {
         // εφεδρικά η στατική τιμή, αν αποτύχει το αίτημα δυναμικής τιμής
       }
@@ -466,10 +503,15 @@ export default function RecipePage() {
         try {
           const price = await db.getIngredientCurrentPrice(item.ingredientId);
           if (price && price.priceSource !== "none") {
-            const newTotal = Number((Number(item.quantity) * price.unitCost).toFixed(2));
-            await db.updateRecipeIngredient(item.id, { unitCost: price.unitCost, totalCost: newTotal });
+            // ΔΙΟΡΘΩΣΗ: ίδιο θέμα με το addIngredientToRecipe -- η τιμή
+            // έρχεται στη μονάδα του ιστορικού παραγγελιών (π.χ. €/kg),
+            // τη μετατρέπουμε στη μονάδα ΤΗΣ ΓΡΑΜΜΗΣ (item.unit, π.χ.
+            // "gr") πριν πολλαπλασιάσουμε με την ποσότητα.
+            const rowUnitCost = convertUnitPrice(price.unitCost, price.unit, item.unit);
+            const newTotal = Number((Number(item.quantity) * rowUnitCost).toFixed(2));
+            await db.updateRecipeIngredient(item.id, { unitCost: rowUnitCost, totalCost: newTotal });
             const rowId = item.id;
-            setRecipeItems((prev) => prev.map((i) => (i.id === rowId ? { ...i, unitCost: price.unitCost, totalCost: newTotal } : i)));
+            setRecipeItems((prev) => prev.map((i) => (i.id === rowId ? { ...i, unitCost: rowUnitCost, totalCost: newTotal } : i)));
             updated++;
           } else {
             skipped++;
