@@ -19,9 +19,7 @@ import type {
   AppUser, Supplier, SupplierProduct, Order, OrderItem, SupplierPayment,
   StockTaking, StockTakingItem, InventorySnapshot, Ingredient, Recipe,
   RecipeIngredient, Menu, MenuRecipe, PrepListItem, Unit, IngestionLog, UserRole,
-  BusinessProfile,
 } from "./types";
-import { parsePrice } from "./csv";
 
 function requireClient() {
   if (!supabase) throw new Error("Supabase δεν έχει ρυθμιστεί — δείτε src/lib/supabaseClient.ts");
@@ -30,24 +28,6 @@ function requireClient() {
 
 const numToStr = (n: number | null | undefined): string => (n == null ? "0" : String(n));
 const strToNum = (s: string | null | undefined): number => (s == null || s === "" ? 0 : Number(s));
-
-// Αφαιρεί τόνους/διαλυτικά, κάνει κεφαλαία και συμπτύσσει πολλαπλά κενά σε
-// ένα -- ίδιας λογικής helper με αυτόν που ήδη υπάρχει (αντιγραμμένος) στη
-// σελίδα Υλικών και στην Παραγγελία Πρόχειρου. Χρησιμοποιείται ΜΟΝΟ για το
-// ταίριασμα ονόματος υλικού στη μαζική εισαγωγή συνταγών παρακάτω, ώστε
-// "Κρέμα Γάλακτος 35%" και "ΚΡΕΜΑ ΓΑΛΑΚΤΟΣ  35%" (τόνοι/κεφαλαία/διπλό κενό
-// διαφορετικά) να ταιριάζουν με το ΙΔΙΟ υπάρχον υλικό αντί να δημιουργείται
-// νέο σχεδόν-διπλότυπο κάθε φορά που το όνομα γράφτηκε λίγο διαφορετικά στο
-// αρχείο εισαγωγής.
-const IMPORT_GREEK_ACCENT_MAP: Record<string, string> = {
-  "Ά": "Α", "Έ": "Ε", "Ή": "Η", "Ί": "Ι", "Ϊ": "Ι", "Ό": "Ο", "Ύ": "Υ", "Ϋ": "Υ", "Ώ": "Ω",
-  "ά": "α", "έ": "ε", "ή": "η", "ί": "ι", "ϊ": "ι", "ΐ": "ι", "ό": "ο", "ύ": "υ", "ϋ": "υ", "ΰ": "υ", "ώ": "ω",
-};
-function normalizeIngredientNameForImport(s: string): string {
-  let out = "";
-  for (const ch of (s ?? "").trim()) out += IMPORT_GREEK_ACCENT_MAP[ch] ?? ch;
-  return out.toUpperCase().replace(/\s+/g, " ");
-}
 
 // ------------------------------------------------------------
 // USERS
@@ -118,28 +98,6 @@ export async function createSupplier(input: Omit<Supplier, "id" | "createdAt">):
 export async function deleteSupplier(id: number): Promise<void> {
   const { error } = await requireClient().from("suppliers").delete().eq("id", id);
   if (error) throw error;
-}
-
-/** Sets one supplier's own category (Καρτέλα Προμηθευτών). After saving,
- * the caller typically follows up with applySupplierCategoryToUncategorizedProducts
- * so that supplier's still-uncategorized products pick it up too. */
-export async function updateSupplierCategory(id: number, category: string): Promise<void> {
-  const { error } = await requireClient().from("suppliers").update({ category }).eq("id", id);
-  if (error) throw error;
-}
-
-/** Bulk-fills `category` on every one of this supplier's products that
- * doesn't have one set yet (empty or null) — never overwrites a category
- * a product already has, so a manual per-product override always sticks.
- * Returns how many product rows were updated. */
-export async function applySupplierCategoryToUncategorizedProducts(supplierId: number, category: string): Promise<number> {
-  const { error, count } = await requireClient()
-    .from("supplier_products")
-    .update({ category }, { count: "exact" })
-    .eq("supplier_id", supplierId)
-    .or("category.is.null,category.eq.");
-  if (error) throw error;
-  return count ?? 0;
 }
 
 export async function deleteOldQuotes(supplierId: number | null): Promise<number> {
@@ -237,77 +195,6 @@ export async function createSupplierProductsBulk(
   return count ?? rows.length;
 }
 
-/** Updates a single supplier product's category — used by the inline
- * dropdown in the Supplier Quotes ("Πίνακας Προσφορών") table so the
- * owner can categorize items manually after import. */
-export async function updateSupplierProductCategory(id: number, category: string): Promise<void> {
-  const { error } = await requireClient().from("supplier_products").update({ category }).eq("id", id);
-  if (error) throw error;
-}
-
-// ------------------------------------------------------------
-// PRODUCT SKU MAP (raw product name -> canonical SKU + group name).
-// Lets the owner manage which raw product names, as they appear in
-// order/quote history, belong under the same SKU — self-contained
-// data access for the new "Ομαδοποίηση Ειδών (SKU)" page.
-// ------------------------------------------------------------
-export interface ProductSkuMapEntry {
-  id: number;
-  productName: string;
-  sku: string;
-  finalGroup: string;
-  createdAt?: string;
-}
-
-interface ProductSkuMapRow {
-  id: number; product_name: string; sku: string; final_group: string; created_at: string;
-}
-
-function mapProductSkuMapEntry(row: ProductSkuMapRow): ProductSkuMapEntry {
-  return { id: row.id, productName: row.product_name, sku: row.sku, finalGroup: row.final_group, createdAt: row.created_at };
-}
-
-export async function fetchProductSkuMap(): Promise<ProductSkuMapEntry[]> {
-  const { data, error } = await requireClient()
-    .from("product_sku_map")
-    .select("id, product_name, sku, final_group, created_at")
-    .order("sku", { ascending: true });
-  if (error) throw error;
-  return (data ?? []).map((r) => mapProductSkuMapEntry(r as unknown as ProductSkuMapRow));
-}
-
-/** Adds one raw product name under a SKU (existing or brand new). */
-export async function createProductSkuMapEntry(input: { productName: string; sku: string; finalGroup: string }): Promise<void> {
-  const { error } = await requireClient().from("product_sku_map").insert({
-    product_name: input.productName, sku: input.sku, final_group: input.finalGroup,
-  });
-  if (error) throw error;
-}
-
-/** Moves one existing mapping to a different SKU/group (a single
- * product-name row, not the whole group). */
-export async function updateProductSkuMapEntry(id: number, patch: { sku?: string; finalGroup?: string }): Promise<void> {
-  const dbPatch: Record<string, string> = {};
-  if (patch.sku !== undefined) dbPatch.sku = patch.sku;
-  if (patch.finalGroup !== undefined) dbPatch.final_group = patch.finalGroup;
-  if (Object.keys(dbPatch).length === 0) return;
-  const { error } = await requireClient().from("product_sku_map").update(dbPatch).eq("id", id);
-  if (error) throw error;
-}
-
-/** Renames a SKU's group label across every product mapped to it
- * (final_group is meant to stay one consistent name per SKU). */
-export async function renameSkuGroup(sku: string, finalGroup: string): Promise<void> {
-  const { error } = await requireClient().from("product_sku_map").update({ final_group: finalGroup }).eq("sku", sku);
-  if (error) throw error;
-}
-
-/** Removes one product-name mapping (the product becomes "unmapped" again). */
-export async function deleteProductSkuMapEntry(id: number): Promise<void> {
-  const { error } = await requireClient().from("product_sku_map").delete().eq("id", id);
-  if (error) throw error;
-}
-
 // ------------------------------------------------------------
 // ORDERS + ORDER ITEMS
 // ------------------------------------------------------------
@@ -364,30 +251,6 @@ export async function createOrderWithItems(
     );
     if (itemsError) throw itemsError;
   }
-
-  // Auto-record a "Χρέωση" (debit) in the Payments Ledger for this
-  // order's total, so the supplier's turnover (Σύνολο Χρεώσεων /
-  // Ανοιχτό Υπόλοιπο on the Supplier CRM page) reflects orders placed
-  // without having to enter them again by hand. Best-effort: a failure
-  // here shouldn't undo the order that was just successfully saved —
-  // the order itself is already committed above.
-  const grossTotal = strToNum(order.totalGross);
-  if (grossTotal > 0) {
-    const { error: debitError } = await client.from("supplier_payments").insert({
-      supplier_id: order.supplierId,
-      transaction_date: order.orderDate,
-      amount: grossTotal,
-      type: "debit",
-      reference: order.orderNumber,
-      notes: "Αυτόματη χρέωση από παραγγελία",
-    });
-    if (debitError) {
-      // Swallow rather than throw: the order + items are already saved,
-      // and surfacing this as a save failure would be misleading.
-      console.error("Failed to auto-record order debit:", debitError);
-    }
-  }
-
   return orderId;
 }
 
@@ -462,28 +325,6 @@ export async function updateOrderItem(id: number, fields: { deliveredQuantity?: 
 export async function deleteOrderItem(id: number): Promise<void> {
   const { error } = await requireClient().from("order_items").delete().eq("id", id);
   if (error) throw error;
-}
-
-// Adds a brand-new line item to an EXISTING order (used by the
-// "Restore & Correction" flow in Orders Archive, so a product missed
-// off the original order can be added when correcting it).
-export async function addOrderItem(orderId: number, item: {
-  productName: string; orderedQuantity: number; deliveredQuantity?: number; unit: string;
-  basePrice: number; vatPercent: number; discountPercent: number;
-  netAmount: number; vatAmount: number; grossAmount: number; supplierProductId?: number | null;
-}): Promise<number> {
-  const { data, error } = await requireClient()
-    .from("order_items")
-    .insert({
-      order_id: orderId, supplier_product_id: item.supplierProductId ?? null, product_name: item.productName,
-      ordered_quantity: item.orderedQuantity, delivered_quantity: item.deliveredQuantity ?? item.orderedQuantity,
-      unit: item.unit, base_price: item.basePrice, vat_percent: item.vatPercent, discount_percent: item.discountPercent,
-      net_amount: item.netAmount, vat_amount: item.vatAmount, gross_amount: item.grossAmount,
-    })
-    .select("id")
-    .single();
-  if (error) throw error;
-  return (data as { id: number }).id;
 }
 
 // ------------------------------------------------------------
@@ -617,26 +458,9 @@ function mapIngredient(row: {
 }
 
 export async function fetchIngredients(): Promise<Ingredient[]> {
-  const client = requireClient();
-  // Η Supabase γυρνάει ΤΟ ΠΟΛΥ 1000 γραμμές ανά αίτημα (default) -- με
-  // περισσότερα από 1000 υλικά στο μητρώο (π.χ. 2800+) χρειάζεται
-  // σελιδοποίηση με .range(), αλλιώς λείπουν υλικά τόσο από τη λίστα
-  // στη σελίδα «Υλικά» όσο και από την αναζήτηση κατά τη σύνθεση
-  // συνταγής (ίδιο ζήτημα που είχαμε διορθώσει και για recipe_ingredients).
-  const PAGE_SIZE = 1000;
-  const rows: Parameters<typeof mapIngredient>[0][] = [];
-  for (let from = 0; ; from += PAGE_SIZE) {
-    const { data, error } = await client
-      .from("ingredients")
-      .select("id, sku, name, name_en, current_stock, unit, base_price, conversion_factor, conversion_per_unit, mapped_supplier_product_id, wastage_factor, calories, is_active, created_at")
-      .order("name", { ascending: true })
-      .range(from, from + PAGE_SIZE - 1);
-    if (error) throw error;
-    if (!data || data.length === 0) break;
-    rows.push(...(data as unknown as Parameters<typeof mapIngredient>[0][]));
-    if (data.length < PAGE_SIZE) break;
-  }
-  return rows.map(mapIngredient);
+  const { data, error } = await requireClient().from("ingredients").select("id, sku, name, name_en, current_stock, unit, base_price, conversion_factor, conversion_per_unit, mapped_supplier_product_id, wastage_factor, calories, is_active, created_at").order("name", { ascending: true });
+  if (error) throw error;
+  return (data ?? []).map(mapIngredient);
 }
 
 export interface IngredientCurrentPrice {
@@ -722,33 +546,19 @@ export async function fetchRecipes(): Promise<Recipe[]> {
   // 1 αίτημα: όλες οι συνταγές (χωρίς τα υλικά τους ακόμα)
   const { data: recipes, error } = await client
     .from("recipes")
-    .select("id, name, name_en, portion_yield, portion_unit, allergens, plating_images, technical_guide, total_raw_material_cost, labor_cost, overhead_cost, total_cost, profit_margin_percent, selling_price, menu_price_vat, menu_price_final, calories_per_portion, grams_per_portion, is_active, created_at")
+    .select("id, name, name_en, portion_yield, portion_unit, allergens, technical_guide, total_raw_material_cost, labor_cost, overhead_cost, total_cost, profit_margin_percent, selling_price, menu_price_vat, menu_price_final, is_active, created_at")
     .order("name", { ascending: true });
   if (error) throw error;
 
-  // Όλες οι γραμμές recipe_ingredients, για όλες τις συνταγές μαζί —
-  // αντί για ένα ξεχωριστό αίτημα ανά συνταγή (το οποίο, με χιλιάδες
-  // συνταγές, καθυστερούσε τόσο πολύ ώστε η αρχική φόρτωση δεδομένων
-  // της εφαρμογής δεν πρόλαβαινε ποτέ να ολοκληρωθεί εγκαίρως).
-  // Η Supabase γυρνάει ΤΟ ΠΟΛΥ 1000 γραμμές ανά αίτημα (default),
-  // οπότε με περισσότερες από 1000 recipe_ingredients (π.χ. 14000+)
-  // χρειάζεται σελιδοποίηση με .range() — αλλιώς λείπουν υλικά από
-  // πολλές συνταγές.
-  const PAGE_SIZE = 1000;
-  const allIngredients: {
-    id: number; recipe_id: number; ingredient_id: number | null; ingredient_name: string; quantity: number;
-    unit: string; unit_cost: number; total_cost: number; wastage_factor: number; requires_prep: boolean; prep_notes: string | null;
-  }[] = [];
-  for (let from = 0; ; from += PAGE_SIZE) {
-    const { data: page, error: ingError } = await client
-      .from("recipe_ingredients")
-      .select("id, recipe_id, ingredient_id, ingredient_name, quantity, unit, unit_cost, total_cost, wastage_factor, requires_prep, prep_notes")
-      .range(from, from + PAGE_SIZE - 1);
-    if (ingError) throw ingError;
-    if (!page || page.length === 0) break;
-    allIngredients.push(...page);
-    if (page.length < PAGE_SIZE) break;
-  }
+  // 1 αίτημα: ΟΛΕΣ οι γραμμές recipe_ingredients, για όλες τις
+  // συνταγές μαζί — αντί για ένα ξεχωριστό αίτημα ανά συνταγή (το
+  // οποίο, με χιλιάδες συνταγές, καθυστερούσε τόσο πολύ ώστε η
+  // αρχική φόρτωση δεδομένων της εφαρμογής δεν πρόλαβαινε ποτέ να
+  // ολοκληρωθεί εγκαίρως).
+  const { data: allIngredients, error: ingError } = await client
+    .from("recipe_ingredients")
+    .select("id, recipe_id, ingredient_id, ingredient_name, quantity, unit, unit_cost, total_cost, wastage_factor, requires_prep, prep_notes");
+  if (ingError) throw ingError;
 
   // Ομαδοποίηση στη μνήμη: recipe_id -> λίστα υλικών του.
   const ingredientsByRecipeId = new Map<number, typeof allIngredients>();
@@ -763,30 +573,15 @@ export async function fetchRecipes(): Promise<Recipe[]> {
     const ingredients = ingredientsByRecipeId.get(r.id) ?? [];
     result.push({
       id: r.id, name: r.name, nameEn: r.name_en, portionYield: numToStr(r.portion_yield), portionUnit: r.portion_unit,
-      allergens: JSON.stringify(r.allergens ?? []), platingImages: JSON.stringify(r.plating_images ?? []), technicalGuide: r.technical_guide,
+      allergens: JSON.stringify(r.allergens ?? []), technicalGuide: r.technical_guide,
       totalRawMaterialCost: numToStr(r.total_raw_material_cost), laborCost: numToStr(r.labor_cost),
       overheadCost: numToStr(r.overhead_cost), totalCost: numToStr(r.total_cost),
       profitMarginPercent: numToStr(r.profit_margin_percent), sellingPrice: numToStr(r.selling_price),
-      menuPriceVat: numToStr(r.menu_price_vat), menuPriceFinal: numToStr(r.menu_price_final),
-      caloriesPerPortion: numToStr(r.calories_per_portion), gramsPerPortion: numToStr(r.grams_per_portion), isActive: r.is_active,
+      menuPriceVat: numToStr(r.menu_price_vat), menuPriceFinal: numToStr(r.menu_price_final), isActive: r.is_active,
       createdAt: r.created_at, ingredients: ingredients.map(mapRecipeIngredient),
     });
   }
   return result;
-}
-
-// Ανεβάζει μία φωτογραφία παρουσίασης (πιάτου) μιας συνταγής στο
-// Supabase Storage bucket "recipe-images" και επιστρέφει το δημόσιο
-// URL της. Ο καλών είναι υπεύθυνος να αποθηκεύσει το URL στο πεδίο
-// plating_images της συνταγής (μέσω updateRecipeDetails).
-export async function uploadRecipeImage(recipeId: number, file: File): Promise<string> {
-  const client = requireClient();
-  const ext = file.name.split(".").pop() || "jpg";
-  const path = `recipe-${recipeId}/${Date.now()}.${ext}`;
-  const { error } = await client.storage.from("recipe-images").upload(path, file, { upsert: true });
-  if (error) throw error;
-  const { data } = client.storage.from("recipe-images").getPublicUrl(path);
-  return data.publicUrl;
 }
 
 // Ενημερώνει ΜΟΝΟ τα δικά της πεδία μιας συνταγής (όνομα, μερίδες,
@@ -802,12 +597,10 @@ export async function updateRecipeDetails(
   const payload = {
     name: recipe.name, name_en: recipe.nameEn, portion_yield: strToNum(recipe.portionYield), portion_unit: recipe.portionUnit,
     allergens: typeof recipe.allergens === "string" ? JSON.parse(recipe.allergens || "[]") : recipe.allergens ?? [],
-    plating_images: typeof recipe.platingImages === "string" ? JSON.parse(recipe.platingImages || "[]") : recipe.platingImages ?? [],
     technical_guide: recipe.technicalGuide, total_raw_material_cost: strToNum(recipe.totalRawMaterialCost),
     labor_cost: strToNum(recipe.laborCost), overhead_cost: strToNum(recipe.overheadCost), total_cost: strToNum(recipe.totalCost),
     profit_margin_percent: strToNum(recipe.profitMarginPercent), selling_price: strToNum(recipe.sellingPrice),
-    menu_price_vat: strToNum(recipe.menuPriceVat), menu_price_final: strToNum(recipe.menuPriceFinal),
-    calories_per_portion: strToNum(recipe.caloriesPerPortion), grams_per_portion: strToNum(recipe.gramsPerPortion), is_active: recipe.isActive ?? true,
+    menu_price_vat: strToNum(recipe.menuPriceVat), menu_price_final: strToNum(recipe.menuPriceFinal), is_active: recipe.isActive ?? true,
   };
   const { error } = await requireClient().from("recipes").update(payload).eq("id", id);
   if (error) throw error;
@@ -823,12 +616,10 @@ export async function createRecipeDetails(
   const payload = {
     name: recipe.name, name_en: recipe.nameEn, portion_yield: strToNum(recipe.portionYield), portion_unit: recipe.portionUnit,
     allergens: typeof recipe.allergens === "string" ? JSON.parse(recipe.allergens || "[]") : recipe.allergens ?? [],
-    plating_images: typeof recipe.platingImages === "string" ? JSON.parse(recipe.platingImages || "[]") : recipe.platingImages ?? [],
     technical_guide: recipe.technicalGuide, total_raw_material_cost: strToNum(recipe.totalRawMaterialCost),
     labor_cost: strToNum(recipe.laborCost), overhead_cost: strToNum(recipe.overheadCost), total_cost: strToNum(recipe.totalCost),
     profit_margin_percent: strToNum(recipe.profitMarginPercent), selling_price: strToNum(recipe.sellingPrice),
-    menu_price_vat: strToNum(recipe.menuPriceVat), menu_price_final: strToNum(recipe.menuPriceFinal),
-    calories_per_portion: strToNum(recipe.caloriesPerPortion), grams_per_portion: strToNum(recipe.gramsPerPortion), is_active: recipe.isActive ?? true,
+    menu_price_vat: strToNum(recipe.menuPriceVat), menu_price_final: strToNum(recipe.menuPriceFinal), is_active: recipe.isActive ?? true,
   };
   const { data, error } = await requireClient().from("recipes").insert(payload).select("id").single();
   if (error) throw error;
@@ -840,12 +631,10 @@ export async function upsertRecipe(recipe: Omit<Recipe, "id" | "createdAt"> & { 
   const payload = {
     name: recipe.name, name_en: recipe.nameEn, portion_yield: strToNum(recipe.portionYield), portion_unit: recipe.portionUnit,
     allergens: typeof recipe.allergens === "string" ? JSON.parse(recipe.allergens || "[]") : recipe.allergens ?? [],
-    plating_images: typeof recipe.platingImages === "string" ? JSON.parse(recipe.platingImages || "[]") : recipe.platingImages ?? [],
     technical_guide: recipe.technicalGuide, total_raw_material_cost: strToNum(recipe.totalRawMaterialCost),
     labor_cost: strToNum(recipe.laborCost), overhead_cost: strToNum(recipe.overheadCost), total_cost: strToNum(recipe.totalCost),
     profit_margin_percent: strToNum(recipe.profitMarginPercent), selling_price: strToNum(recipe.sellingPrice),
-    menu_price_vat: strToNum(recipe.menuPriceVat), menu_price_final: strToNum(recipe.menuPriceFinal),
-    calories_per_portion: strToNum(recipe.caloriesPerPortion), grams_per_portion: strToNum(recipe.gramsPerPortion), is_active: recipe.isActive ?? true,
+    menu_price_vat: strToNum(recipe.menuPriceVat), menu_price_final: strToNum(recipe.menuPriceFinal), is_active: recipe.isActive ?? true,
   };
 
   let recipeId: number;
@@ -1012,26 +801,18 @@ export async function bulkImportRecipesWithIngredients(rows: RecipeImportRow[]):
     .from("ingredients")
     .select("id, name, name_en, unit, base_price, wastage_factor");
   if (fetchError) throw fetchError;
-  // ΣΗΜΑΝΤΙΚΟ: ταίριασμα με κανονικοποιημένο (χωρίς τόνους/κεφαλαία/διπλά
-  // κενά) όνομα, όχι ακριβές lowercase -- διαφορετικά ένα υλικό γραμμένο
-  // λίγο διαφορετικά στο αρχείο εισαγωγής (τόνος, κεφαλαίο, διπλό κενό)
-  // περνούσε σαν "νέο" υλικό αντί να ταιριάξει με το ήδη υπάρχον
-  // (ήδη τιμολογημένο/ομαδοποιημένο) -- αυτό δημιουργούσε σχεδόν-διπλότυπα
-  // υλικά (π.χ. πολλαπλά "ΚΡΕΜΑ ΓΑΛΑΚΤΟΣ 35%").
-  const ingredientByName = new Map(
-    (existingIngredients ?? []).map((i) => [normalizeIngredientNameForImport(i.name), i])
-  );
+  const ingredientByName = new Map((existingIngredients ?? []).map((i) => [i.name.trim().toLowerCase(), i]));
 
   // ---- Step 2: find every ingredient name used anywhere in the file
   // that ISN'T already in the register, and bulk-create them all in one
   // insert. New ingredients get a generated SKU and the unit taken from
   // wherever that ingredient name first appears in the file. ----
-  const newIngredientNames = new Map<string, string>(); // normalized key -> original-cased name
+  const newIngredientNames = new Map<string, string>(); // lowercased key -> original-cased name
   const newIngredientUnits = new Map<string, string>();
   for (const row of rows) {
     const name = row.ingredientName?.trim();
     if (!name) continue;
-    const key = normalizeIngredientNameForImport(name);
+    const key = name.toLowerCase();
     if (ingredientByName.has(key) || newIngredientNames.has(key)) continue;
     newIngredientNames.set(key, name);
     newIngredientUnits.set(key, row.unit?.trim() || "kg");
@@ -1058,7 +839,7 @@ export async function bulkImportRecipesWithIngredients(rows: RecipeImportRow[]):
       .select("id, name, name_en, unit, base_price, wastage_factor");
     if (createIngError) throw createIngError;
     for (const ing of createdIngredients ?? []) {
-      ingredientByName.set(normalizeIngredientNameForImport(ing.name), ing);
+      ingredientByName.set(ing.name.trim().toLowerCase(), ing);
     }
   }
 
@@ -1100,22 +881,12 @@ export async function bulkImportRecipesWithIngredients(rows: RecipeImportRow[]):
     .select("id, name");
   if (createRecError) throw createRecError;
 
-  // ΣΗΜΑΝΤΙΚΗ ΔΙΟΡΘΩΣΗ: ΔΕΝ ταιριάζουμε πλέον τα δημιουργημένα recipes με
-  // τα recipesToCreate βάσει ΘΕΣΗΣ (index) στον πίνακα. Η υπόθεση "η
-  // Supabase/PostgREST επιστρέφει τις γραμμές ενός μαζικού insert με την
-  // ΙΔΙΑ σειρά που δόθηκαν" ΔΕΝ είναι εγγυημένη -- ένα μαζικό insert σε
-  // Postgres/PostgREST μπορεί να επιστρέψει τις γραμμές σε ΔΙΑΦΟΡΕΤΙΚΗ
-  // σειρά (π.χ. αν υπάρχει trigger, RLS policy με subquery, κτλ). Αν
-  // αυτό συμβεί, το ΛΑΘΟΣ recipe_id ταιριάζει με κάθε όνομα συνταγής, και
-  // ΟΛΑ τα υλικά της μιας συνταγής καταλήγουν να αποθηκεύονται κάτω από
-  // την ΑΛΛΗ συνταγή -- ακριβώς το σύμπτωμα "τα υλικά μέσα στη συνταγή
-  // δεν είναι αυτής της συνταγής, είναι ό,τι να 'ναι" που παρατηρήθηκε.
-  // Αντ' αυτού, ταιριάζουμε με το ΟΝΟΜΑ που επιστρέφει η ίδια η βάση για
-  // κάθε δημιουργημένη γραμμή -- ανεξάρτητο από τη σειρά επιστροφής.
+  // Supabase returns created rows in insertion order for a single insert
+  // call, so pairing by index with recipesToCreate is safe here.
   const recipeIdByKey = new Map<string, number>();
-  (createdRecipes ?? []).forEach((r) => {
-    const key = String(r.name ?? "").trim().toLowerCase();
-    recipeIdByKey.set(key, r.id as number);
+  (createdRecipes ?? []).forEach((r, idx) => {
+    const originalKey = recipesToCreate[idx].name.trim().toLowerCase();
+    recipeIdByKey.set(originalKey, r.id as number);
   });
 
   // ---- Step 4: build every recipe_ingredients row across every recipe,
@@ -1141,14 +912,9 @@ export async function bulkImportRecipesWithIngredients(rows: RecipeImportRow[]):
     if (recipeId == null) continue;
     let recipeCost = 0;
     for (const row of group.rows) {
-      const ingKey = normalizeIngredientNameForImport(row.ingredientName);
+      const ingKey = row.ingredientName.trim().toLowerCase();
       const matched = ingredientByName.get(ingKey);
-      // parsePrice() κάνει ό,τι κάνει ήδη για τιμές: μετατρέπει "7,5"
-      // (ελληνικό δεκαδικό κόμμα) σε "7.5" πριν το Number(). Πριν αυτή την
-      // αλλαγή η ποσότητα περνούσε ΚΑΤΕΥΘΕΙΑΝ από strToNum -> Number(), το
-      // οποίο επιστρέφει NaN για "7,5" (το κόμμα δεν αναγνωρίζεται) --
-      // ασυνέπεια με το πεδίο τιμής, που ήδη καθαριζόταν σωστά.
-      const quantity = strToNum(parsePrice(row.quantity));
+      const quantity = strToNum(row.quantity);
       const unitCost = Number(matched?.base_price ?? 0);
       const totalCost = quantity * unitCost;
       recipeCost += totalCost;
@@ -1310,45 +1076,6 @@ export async function logIngestion(entry: { fileName: string; fileType: string; 
   const { error } = await requireClient().from("ingestion_logs").insert({
     file_name: entry.fileName, file_type: entry.fileType, records_parsed: entry.recordsParsed,
     records_inserted: entry.recordsInserted, status: entry.status, errors: entry.errors ?? null,
-  });
-  if (error) throw error;
-}
-
-// ------------------------------------------------------------
-// BUSINESS PROFILE (single settings row — the company's own
-// letterhead info + logo, shown on printed/emailed purchase
-// orders). id is always 1; the row is created the first time
-// someone saves the Business Profile page, so a fresh install
-// with no row yet is a normal, expected state (fetch returns
-// null, and the page shows an empty form).
-// ------------------------------------------------------------
-export async function fetchBusinessProfile(): Promise<BusinessProfile | null> {
-  const { data, error } = await requireClient()
-    .from("business_profile")
-    .select("name, address, phone, email, tax_id, logo_data_url")
-    .eq("id", 1)
-    .maybeSingle();
-  if (error) throw error;
-  if (!data) return null;
-  return {
-    name: data.name ?? "",
-    address: data.address ?? "",
-    phone: data.phone ?? "",
-    email: data.email ?? "",
-    taxId: data.tax_id ?? "",
-    logoDataUrl: data.logo_data_url ?? null,
-  };
-}
-
-export async function saveBusinessProfile(profile: BusinessProfile): Promise<void> {
-  const { error } = await requireClient().from("business_profile").upsert({
-    id: 1,
-    name: profile.name || null,
-    address: profile.address || null,
-    phone: profile.phone || null,
-    email: profile.email || null,
-    tax_id: profile.taxId || null,
-    logo_data_url: profile.logoDataUrl || null,
   });
   if (error) throw error;
 }

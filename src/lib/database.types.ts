@@ -306,8 +306,6 @@ export interface Database {
           selling_price: number;
           menu_price_vat: number;
           menu_price_final: number;
-          calories_per_portion: number;
-          grams_per_portion: number;
           is_active: boolean | null;
           created_at: string;
         };
@@ -328,8 +326,6 @@ export interface Database {
           selling_price?: number;
           menu_price_vat?: number;
           menu_price_final?: number;
-          calories_per_portion?: number;
-          grams_per_portion?: number;
           is_active?: boolean | null;
         };
         Update: Partial<Database["public"]["Tables"]["recipes"]["Insert"]>;
@@ -486,52 +482,11 @@ export interface Database {
         Update: Partial<Database["public"]["Tables"]["ingestion_logs"]["Insert"]>;
         Relationships: [];
       };
-  
+    };
     // Required by Supabase's GenericSchema constraint even when empty —
     // omitting these caused every table query in this file to silently
     // degrade to a `never` type instead of failing clearly, which is
     // exactly what was happening before this was added.
-         product_sku_map: {
-        Row: {
-          id: number;
-          product_name: string;
-          sku: string;
-          final_group: string;
-          created_at: string;
-        };
-        Insert: {
-          id?: number;
-          product_name: string;
-          sku: string;
-          final_group: string;
-        };
-        Update: Partial<Database["public"]["Tables"]["product_sku_map"]["Insert"]>;
-        Relationships: [];
-      };
-      business_profile: {
-        Row: {
-          id: number;
-          name: string | null;
-          address: string | null;
-          phone: string | null;
-          email: string | null;
-          tax_id: string | null;
-          logo_data_url: string | null;
-          updated_at: string;
-        };
-        Insert: {
-          id?: number;
-          name?: string | null;
-          address?: string | null;
-          phone?: string | null;
-          email?: string | null;
-          tax_id?: string | null;
-          logo_data_url?: string | null;
-        };
-        Update: Partial<Database["public"]["Tables"]["business_profile"]["Insert"]>;
-        Relationships: [];
-      };
-    };
     Views: Record<string, never>;
     Functions: {
       // Matches get_ingredient_current_price() in schema_dynamic_pricing.sql —

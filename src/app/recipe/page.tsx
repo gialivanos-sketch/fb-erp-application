@@ -1,27 +1,12 @@
 "use client";
 import { useState, useRef, useMemo, useEffect } from "react";
-import { createPortal } from "react-dom";
 import { useLanguage } from "@/lib/context";
 import { PageHeader, Badge, Modal } from "@/components/shared";
 import type { Recipe, RecipeIngredient } from "@/lib/types";
 import * as db from "@/lib/supabaseData";
-import { parseSpreadsheetFile, rowsToObjects, pick, exportRowsToExcel, exportRecipeFormsPretty, type PrettyRecipeSheet } from "@/lib/csv";
+import { parseSpreadsheetFile, rowsToObjects, pick, exportRowsToExcel } from "@/lib/csv";
 
 const ALLERGEN_LIST = ["gluten","dairy","eggs","fish","shellfish","nuts","peanuts","soy","sesame","celery","mustard","lupin","molluscs","sulphites"];
-
-// Αφαιρεί τόνους/διαλυτικά και κάνει κεφαλαία, ώστε η αναζήτηση υλικού
-// να ταιριάζει ανεξάρτητα από τόνους (ίδιο helper με τη σελίδα Παραγγελίας
-// Πρόχειρου -- βλέπε src/app/draft-order/page.tsx). Χωρίς αυτό, η
-// αναζήτηση υλικού εδώ έβρισκε μόνο ακριβές ταίριασμα τόνων.
-const GREEK_ACCENT_MAP: Record<string, string> = {
-  "Ά": "Α", "Έ": "Ε", "Ή": "Η", "Ί": "Ι", "Ϊ": "Ι", "Ό": "Ο", "Ύ": "Υ", "Ϋ": "Υ", "Ώ": "Ω",
-  "ά": "α", "έ": "ε", "ή": "η", "ί": "ι", "ϊ": "ι", "ΐ": "ι", "ό": "ο", "ύ": "υ", "ϋ": "υ", "ΰ": "υ", "ώ": "ω",
-};
-function normalizeGreek(s: string): string {
-  let out = "";
-  for (const ch of s) out += GREEK_ACCENT_MAP[ch] ?? ch;
-  return out.toUpperCase();
-}
 
 interface RecipeFormState {
   name: string;
@@ -38,9 +23,6 @@ interface RecipeFormState {
   sellingPrice: string;
   menuPriceVat: string;
   menuPriceFinal: string;
-  caloriesPerPortion: string;
-  gramsPerPortion: string;
-  platingImages: string;
 }
 
 export default function RecipePage() {
@@ -57,20 +39,8 @@ export default function RecipePage() {
     totalRawMaterialCost: "0", laborCost: "0", overheadCost: "0",
     totalCost: "0", profitMarginPercent: "60", sellingPrice: "0",
     menuPriceVat: "0", menuPriceFinal: "0",
-    caloriesPerPortion: "0", gramsPerPortion: "0", platingImages: "[]",
   });
   const [recipeItems, setRecipeItems] = useState<RecipeIngredient[]>([]);
-  const [uploadingSlot, setUploadingSlot] = useState<number | null>(null);
-  // "Αριθμομηχανή" μερίδων — ανεξάρτητο από το portionYield της
-  // αποθηκευμένης συνταγής. Αλλάζοντάς το (π.χ. 5, 10, 50) ξαναϋπολογίζει
-  // ζωντανά τις ποσότητες/τιμές παρτίδας στον πίνακα υλικών, χωρίς να
-  // αλλάζει τίποτα στη βάση — καθαρά για το "πόσο χρειάζομαι για τη
-  // δουλειά που κάνω τώρα".
-  const [targetPortions, setTargetPortions] = useState<string>("1");
-  // Ανά-γραμμή επιλογή εμφάνισης kg/g (μόνο για υλικά με βασική μονάδα
-  // kg ή g) — καθαρά οπτικό, η πραγματική ποσότητα αποθηκεύεται πάντα
-  // στη βασική μονάδα του υλικού (item.unit).
-  const [rowUnitDisplay, setRowUnitDisplay] = useState<Record<number, "kg" | "g">>({});
   const [showSearch, setShowSearch] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   // Αναζήτηση υλικού με πληκτρολόγηση + dropdown, για προσθήκη υλικού
@@ -78,180 +48,29 @@ export default function RecipePage() {
   // ρητού αιτήματος του χρήστη να ακυρωθεί ο χωρισμός σε σελίδες).
   const [ingredientSearchTerm, setIngredientSearchTerm] = useState("");
   const [showIngredientSearch, setShowIngredientSearch] = useState(false);
-  // Φίλτρο μονάδας δίπλα στην αναζήτηση υλικού -- χρήσιμο για να
-  // περιορίσεις γρήγορα ανάμεσα σε >2800 υλικά χωρίς να χρειάζεται να
-  // πληκτρολογήσεις ολόκληρο το όνομα.
-  const [ingredientUnitFilter, setIngredientUnitFilter] = useState("");
   const [savingIngredientRowId, setSavingIngredientRowId] = useState<number | "new" | null>(null);
-  const [refreshingPrices, setRefreshingPrices] = useState(false);
-  const [priceRefreshMsg, setPriceRefreshMsg] = useState("");
   const ingredientSearchRef = useRef<HTMLDivElement>(null);
-  // ΔΙΟΡΘΩΣΗ: το dropdown αναζήτησης ζει μέσα στο modal "Επεξεργασία
-  // Συνταγής", του οποίου το σώμα έχει overflow-y-auto (scrollable κουτί
-  // περιορισμένου ύψους) -- ένα absolute-positioned dropdown ΜΕΣΑ σε αυτό
-  // το κουτί "κόβεται" στο κάτω άκρο του modal, όσο μεγάλο κι αν το
-  // κάνουμε (γι' αυτό μεγαλώνοντας απλά το width/height δεν έλυνε το
-  // "δεν ανοίγει όλο" -- το πρόβλημα δεν ήταν το μέγεθος, ήταν ότι μέρος
-  // του ήταν σωματικά έξω από το ορατό/scrollable κουτί του modal).
-  // Λύση: το dropdown "τηλεμεταφέρεται" (React portal) απευθείας στο
-  // <body>, ΕΞΩ από το modal, με position:fixed σε συντεταγμένες που
-  // υπολογίζουμε εμείς από τη θέση του πλαισίου αναζήτησης στην οθόνη --
-  // έτσι δεν κόβεται ΠΟΤΕ από το scroll container του modal.
-  const ingredientDropdownRef = useRef<HTMLDivElement>(null);
-  const [searchDropdownPos, setSearchDropdownPos] = useState<{ top: number; right: number } | null>(null);
-  // Πόσα υλικά είχε η συνταγή την τελευταία φορά που φορτώθηκε/αποθηκεύτηκε
-  // -- baseline για το παρακάτω useEffect, ώστε να ξέρει πότε ΠΡΑΓΜΑΤΙΚΑ
-  // προστέθηκε ή αφαιρέθηκε υλικό (και να ενημερώσει αυτόματα τα
-  // "Γραμμάρια / Μερίδα"), αντί να το κάνει και όταν απλά ανοίγεις μια
-  // ήδη αποθηκευμένη συνταγή (όπου η χειροκίνητη τιμή μπορεί σκόπιμα να
-  // διαφέρει από το άθροισμα -- π.χ. λόγω απώλειας βάρους στο μαγείρεμα).
-  const lastIngredientCountRef = useRef<number | null>(null);
 
-  const ingredientUnits = useMemo(() => {
-    const set = new Set<string>();
-    for (const ing of allIngredients) if (ing.unit) set.add(ing.unit);
-    return Array.from(set).sort();
-  }, [allIngredients]);
-
-  // Αναζήτηση ανεξάρτητη τόνων (βλέπε normalizeGreek) -- έτσι
-  // "ΝΤΟΜΑΤΑ" βρίσκει και "ντομάτα" και το αντίστροφο, χωρίς να
-  // χρειάζεται να πληκτρολογηθούν ακριβώς οι ίδιοι τόνοι.
   const ingredientSearchResults = useMemo(() => {
-    const q = normalizeGreek(ingredientSearchTerm.trim());
-    if (!q && !ingredientUnitFilter) return [];
+    const q = ingredientSearchTerm.trim().toLowerCase();
+    if (!q) return [];
     return allIngredients
       .filter((ing) => {
-        if (ingredientUnitFilter && ing.unit !== ingredientUnitFilter) return false;
-        if (!q) return true;
-        const name = normalizeGreek(locale === "gr" ? ing.name : (ing.nameEn || ing.name));
-        return name.includes(q) || normalizeGreek(ing.sku).includes(q);
+        const name = (locale === "gr" ? ing.name : (ing.nameEn || ing.name)).toLowerCase();
+        return name.includes(q) || ing.sku.toLowerCase().includes(q);
       })
-      .slice(0, 30);
-  }, [ingredientSearchTerm, ingredientUnitFilter, allIngredients, locale]);
-
-  // Πραγματική τιμή (όχι η στατική "Τιμή Μονάδας") για κάθε υλικό που
-  // εμφανίζεται ΤΩΡΑ στα αποτελέσματα αναζήτησης -- χωρίς αυτό, δύο
-  // σχεδόν-ίδια υλικά (π.χ. πολλά "ΚΡΕΜΑ ΓΑΛΑΚΤΟΣ 35%" από παλιά μαζική
-  // εισαγωγή) φαίνονται πανομοιότυπα στη λίστα, και δεν υπάρχει τρόπος
-  // να ξέρεις ΠΡΙΝ το προσθέσεις ποιο από όλα έχει πραγματικά τιμή.
-  // Με μικρή καθυστέρηση (debounce) ώστε να μη γίνεται ένα αίτημα ανά
-  // πάτημα πλήκτρου, και με "reqId" ώστε μια παλιά/αργή απάντηση να μην
-  // αντικαταστήσει αποτελέσματα μιας νεότερης αναζήτησης.
-  const [resultPrices, setResultPrices] = useState<Record<number, db.IngredientCurrentPrice | "loading" | "error">>({});
-  const searchPriceReqIdRef = useRef(0);
-  useEffect(() => {
-    if (ingredientSearchResults.length === 0) return;
-    const reqId = ++searchPriceReqIdRef.current;
-    const ids = ingredientSearchResults.map((r) => r.id);
-    setResultPrices((prev) => {
-      const next: typeof prev = {};
-      for (const id of ids) next[id] = prev[id] ?? "loading";
-      return next;
-    });
-    const timer = setTimeout(() => {
-      Promise.all(
-        ids.map((id) =>
-          db.getIngredientCurrentPrice(id)
-            .then((p) => [id, p] as const)
-            .catch(() => [id, null] as const)
-        )
-      ).then((entries) => {
-        if (searchPriceReqIdRef.current !== reqId) return; // ξεπεράστηκε από νεότερη αναζήτηση
-        setResultPrices((prev) => {
-          const next = { ...prev };
-          for (const [id, p] of entries) next[id] = p ?? "error";
-          return next;
-        });
-      });
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [ingredientSearchResults]);
-
-  // Γραμμάρια/μερίδα υπολογισμένα ΑΠΟ τα ίδια τα υλικά της συνταγής
-  // (άθροισμα των kg/g υλικών, διά τις μερίδες) — ενημερωτικά, δίπλα
-  // στο χειροκίνητο πεδίο "Γραμμάρια / Μερίδα".
-  const computedGramsPerPortion = useMemo(() => {
-    const totalGrams = recipeItems.reduce((sum, item) => {
-      const u = (item.unit || "").toLowerCase();
-      if (u === "kg") return sum + Number(item.quantity || 0) * 1000;
-      if (u === "g") return sum + Number(item.quantity || 0);
-      return sum;
-    }, 0);
-    const portions = Number(form.portionYield || 1) || 1;
-    return totalGrams / portions;
-  }, [recipeItems, form.portionYield]);
-
-  // Αυτόματη ενημέρωση "Γραμμάρια / Μερίδα" ΜΟΝΟ όταν πραγματικά
-  // προστέθηκε ή αφαιρέθηκε υλικό (ο αριθμός γραμμών άλλαξε σε σχέση
-  // με το baseline) -- ΟΧΙ όταν απλά άνοιξε μια ήδη αποθηκευμένη
-  // συνταγή (loadRecipe/newRecipe ορίζουν το baseline ίσο με το τρέχον
-  // πλήθος ΠΡΙΝ αυτό το effect προλάβει να τρέξει), ώστε να μην
-  // σβήνεται μια χειροκίνητη τιμή που σκόπιμα διαφέρει (π.χ. λόγω
-  // απώλειας βάρους στο μαγείρεμα). Το χειροκίνητο πεδίο παραμένει
-  // πάντα επεξεργάσιμο μετά — απλά δεν χρειάζεται πια το κλικ σε
-  // "Χρήση αυτού" κάθε φορά που προστίθεται/αφαιρείται μια γραμμή.
-  useEffect(() => {
-    if (lastIngredientCountRef.current === null) return;
-    if (recipeItems.length !== lastIngredientCountRef.current) {
-      lastIngredientCountRef.current = recipeItems.length;
-      setForm((prev) => ({ ...prev, gramsPerPortion: computedGramsPerPortion.toFixed(0) }));
-    }
-  }, [recipeItems.length, computedGramsPerPortion]);
-
-  // ΔΙΟΡΘΩΣΗ: η calculateCosting() (παρακάτω) υπολογίζει "Κόστος Υλικών /
-  // Συνολικό Κόστος / Τιμή Πώλησης / Τιμή Μενού" από τα recipeItems, αλλά
-  // δεν την καλούσε ΚΑΝΕΝΑ σημείο του κώδικα -- τα 4 αυτά πεδία έμεναν
-  // πάντα στην τιμή που είχε φορτωθεί από τη βάση (ή "0" σε νέα συνταγή),
-  // ΑΝΕΞΑΡΤΗΤΑ από το τι έδειχνε ήδη ο πίνακας υλικών από κάτω (γι' αυτό
-  // φαινόταν €0,00 παντού ενώ οι γραμμές υλικών είχαν μη μηδενικό κόστος).
-  // Τώρα ξανατρέχει αυτόματα κάθε φορά που αλλάζουν τα υλικά (προσθήκη,
-  // αφαίρεση, επεξεργασία ποσότητας/τιμής, ανανέωση τιμών) ή τα
-  // χειροκίνητα πεδία εργατικών/γενικών εξόδων/περιθωρίου κέρδους.
-  useEffect(() => {
-    calculateCosting();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [recipeItems, form.laborCost, form.overheadCost, form.profitMarginPercent]);
+      .slice(0, 20);
+  }, [ingredientSearchTerm, allIngredients, locale]);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
-      const target = e.target as Node;
-      // ΔΙΟΡΘΩΣΗ: το dropdown είναι πλέον portal-ed στο <body> (βλέπε
-      // ingredientDropdownRef πιο πάνω) -- ΔΕΝ είναι πια DOM-απόγονος του
-      // ingredientSearchRef, οπότε πρέπει να ελέγξουμε ΚΑΙ τα δύο πριν
-      // το κλείσουμε, αλλιώς ένα κλικ ΜΕΣΑ στο ίδιο το dropdown (π.χ. για
-      // να προσθέσεις ένα υλικό) θα το έκλεινε αμέσως σαν "κλικ έξω".
-      const insideInput = ingredientSearchRef.current?.contains(target);
-      const insideDropdown = ingredientDropdownRef.current?.contains(target);
-      if (!insideInput && !insideDropdown) {
+      if (ingredientSearchRef.current && !ingredientSearchRef.current.contains(e.target as Node)) {
         setShowIngredientSearch(false);
       }
     }
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
-
-  // Υπολογίζει/ανανεώνει τη θέση (στην οθόνη) του dropdown αναζήτησης
-  // κάθε φορά που ανοίγει, ΚΑΙ όποτε γίνεται scroll (μέσα στο modal --
-  // το scroll ενός εσωτερικού κουτιού δεν "ανεβαίνει" (bubble) στο
-  // window, αλλά ΠΙΑΝΕΤΑΙ στο capture-phase, γι' αυτό το true παρακάτω)
-  // ή αλλάζει μέγεθος το παράθυρο -- αλλιώς το "τηλεμεταφερμένο" dropdown
-  // θα έμενε κολλημένο στην ΠΑΛΙΑ θέση καθώς κάποιος κάνει scroll.
-  useEffect(() => {
-    if (!showIngredientSearch) { setSearchDropdownPos(null); return; }
-    function updatePos() {
-      const el = ingredientSearchRef.current;
-      if (!el) return;
-      const rect = el.getBoundingClientRect();
-      setSearchDropdownPos({ top: rect.bottom + 4, right: Math.max(4, window.innerWidth - rect.right) });
-    }
-    updatePos();
-    window.addEventListener("scroll", updatePos, true);
-    window.addEventListener("resize", updatePos);
-    return () => {
-      window.removeEventListener("scroll", updatePos, true);
-      window.removeEventListener("resize", updatePos);
-    };
-  }, [showIngredientSearch, ingredientSearchTerm, ingredientUnitFilter]);
   // Πλατιά προβολή λίστας: πίνακας με όλες τις συνταγές, checkboxes
   // για πολλαπλή επιλογή (θεμέλιο για μαζικές ενέργειες όπως export
   // ή μαζική διαγραφή). Ξεχωριστό state από το selectedRecipe/editing
@@ -272,11 +91,8 @@ export default function RecipePage() {
   function newRecipe() {
     setEditing(true);
     setSelectedRecipe(null);
-    setForm({ name: "", nameEn: "", portionYield: "1", portionUnit: "pcs", allergens: [], technicalGuide: "", totalRawMaterialCost: "0", laborCost: "0", overheadCost: "0", totalCost: "0", profitMarginPercent: "60", sellingPrice: "0", menuPriceVat: "0", menuPriceFinal: "0", caloriesPerPortion: "0", gramsPerPortion: "0", platingImages: "[]" });
+    setForm({ name: "", nameEn: "", portionYield: "1", portionUnit: "pcs", allergens: [], technicalGuide: "", totalRawMaterialCost: "0", laborCost: "0", overheadCost: "0", totalCost: "0", profitMarginPercent: "60", sellingPrice: "0", menuPriceVat: "0", menuPriceFinal: "0" });
     setRecipeItems([]);
-    setTargetPortions("1");
-    setRowUnitDisplay({});
-    lastIngredientCountRef.current = 0;
   }
 
   function loadRecipe(r: Recipe) {
@@ -290,13 +106,8 @@ export default function RecipePage() {
       totalRawMaterialCost: r.totalRawMaterialCost, laborCost: r.laborCost, overheadCost: r.overheadCost,
       totalCost: r.totalCost, profitMarginPercent: r.profitMarginPercent, sellingPrice: r.sellingPrice,
       menuPriceVat: r.menuPriceVat, menuPriceFinal: r.menuPriceFinal,
-      caloriesPerPortion: r.caloriesPerPortion ?? "0", gramsPerPortion: r.gramsPerPortion ?? "0",
-      platingImages: r.platingImages ?? "[]",
     });
     setRecipeItems(r.ingredients || []);
-    setTargetPortions(r.portionYield || "1");
-    setRowUnitDisplay({});
-    lastIngredientCountRef.current = (r.ingredients || []).length;
   }
 
   function calculateCosting() {
@@ -317,141 +128,6 @@ export default function RecipePage() {
     }));
   }
 
-  // --- Μερίδες & ζύγιση: βοηθητικές συναρτήσεις για τον πίνακα υλικών ---
-  // Μετατρέπει μια ποσότητα ανάμεσα σε kg/g. Για κάθε άλλη μονάδα
-  // (τεμ, lt κ.λπ.) επιστρέφει την τιμή αμετάβλητη.
-  function convertQty(baseQty: number, fromUnit: string, toUnit: string): number {
-    const from = (fromUnit || "").toLowerCase();
-    const to = (toUnit || "").toLowerCase();
-    if (from === to) return baseQty;
-    if (from === "kg" && to === "g") return baseQty * 1000;
-    if (from === "g" && to === "kg") return baseQty / 1000;
-    if ((from === "lt" || from === "l") && to === "ml") return baseQty * 1000;
-    if (from === "ml" && (to === "lt" || to === "l")) return baseQty / 1000;
-    return baseQty;
-  }
-  function isWeightUnit(u: string): boolean {
-    const x = (u || "").toLowerCase();
-    return x === "kg" || x === "g";
-  }
-  // ΔΙΟΡΘΩΣΗ: μετατρέπει μια τιμή ΑΝΑ ΜΟΝΑΔΑ (π.χ. €/kg) σε τιμή ανά ΑΛΛΗ
-  // μονάδα (π.χ. €/g) -- ΑΝΤΙΘΕΤΗ κατεύθυνση από την convertQty() παραπάνω
-  // (μια ποσότητα 1kg->1000g πολλαπλασιάζεται επί 1000, αλλά μια τιμή
-  // €/kg->€/g ΔΙΑΙΡΕΙΤΑΙ διά 1000). Πριν αυτή τη διόρθωση, η τιμή μονάδας
-  // που επέστρεφε το get_ingredient_current_price (π.χ. €3,09/κιλό, αφού
-  // στο ιστορικό παραγγελιών η ντομάτα τιμολογείται ανά κονσέρβα 2,5kg)
-  // πολλαπλασιαζόταν ΚΑΤΕΥΘΕΙΑΝ με την ποσότητα της συνταγής σε ΓΡΑΜΜΑΡΙΑ
-  // (π.χ. 200) -- σαν να χρησιμοποιήθηκαν 200 ΚΙΛΑ αντί για 200 ΓΡΑΜΜΑΡΙΑ,
-  // βγάζοντας τερατώδη κόστη (π.χ. €618 αντί για €0,62 πραγματικό κόστος).
-  function convertUnitPrice(pricePerFromUnit: number, fromUnit: string, toUnit: string): number {
-    const factor = convertQty(1, fromUnit, toUnit); // πόσα toUnit είναι 1 fromUnit
-    if (!factor) return pricePerFromUnit;
-    return pricePerFromUnit / factor;
-  }
-  // Ποσότητα ΑΝΑ ΜΙΑ ΜΕΡΙΔΑ (στη βασική μονάδα του υλικού), με βάση τις
-  // αποθηκευμένες μερίδες της συνταγής (form.portionYield).
-  function qtyPerPortionBase(item: RecipeIngredient): number {
-    const portions = Number(form.portionYield || 1) || 1;
-    return Number(item.quantity || 0) / portions;
-  }
-  // Ποσότητα για τον ΣΤΟΧΟ μερίδων (targetPortions) — π.χ. πόσα
-  // γραμμάρια χρειάζονται για 50 μερίδες αντί για τη 1 που έχει η
-  // αποθηκευμένη συνταγή.
-  function batchQtyBase(item: RecipeIngredient): number {
-    const target = Number(targetPortions || 0);
-    return qtyPerPortionBase(item) * target;
-  }
-  // Τιμή Μερίδας: πόσο κοστίζει αυτό το υλικό ΑΝΑ ΜΙΑ μερίδα της
-  // συνταγής (αντί για τιμή ανά μονάδα/κιλό).
-  function pricePerPortion(item: RecipeIngredient): number {
-    const portions = Number(form.portionYield || 1) || 1;
-    return Number(item.totalCost || 0) / portions;
-  }
-  // Κόστος αυτού του υλικού για τον στόχο μερίδων.
-  function batchPrice(item: RecipeIngredient): number {
-    const target = Number(targetPortions || 0);
-    return pricePerPortion(item) * target;
-  }
-
-  // Εξάγει ΜΙΑ συνταγή (αυτή που είναι ανοιχτή στο popup) σε .xlsx —
-  // μία γραμμή ανά υλικό, με τα στοιχεία της συνταγής επαναλαμβανόμενα
-  // σε κάθε γραμμή, και μια τελευταία γραμμή ΣΥΝΟΛΟ με τα κόστη.
-  function exportRecipeToExcel() {
-    if (recipeItems.length === 0) return;
-    const rows: Record<string, string | number>[] = recipeItems.map((item) => ({
-      [locale === "gr" ? "Συνταγή" : "Recipe"]: form.name,
-      [locale === "gr" ? "Μερίδες Συνταγής" : "Recipe Portions"]: Number(form.portionYield),
-      [locale === "gr" ? "Υλικό" : "Ingredient"]: item.ingredientName,
-      [locale === "gr" ? "Ποσότητα" : "Quantity"]: item.quantity,
-      [locale === "gr" ? "Μονάδα" : "Unit"]: item.unit,
-      [locale === "gr" ? "Τιμή Μερίδας" : "Portion Price"]: Number(pricePerPortion(item).toFixed(3)),
-      [locale === "gr" ? `Ποσότητα (${targetPortions || 0} μερ.)` : `Quantity (${targetPortions || 0} ptn)`]: Number(batchQtyBase(item).toFixed(4)),
-      [locale === "gr" ? `Κόστος (${targetPortions || 0} μερ.)` : `Cost (${targetPortions || 0} ptn)`]: Number(batchPrice(item).toFixed(2)),
-      [locale === "gr" ? "Σύνολο" : "Total"]: Number(item.totalCost),
-    }));
-    rows.push({
-      [locale === "gr" ? "Συνταγή" : "Recipe"]: form.name,
-      [locale === "gr" ? "Μερίδες Συνταγής" : "Recipe Portions"]: Number(form.portionYield),
-      [locale === "gr" ? "Υλικό" : "Ingredient"]: locale === "gr" ? "ΣΥΝΟΛΟ" : "TOTAL",
-      [locale === "gr" ? "Ποσότητα" : "Quantity"]: "",
-      [locale === "gr" ? "Μονάδα" : "Unit"]: "",
-      [locale === "gr" ? "Τιμή Μερίδας" : "Portion Price"]: "",
-      [locale === "gr" ? `Ποσότητα (${targetPortions || 0} μερ.)` : `Quantity (${targetPortions || 0} ptn)`]: "",
-      [locale === "gr" ? `Κόστος (${targetPortions || 0} μερ.)` : `Cost (${targetPortions || 0} ptn)`]: locale === "gr" ? "Κόστος Υλικών:" : "Raw Cost:",
-      [locale === "gr" ? "Σύνολο" : "Total"]: Number(form.totalRawMaterialCost),
-    });
-    const safeName = (form.name || (locale === "gr" ? "συνταγή" : "recipe")).replace(/[\\/:*?"<>|]/g, "").trim() || "recipe";
-    exportRowsToExcel(rows, safeName, locale === "gr" ? "Συνταγή" : "Recipe");
-  }
-
-  // Χτίζει το ίδιο payload με το saveRecipe, χρησιμοποιείται για να
-  // αποθηκεύσει ΑΜΕΣΩΣ τις φωτογραφίες παρουσίασης, χωρίς να χρειάζεται
-  // ξεχωριστό πάτημα του κουμπιού "Αποθήκευση Συνταγής".
-  function buildRecipeDetailsPayload(platingImagesOverride: string) {
-    return {
-      name: form.name, nameEn: form.nameEn || null, portionYield: form.portionYield, portionUnit: form.portionUnit,
-      allergens: JSON.stringify(form.allergens), technicalGuide: form.technicalGuide || null,
-      totalRawMaterialCost: form.totalRawMaterialCost, laborCost: form.laborCost, overheadCost: form.overheadCost,
-      totalCost: form.totalCost, profitMarginPercent: form.profitMarginPercent, sellingPrice: form.sellingPrice,
-      menuPriceVat: form.menuPriceVat, menuPriceFinal: form.menuPriceFinal,
-      caloriesPerPortion: form.caloriesPerPortion, gramsPerPortion: form.gramsPerPortion,
-      platingImages: platingImagesOverride, isActive: true,
-    };
-  }
-
-  // Ανεβάζει μια φωτογραφία στο slot (0, 1 ή 2) της Φωτογαλερίας —
-  // απαιτεί ήδη αποθηκευμένη συνταγή (selectedRecipe.id), γράφει
-  // ΑΜΕΣΩΣ στη βάση ώστε να μη χαθεί αν ο χρήστης κλείσει το popup.
-  async function uploadPlatingImage(slot: number, file: File) {
-    if (!selectedRecipe?.id) return;
-    setUploadingSlot(slot);
-    try {
-      const url = await db.uploadRecipeImage(selectedRecipe.id, file);
-      const images: string[] = JSON.parse(form.platingImages || "[]");
-      while (images.length < 3) images.push("");
-      images[slot] = url;
-      const newPlatingImages = JSON.stringify(images);
-      setForm((prev) => ({ ...prev, platingImages: newPlatingImages }));
-      await db.updateRecipeDetails(selectedRecipe.id, buildRecipeDetailsPayload(newPlatingImages));
-    } catch (err) {
-      alert(locale === "gr" ? "Αποτυχία μεταφόρτωσης: " + String(err) : "Upload failed: " + String(err));
-    } finally {
-      setUploadingSlot(null);
-    }
-  }
-
-  function removePlatingImage(slot: number) {
-    if (!selectedRecipe?.id) return;
-    const images: string[] = JSON.parse(form.platingImages || "[]");
-    while (images.length < 3) images.push("");
-    images[slot] = "";
-    const newPlatingImages = JSON.stringify(images);
-    setForm((prev) => ({ ...prev, platingImages: newPlatingImages }));
-    db.updateRecipeDetails(selectedRecipe.id, buildRecipeDetailsPayload(newPlatingImages)).catch((err) =>
-      alert(locale === "gr" ? "Αποτυχία διαγραφής: " + String(err) : "Delete failed: " + String(err))
-    );
-  }
-
   // Καλείται όταν ο χρήστης διαλέγει ένα υλικό από το αποτέλεσμα
   // αναζήτησης. Γράφει ΑΜΕΣΩΣ στη βάση (addRecipeIngredient) --
   // απαιτεί ότι η συνταγή ήδη υπάρχει (έχει selectedRecipe.id), αφού
@@ -463,36 +139,15 @@ export default function RecipePage() {
       let unitCost = Number(ing.basePrice);
       try {
         const price = await db.getIngredientCurrentPrice(ing.id);
-        // Μόνο αν βρέθηκε ΠΡΑΓΜΑΤΙΚΗ τιμή αντικαθιστούμε τη χειροκίνητη --
-        // αν το υλικό δεν έχει καθόλου ιστορικό παραγγελιών (π.χ. είναι
-        // σπιτικό παρασκεύασμα που δεν αγοράζεται ποτέ έτοιμο, όχι κάτι
-        // που λείπει από λάθος), κρατάμε τη χειροκίνητη «Τιμή Μονάδας»
-        // από τη Σελίδα Με Υλικά αντί να τη μηδενίζουμε.
-        // ΔΙΟΡΘΩΣΗ: το get_ingredient_current_price επιστρέφει την τιμή
-        // στη μονάδα ΤΟΥ ΙΣΤΟΡΙΚΟΥ ΠΑΡΑΓΓΕΛΙΩΝ (π.χ. €/kg), όχι απαραίτητα
-        // στη μονάδα που θα χρησιμοποιηθεί το υλικό στη συνταγή (ing.unit,
-        // π.χ. "gr") -- τη μετατρέπουμε ΕΔΩ, μία φορά, ώστε το unitCost
-        // που αποθηκεύεται να ταιριάζει ΠΑΝΤΑ με τη μονάδα της γραμμής.
-        if (price && price.priceSource !== "none") {
-          unitCost = convertUnitPrice(price.unitCost, price.unit, ing.unit);
-        }
+        if (price) unitCost = price.unitCost;
       } catch {
         // εφεδρικά η στατική τιμή, αν αποτύχει το αίτημα δυναμικής τιμής
       }
-      const newRowName = locale === "gr" ? ing.name : (ing.nameEn || ing.name);
-      const newId = await db.addRecipeIngredient(selectedRecipe.id, {
-        ingredientId: ing.id, ingredientName: newRowName,
+      await db.addRecipeIngredient(selectedRecipe.id, {
+        ingredientId: ing.id, ingredientName: locale === "gr" ? ing.name : (ing.nameEn || ing.name),
         quantity: 0, unit: ing.unit, unitCost, totalCost: 0,
         wastageFactor: Number(ing.wastageFactor), requiresPrep: false, prepNotes: "",
       });
-      setRecipeItems((prev) => [
-        ...prev,
-        {
-          id: newId, ingredientId: ing.id, ingredientName: newRowName,
-          quantity: 0, unit: ing.unit, unitCost, totalCost: 0,
-          wastageFactor: Number(ing.wastageFactor), requiresPrep: false, prepNotes: "",
-        },
-      ]);
       await refreshAll();
       setIngredientSearchTerm("");
       setShowIngredientSearch(false);
@@ -515,7 +170,6 @@ export default function RecipePage() {
     setSavingIngredientRowId(rowId);
     try {
       await db.updateRecipeIngredient(rowId, patch);
-      setRecipeItems((prev) => prev.map((i) => (i.id === rowId ? { ...i, ...patch } : i)));
       await refreshAll();
     } catch (err) {
       alert(locale === "gr" ? "Αποτυχία ενημέρωσης: " + String(err) : "Failed to update: " + String(err));
@@ -524,69 +178,10 @@ export default function RecipePage() {
     }
   }
 
-  // Ξαναφέρνει την πραγματική τιμή (get_ingredient_current_price) για ΚΑΘΕ
-  // υλικό ήδη προστεθειμένο σε αυτή τη συνταγή -- χρήσιμο για συνταγές
-  // που έγιναν πριν λειτουργήσει η δυναμική τιμοδότηση (τότε είχαν
-  // αποθηκευτεί με €0,00), ή απλά για να ξαναπάρεις τις πιο πρόσφατες
-  // τιμές χωρίς να ξαναπροσθέσεις κάθε υλικό ένα-ένα.
-  //
-  // Ενημερώνει ΜΟΝΟ όσα υλικά βρήκαν πραγματική τιμή (order_history ή
-  // supplier_offer) -- αν ένα υλικό δεν έχει ΚΑΘΟΛΟΥ ιστορικό παραγγελιών
-  // (π.χ. σπιτικό παρασκεύασμα, δεν αγοράζεται ποτέ έτοιμο), η ήδη
-  // αποθηκευμένη τιμή του (χειροκίνητη ή προηγούμενη) ΔΕΝ πειράζεται --
-  // πριν μηδενιζόταν αυτόματα, πράγμα που κατέστρεφε τη μοναδική έγκυρη
-  // τιμή που θα μπορούσε ποτέ να έχει ένα τέτοιο υλικό.
-  async function refreshAllPrices() {
-    if (recipeItems.length === 0) return;
-    setRefreshingPrices(true);
-    let updated = 0;
-    let skipped = 0;
-    let failed = 0;
-    try {
-      for (const item of recipeItems) {
-        if (item.id == null || item.ingredientId == null) continue;
-        try {
-          const price = await db.getIngredientCurrentPrice(item.ingredientId);
-          if (price && price.priceSource !== "none") {
-            // ΔΙΟΡΘΩΣΗ: ίδιο θέμα με το addIngredientToRecipe -- η τιμή
-            // έρχεται στη μονάδα του ιστορικού παραγγελιών (π.χ. €/kg),
-            // τη μετατρέπουμε στη μονάδα ΤΗΣ ΓΡΑΜΜΗΣ (item.unit, π.χ.
-            // "gr") πριν πολλαπλασιάσουμε με την ποσότητα.
-            const rowUnitCost = convertUnitPrice(price.unitCost, price.unit, item.unit);
-            const newTotal = Number((Number(item.quantity) * rowUnitCost).toFixed(2));
-            await db.updateRecipeIngredient(item.id, { unitCost: rowUnitCost, totalCost: newTotal });
-            const rowId = item.id;
-            setRecipeItems((prev) => prev.map((i) => (i.id === rowId ? { ...i, unitCost: rowUnitCost, totalCost: newTotal } : i)));
-            updated++;
-          } else {
-            skipped++;
-          }
-        } catch {
-          failed++;
-        }
-      }
-      await refreshAll();
-      setPriceRefreshMsg(
-        locale === "gr"
-          ? `✅ Ενημερώθηκαν ${updated} τιμές${skipped > 0 ? ` (${skipped} χωρίς ιστορικό — δεν πειράχτηκαν)` : ""}${failed > 0 ? ` (${failed} απέτυχαν)` : ""}`
-          : `✅ ${updated} prices refreshed${skipped > 0 ? ` (${skipped} had no history — left untouched)` : ""}${failed > 0 ? ` (${failed} failed)` : ""}`
-      );
-      setTimeout(() => setPriceRefreshMsg(""), 4000);
-    } finally {
-      setRefreshingPrices(false);
-    }
-  }
-
   async function deleteIngredientRow(rowId: number) {
     setSavingIngredientRowId(rowId);
     try {
       await db.deleteRecipeIngredient(rowId);
-      // Το refreshAll() πιο κάτω ενημερώνει μόνο το καθολικό cache
-      // (data.recipes) -- ΔΕΝ ξαναγράφει μόνο του το τοπικό recipeItems
-      // που δείχνει αυτός ο πίνακας, οπότε χωρίς αυτή τη γραμμή η
-      // γραμμή υλικού έμενε ορατή μέχρι να κλείσεις/ξανανοίξεις τη
-      // συνταγή, παρόλο που η διαγραφή είχε ήδη γίνει στη βάση.
-      setRecipeItems((prev) => prev.filter((i) => i.id !== rowId));
       await refreshAll();
     } catch (err) {
       alert(locale === "gr" ? "Αποτυχία διαγραφής: " + String(err) : "Failed to delete: " + String(err));
@@ -614,25 +209,15 @@ export default function RecipePage() {
         sellingPrice: form.sellingPrice,
         menuPriceVat: form.menuPriceVat,
         menuPriceFinal: form.menuPriceFinal,
-        caloriesPerPortion: form.caloriesPerPortion,
-        gramsPerPortion: form.gramsPerPortion,
-        platingImages: form.platingImages,
         isActive: true,
       };
       if (selectedRecipe?.id) {
         await db.updateRecipeDetails(selectedRecipe.id, details);
-        await refreshAll();
-        setEditing(false);
       } else {
-        // Νέα συνταγή: αποθηκεύουμε, αλλά ΔΕΝ κλείνουμε το popup —
-        // μένει ανοιχτό, φορτωμένο σαν "υπάρχουσα" συνταγή (με το νέο
-        // id), ώστε να εμφανιστεί αμέσως ο πίνακας υλικών και ο χρήστης
-        // να μπορεί να αρχίσει να προσθέτει υλικά χωρίς να κλείσει και
-        // να ξανανοίξει τη συνταγή.
-        const newId = await db.createRecipeDetails(details);
-        await refreshAll();
-        loadRecipe({ id: newId, ...details, ingredients: [] } as Recipe);
+        await db.createRecipeDetails(details);
       }
+      await refreshAll();
+      setEditing(false);
     } catch (err) {
       alert(locale === "gr" ? "Αποτυχία αποθήκευσης: " + String(err) : "Failed to save: " + String(err));
     } finally {
@@ -709,72 +294,8 @@ export default function RecipePage() {
     exportRowsToExcel(rows, filename, locale === "gr" ? "Συνταγές" : "Recipes");
   }
 
-  // Χτίζει το "όμορφο" φύλλο ΜΙΑΣ συνταγής (τίτλος, κουτί στοιχείων,
-  // πίνακας υλικών, κοστολόγηση, τεχνικός οδηγός) για τη μαζική εξαγωγή
-  // "Εξαγωγή Φορμών" -- έτοιμο να τυπωθεί και να δοθεί σε μάγειρα.
-  function buildPrettyRecipeSheet(r: Recipe, idx: number): PrettyRecipeSheet {
-    const gr = locale === "gr";
-    const portions = Number(r.portionYield || 1) || 1;
-    let allergens: string[] = [];
-    try {
-      allergens = typeof r.allergens === "string" ? JSON.parse(r.allergens || "[]") : ((r.allergens as unknown as string[]) || []);
-    } catch {
-      allergens = [];
-    }
-    return {
-      sheetName: r.name || (gr ? `Συνταγή ${idx + 1}` : `Recipe ${idx + 1}`),
-      title: r.name || (gr ? `Συνταγή ${idx + 1}` : `Recipe ${idx + 1}`),
-      subtitle: r.nameEn || undefined,
-      infoPairs: [
-        { label: gr ? "Μερίδες" : "Portions", value: `${Number(r.portionYield || 0)} ${r.portionUnit}` },
-        { label: gr ? "Θερμίδες / Μερίδα" : "Calories / Portion", value: Number(r.caloriesPerPortion || 0) },
-        { label: gr ? "Γραμμάρια / Μερίδα" : "Grams / Portion", value: `${Number(r.gramsPerPortion || 0)} g` },
-        { label: gr ? "Κόστος Εργασίας" : "Labor Cost", value: `€${Number(r.laborCost || 0).toFixed(2)}` },
-        { label: gr ? "Γενικά Έξοδα" : "Overhead Cost", value: `€${Number(r.overheadCost || 0).toFixed(2)}` },
-        { label: gr ? "Περιθώριο Κέρδους %" : "Profit Margin %", value: `${Number(r.profitMarginPercent || 0)}%` },
-      ],
-      allergensLine: allergens.length ? `${gr ? "Αλλεργιογόνα" : "Allergens"}: ${allergens.join(", ")}` : undefined,
-      ingredientRows: (r.ingredients || []).map((item) => ({
-        name: item.ingredientName,
-        quantity: Number(item.quantity || 0),
-        unit: item.unit,
-        portionPrice: `€${(Number(item.totalCost || 0) / portions).toFixed(3)}`,
-        total: `€${Number(item.totalCost || 0).toFixed(2)}`,
-      })),
-      costingPairs: [
-        { label: gr ? "Κόστος Υλικών" : "Raw Material Cost", value: `€${Number(r.totalRawMaterialCost || 0).toFixed(2)}` },
-        { label: gr ? "Συνολικό Κόστος" : "Total Cost", value: `€${Number(r.totalCost || 0).toFixed(2)}` },
-        { label: gr ? "Τιμή Πώλησης" : "Selling Price", value: `€${Number(r.sellingPrice || 0).toFixed(2)}` },
-        { label: gr ? "Τιμή Μενού (ΦΠΑ)" : "Menu Price (VAT)", value: `€${Number(r.menuPriceVat || 0).toFixed(2)}` },
-      ],
-      technicalGuide: r.technicalGuide || undefined,
-    };
-  }
-
-  // Μαζική εξαγωγή -- μία ΠΛΗΡΗΣ, όμορφη φόρμα συνταγής ανά φύλλο Excel
-  // (έτοιμη για εκτύπωση), για τις επιλεγμένες συνταγές (ή όλες, αν
-  // καμία δεν είναι επιλεγμένη).
-  async function exportRecipesFormsToExcel() {
-    const toExport = selectedIds.size > 0 ? recipes.filter((r) => selectedIds.has(r.id)) : recipes;
-    if (toExport.length === 0) return;
-    const sheets = toExport.map((r, idx) => buildPrettyRecipeSheet(r, idx));
-    const filename = locale === "gr" ? "συνταγές-φόρμες" : "recipe-forms";
-    try {
-      await exportRecipeFormsPretty(sheets, filename, {
-        num: "#",
-        ingredient: locale === "gr" ? "Υλικό" : "Ingredient",
-        quantity: locale === "gr" ? "Ποσότητα" : "Quantity",
-        unit: locale === "gr" ? "Μονάδα" : "Unit",
-        portionPrice: locale === "gr" ? "Τιμή Μερίδας" : "Portion Price",
-        total: locale === "gr" ? "Σύνολο" : "Total",
-        technicalGuideTitle: locale === "gr" ? "Τεχνικός Οδηγός" : "Technical Guide",
-      });
-    } catch (err) {
-      alert(locale === "gr" ? "Αποτυχία εξαγωγής: " + String(err) : "Export failed: " + String(err));
-    }
-  }
-
   function openForEdit(r: Recipe) {
+    setListView(false);
     loadRecipe(r);
   }
 
@@ -853,16 +374,16 @@ export default function RecipePage() {
 
   return (
     <div>
-      {/* Όλο το περιεχόμενο εκτός popup — κρύβεται ΤΕΛΕΙΩΣ (display:none)
-          στην εκτύπωση, ώστε η κρυμμένη λίστα συνταγών να μην πιάνει χώρο
-          και να μη δημιουργεί άδειες σελίδες. */}
-      <div className="print:hidden">
       <PageHeader title={t("headerRecipe")} subtitle="Interactive Recipe Composition / Φόρμα Συνταγής">
         <button onClick={() => setListView((v) => !v)} className={listView ? "erp-btn-primary" : "erp-btn-secondary"}>
           📊 {listView ? (locale === "gr" ? "Κανονική Προβολή" : "Normal View") : (locale === "gr" ? "Προβολή Λίστας" : "List View")}
         </button>
         <button onClick={newRecipe} className="erp-btn-primary">➕ {t("btnNewRecipe")}</button>
         <button onClick={() => setShowBulkImport(true)} className="erp-btn-success">📥 {locale === "gr" ? "Μαζική Εισαγωγή Excel" : "Bulk Import Excel"}</button>
+        {editing && <button onClick={saveRecipe} disabled={saving} className="erp-btn-success">{saving ? "…" : "💾"} {t("btnSaveRecipe")}</button>}
+        {editing && <button onClick={calculateCosting} className="erp-btn-secondary">🧮 {locale === "gr" ? "Υπολογισμός Κόστους" : "Calculate Costing"}</button>}
+        {editing && <button onClick={() => { setShowSearch(true); }} className="erp-btn-secondary">🔍 {t("btnSearchRestore")}</button>}
+        {editing && <button onClick={() => window.print()} className="erp-btn-secondary">🖨️ {t("btnPrint")}</button>}
       </PageHeader>
 
       {listView ? (
@@ -881,10 +402,7 @@ export default function RecipePage() {
               <button onClick={exportRecipesExcel} className="erp-btn-secondary text-xs px-3 py-1.5">
                 📊 {selectedIds.size > 0
                   ? (locale === "gr" ? `Εξαγωγή Επιλεγμένων (${selectedIds.size})` : `Export Selected (${selectedIds.size})`)
-                  : (locale === "gr" ? "Εξαγωγή Excel (Λίστα)" : "Export Excel (List)")}
-              </button>
-              <button onClick={exportRecipesFormsToExcel} className="erp-btn-secondary text-xs px-3 py-1.5" title={locale === "gr" ? "Μία πλήρης φόρμα συνταγής ανά φύλλο Excel" : "One full recipe form per Excel sheet"}>
-                📑 {locale === "gr" ? "Εξαγωγή Φορμών (ανά φύλλο)" : "Export Forms (per sheet)"}
+                  : (locale === "gr" ? "Εξαγωγή Excel" : "Export Excel")}
               </button>
             </div>
           </div>
@@ -966,13 +484,13 @@ export default function RecipePage() {
       ) : (
       <div className="flex gap-6">
         {/* Recipe List */}
-        <div className="w-full">
+        <div className={`${editing ? "hidden lg:block lg:w-1/3" : "w-full"}`}>
           <div className="erp-card">
             <div className="erp-card-header"><h3 className="font-semibold">📋 {locale === "gr" ? "Αρχείο Συνταγών" : "Recipe Archive"}</h3></div>
             <div className="divide-y max-h-[600px] overflow-y-auto">
               {recipes.length === 0 ? <div className="p-8 text-center text-slate-400">{t("noData")}</div> :
                 recipes.map((r, idx) => (
-                  <div key={r?.id ?? `recipe-${idx}`} className={`p-4 cursor-pointer hover:bg-blue-50/50 transition-colors ${selectedRecipe?.id === r?.id ? "bg-blue-50 border-l-4 border-blue-500" : ""}`} onClick={() => openForEdit(r)}>
+                  <div key={r?.id ?? `recipe-${idx}`} className={`p-4 cursor-pointer hover:bg-blue-50/50 transition-colors ${selectedRecipe?.id === r?.id ? "bg-blue-50 border-l-4 border-blue-500" : ""}`} onClick={() => loadRecipe(r)}>
                     <div className="font-medium">{r?.name ?? "—"}</div>
                     {r?.nameEn && <div className="text-xs text-slate-400">{r.nameEn}</div>}
                     <div className="flex items-center gap-2 mt-1">
@@ -988,208 +506,82 @@ export default function RecipePage() {
             </div>
           </div>
         </div>
-      </div>
-      )}
-      </div>
 
-      {/* Recipe Form Modal — ανοίγει με κλικ πάνω σε μια συνταγή ή στο
-          "Νέα Συνταγή", αντί για ενσωματωμένο πάνελ. */}
-      <Modal
-        isOpen={editing}
-        onClose={() => setEditing(false)}
-        title={selectedRecipe ? (locale === "gr" ? "Επεξεργασία Συνταγής" : "Edit Recipe") : (locale === "gr" ? "Νέα Συνταγή" : "New Recipe")}
-        size="full"
-      >
-        <div id="printable-recipe-area">
-          {/* Print CSS — συμπυκνώνει τη συνταγή ώστε να χωράει σε 1
-              σελίδα εκτύπωσης αντί για 2-3, και σπάει έξω από τους
-              περιορισμούς ύψους/overflow του Modal ώστε να μην κόβεται
-              περιεχόμενο. */}
-          <style>{`
-            @media print {
-              body * { visibility: hidden; }
-              #printable-recipe-area, #printable-recipe-area * { visibility: visible; }
-              .fixed.inset-0.z-50 { position: static !important; display: block !important; padding: 0 !important; }
-              .backdrop-blur-sm { display: none !important; }
-              .relative.bg-white.rounded-2xl {
-                position: static !important; box-shadow: none !important; max-height: none !important;
-                width: 100% !important; margin: 0 !important; border-radius: 0 !important;
-              }
-              .flex-1.overflow-y-auto.p-6 { overflow: visible !important; padding: 0 !important; flex: none !important; }
-              #plating-gallery-section { display: none !important; }
-              #printable-recipe-area .erp-card {
-                margin-bottom: 4px !important; box-shadow: none !important;
-                border: 1px solid #e2e8f0 !important; page-break-inside: avoid;
-              }
-              #printable-recipe-area .erp-card-header { padding: 3px 10px !important; }
-              #printable-recipe-area .p-6 { padding: 8px !important; }
-              #printable-recipe-area, #printable-recipe-area * { font-size: 12.5px !important; line-height: 1.3 !important; }
-              #printable-recipe-area .erp-label { font-size: 10px !important; margin-bottom: 0 !important; color: #64748b !important; }
-              #printable-recipe-area h3 { font-size: 14px !important; }
-              #printable-recipe-area input, #printable-recipe-area select, #printable-recipe-area textarea {
-                border: none !important; padding: 1px 0 !important; background: transparent !important;
-                height: auto !important; min-height: 0 !important;
-              }
-              #printable-recipe-area .erp-table th, #printable-recipe-area .erp-table td { padding: 2px 4px !important; }
-              #printable-recipe-area .gap-4 { gap: 4px !important; }
-              #printable-recipe-area .mb-4, #printable-recipe-area .mb-6 { margin-bottom: 3px !important; }
-              @page { size: A4; margin: 8mm; }
-            }
-          `}</style>
-          <div className="flex flex-wrap items-center gap-2 mb-4 print:hidden">
-            <button onClick={saveRecipe} disabled={saving} className="erp-btn-success">{saving ? "…" : "💾"} {t("btnSaveRecipe")}</button>
-            <button onClick={calculateCosting} className="erp-btn-secondary">🧮 {locale === "gr" ? "Υπολογισμός Κόστους" : "Calculate Costing"}</button>
-            <button onClick={() => setShowSearch(true)} className="erp-btn-secondary">🔍 {t("btnSearchRestore")}</button>
-            <button onClick={() => window.print()} className="erp-btn-secondary">🖨️ {t("btnPrint")} / PDF</button>
-            {selectedRecipe && (
-              <button onClick={exportRecipeToExcel} className="erp-btn-secondary">📊 {locale === "gr" ? "Εξαγωγή Excel" : "Export Excel"}</button>
-            )}
-          </div>
-
-          <div className="erp-card mb-6">
-            <div className="erp-card-header"><h3 className="font-semibold">👨‍🍳 {locale === "gr" ? "Στοιχεία Συνταγής" : "Recipe Details"}</h3></div>
-            <div className="p-6">
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
-                <div className="col-span-2"><label className="erp-label">{locale === "gr" ? "Ελληνική Ονομασία" : "Greek Name"}</label><input type="text" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} className="erp-input" /></div>
-                <div className="col-span-2"><label className="erp-label">English Name</label><input type="text" value={form.nameEn} onChange={e => setForm({ ...form, nameEn: e.target.value })} className="erp-input" /></div>
-                <div><label className="erp-label">{t("fieldPortionYield")}</label><input type="number" value={form.portionYield} onChange={e => setForm({ ...form, portionYield: e.target.value })} className="erp-input" step="0.1" /></div>
-                <div><label className="erp-label">{t("fieldUnit")}</label>
-                  <select value={form.portionUnit} onChange={e => setForm({ ...form, portionUnit: e.target.value })} className="erp-select">
-                    <option value="pcs">{locale === "gr" ? "Μερίδες" : "Portions"}</option><option value="L">L</option><option value="kg">kg</option>
-                  </select>
+        {/* Recipe Editor */}
+        {editing && (
+          <div className="flex-1" id="printable-recipe-area">
+            <div className="erp-card mb-6">
+              <div className="erp-card-header"><h3 className="font-semibold">👨‍🍳 {locale === "gr" ? "Στοιχεία Συνταγής" : "Recipe Details"}</h3></div>
+              <div className="p-6">
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+                  <div className="col-span-2"><label className="erp-label">{locale === "gr" ? "Ελληνική Ονομασία" : "Greek Name"}</label><input type="text" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} className="erp-input" /></div>
+                  <div className="col-span-2"><label className="erp-label">English Name</label><input type="text" value={form.nameEn} onChange={e => setForm({ ...form, nameEn: e.target.value })} className="erp-input" /></div>
+                  <div><label className="erp-label">{t("fieldPortionYield")}</label><input type="number" value={form.portionYield} onChange={e => setForm({ ...form, portionYield: e.target.value })} className="erp-input" step="0.1" /></div>
+                  <div><label className="erp-label">{t("fieldUnit")}</label>
+                    <select value={form.portionUnit} onChange={e => setForm({ ...form, portionUnit: e.target.value })} className="erp-select">
+                      <option value="pcs">{locale === "gr" ? "Μερίδες" : "Portions"}</option><option value="L">L</option><option value="kg">kg</option>
+                    </select>
+                  </div>
+                  <div><label className="erp-label">{locale === "gr" ? "Κόστος Εργασίας" : "Labor Cost"}</label><input type="number" value={form.laborCost} onChange={e => setForm({ ...form, laborCost: e.target.value })} className="erp-input" step="0.01" /></div>
+                  <div><label className="erp-label">{locale === "gr" ? "Γενικά Έξοδα" : "Overhead Cost"}</label><input type="number" value={form.overheadCost} onChange={e => setForm({ ...form, overheadCost: e.target.value })} className="erp-input" step="0.01" /></div>
+                  <div><label className="erp-label">{locale === "gr" ? "Περιθώριο Κέρδους %" : "Profit Margin %"}</label><input type="number" value={form.profitMarginPercent} onChange={e => setForm({ ...form, profitMarginPercent: e.target.value })} className="erp-input" step="1" /></div>
                 </div>
-                <div><label className="erp-label">{locale === "gr" ? "Κόστος Εργασίας" : "Labor Cost"}</label><input type="number" value={form.laborCost} onChange={e => setForm({ ...form, laborCost: e.target.value })} className="erp-input" step="0.01" /></div>
-                <div><label className="erp-label">{locale === "gr" ? "Γενικά Έξοδα" : "Overhead Cost"}</label><input type="number" value={form.overheadCost} onChange={e => setForm({ ...form, overheadCost: e.target.value })} className="erp-input" step="0.01" /></div>
-                <div><label className="erp-label">{locale === "gr" ? "Περιθώριο Κέρδους %" : "Profit Margin %"}</label><input type="number" value={form.profitMarginPercent} onChange={e => setForm({ ...form, profitMarginPercent: e.target.value })} className="erp-input" step="1" /></div>
-                <div><label className="erp-label">{locale === "gr" ? "Θερμίδες / Μερίδα" : "Calories / Portion"}</label><input type="number" value={form.caloriesPerPortion} onChange={e => setForm({ ...form, caloriesPerPortion: e.target.value })} className="erp-input" step="1" /></div>
-                <div>
-                  <label className="erp-label">{locale === "gr" ? "Γραμμάρια / Μερίδα" : "Grams / Portion"}</label>
-                  <input type="number" value={form.gramsPerPortion} onChange={e => setForm({ ...form, gramsPerPortion: e.target.value })} className="erp-input" step="1" />
-                  {recipeItems.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => setForm(prev => ({ ...prev, gramsPerPortion: computedGramsPerPortion.toFixed(0) }))}
-                      className="mt-1.5 w-full flex items-center justify-between gap-2 px-3 py-2 bg-amber-50 border border-amber-300 rounded-lg text-sm font-semibold text-amber-800 hover:bg-amber-100 transition-colors"
-                    >
-                      <span>
-                        {locale === "gr" ? "Υπολογισμένο από τα υλικά:" : "Computed from ingredients:"}{" "}
-                        {computedGramsPerPortion.toFixed(0)} g
-                      </span>
-                      <span className="text-xs underline">{locale === "gr" ? "Χρήση αυτού" : "Use this"}</span>
-                    </button>
-                  )}
+
+                {/* Allergens */}
+                <div className="mb-4">
+                  <label className="erp-label">{t("fieldAllergens")}</label>
+                  <div className="flex flex-wrap gap-2">
+                    {ALLERGEN_LIST.map(a => (
+                      <button key={a} onClick={() => setForm((prev) => ({
+                        ...prev,
+                        allergens: prev.allergens.includes(a) ? prev.allergens.filter((x) => x !== a) : [...prev.allergens, a],
+                      }))} className={`px-3 py-1 rounded-full text-xs font-medium transition-all ${form.allergens.includes(a) ? "bg-red-500 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}>
+                        {a}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              </div>
 
-              {/* Allergens */}
-              <div className="mb-4">
-                <label className="erp-label">{t("fieldAllergens")}</label>
-                <div className="flex flex-wrap gap-2">
-                  {ALLERGEN_LIST.map(a => (
-                    <button key={a} onClick={() => setForm((prev) => ({
-                      ...prev,
-                      allergens: prev.allergens.includes(a) ? prev.allergens.filter((x) => x !== a) : [...prev.allergens, a],
-                    }))} className={`px-3 py-1 rounded-full text-xs font-medium transition-all ${form.allergens.includes(a) ? "bg-red-500 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}>
-                      {a}
-                    </button>
-                  ))}
+                {/* Technical Guide */}
+                <div className="mb-4">
+                  <label className="erp-label">{t("fieldTechnicalGuide")}</label>
+                  <textarea value={form.technicalGuide} onChange={e => setForm({ ...form, technicalGuide: e.target.value })} className="erp-input min-h-[120px] font-mono text-sm" placeholder={locale === "gr" ? "Βήμα 1: ... Βήμα 2: ..." : "Step 1: ... Step 2: ..."} />
                 </div>
-              </div>
 
-              {/* Technical Guide */}
-              <div className="mb-4">
-                <label className="erp-label">{t("fieldTechnicalGuide")}</label>
-                <textarea value={form.technicalGuide} onChange={e => setForm({ ...form, technicalGuide: e.target.value })} className="erp-input min-h-[120px] font-mono text-sm" placeholder={locale === "gr" ? "Βήμα 1: ... Βήμα 2: ..." : "Step 1: ... Step 2: ..."} />
-              </div>
-
-              {/* Costing Summary */}
-              <div className="grid grid-cols-2 sm:grid-cols-6 gap-3 bg-slate-50 rounded-lg p-4">
-                <div><div className="text-xs text-slate-500">{locale === "gr" ? "Κόστος Υλικών" : "Raw Material Cost"}</div><div className="font-bold">€{Number(form.totalRawMaterialCost).toFixed(2)}</div></div>
-                <div><div className="text-xs text-slate-500">{locale === "gr" ? "Συνολικό Κόστος" : "Total Cost"}</div><div className="font-bold">€{Number(form.totalCost).toFixed(2)}</div></div>
-                <div><div className="text-xs text-slate-500">{locale === "gr" ? "Τιμή Πώλησης" : "Selling Price"}</div><div className="font-bold text-emerald-700">€{Number(form.sellingPrice).toFixed(2)}</div></div>
-                <div><div className="text-xs text-slate-500">{locale === "gr" ? "Τιμή Μενού (ΦΠΑ)" : "Menu Price (VAT)"}</div><div className="font-bold text-blue-700">€{Number(form.menuPriceVat).toFixed(2)}</div></div>
-                <div><div className="text-xs text-slate-500">{locale === "gr" ? `Συνολικά Γραμμάρια (${targetPortions || 0} μερ.)` : `Total Grams (${targetPortions || 0} ptn)`}</div><div className="font-bold">{(Number(form.gramsPerPortion) * Number(targetPortions || form.portionYield || 1)).toFixed(0)} g</div></div>
-                <div><div className="text-xs text-slate-500">{locale === "gr" ? `Κόστος Υλικών (${targetPortions || 0} μερ.)` : `Raw Cost (${targetPortions || 0} ptn)`}</div><div className="font-bold">€{((Number(form.totalRawMaterialCost) / (Number(form.portionYield || 1) || 1)) * Number(targetPortions || 0)).toFixed(2)}</div></div>
+                {/* Costing Summary */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-50 rounded-lg p-4">
+                  <div><div className="text-xs text-slate-500">{locale === "gr" ? "Κόστος Υλικών" : "Raw Material Cost"}</div><div className="font-bold">€{Number(form.totalRawMaterialCost).toFixed(2)}</div></div>
+                  <div><div className="text-xs text-slate-500">{locale === "gr" ? "Συνολικό Κόστος" : "Total Cost"}</div><div className="font-bold">€{Number(form.totalCost).toFixed(2)}</div></div>
+                  <div><div className="text-xs text-slate-500">{locale === "gr" ? "Τιμή Πώλησης" : "Selling Price"}</div><div className="font-bold text-emerald-700">€{Number(form.sellingPrice).toFixed(2)}</div></div>
+                  <div><div className="text-xs text-slate-500">{locale === "gr" ? "Τιμή Μενού (ΦΠΑ)" : "Menu Price (VAT)"}</div><div className="font-bold text-blue-700">€{Number(form.menuPriceVat).toFixed(2)}</div></div>
+                </div>
               </div>
             </div>
-          </div>
 
-          {/* Ingredient Matrix — ενοποιημένη ξανά μέσα στη φόρμα
-              συνταγής, κατόπιν ρητού αιτήματος του χρήστη. */}
-          {selectedRecipe && (
-            <div className="erp-card mb-6">
-              <div className="erp-card-header flex flex-col gap-2">
-                <div className="flex items-center justify-between flex-wrap gap-2">
+            {/* Ingredient Matrix — ενοποιημένη ξανά μέσα στη φόρμα
+                συνταγής, κατόπιν ρητού αιτήματος του χρήστη. */}
+            {selectedRecipe && (
+              <div className="erp-card mb-6">
+                <div className="erp-card-header flex items-center justify-between">
                   <h3 className="font-semibold">🧂 {locale === "gr" ? "Υλικά Συνταγής" : "Recipe Ingredients"}</h3>
-                  <div className="flex items-center gap-1 text-xs bg-blue-50 rounded-lg px-2 py-1.5">
-                    <span className="text-slate-500">{locale === "gr" ? "Υπολογισμός για" : "Calculate for"}</span>
+                  <div className="relative" ref={ingredientSearchRef}>
                     <input
-                      type="number" value={targetPortions}
-                      onChange={(e) => setTargetPortions(e.target.value)}
-                      className="erp-input text-xs py-1 w-16 text-center" step="any"
+                      type="text"
+                      value={ingredientSearchTerm}
+                      onChange={(e) => { setIngredientSearchTerm(e.target.value); setShowIngredientSearch(true); }}
+                      onFocus={() => setShowIngredientSearch(true)}
+                      placeholder={locale === "gr" ? "🔍 Αναζήτηση υλικού…" : "🔍 Search ingredient…"}
+                      className="erp-input text-xs py-1.5 w-56"
+                      autoComplete="off"
                     />
-                    <span className="text-slate-500">{locale === "gr" ? "μερίδες" : "portions"}</span>
-                  </div>
-                  {recipeItems.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={refreshAllPrices}
-                      disabled={refreshingPrices}
-                      className="erp-btn-secondary text-xs py-1.5"
-                      title={locale === "gr" ? "Ξαναφέρνει την πραγματική τιμή για όλα τα υλικά αυτής της συνταγής" : "Re-fetches the real price for every ingredient in this recipe"}
-                    >
-                      {refreshingPrices ? "…" : "🔄"} {locale === "gr" ? "Ανανέωση Τιμών" : "Refresh Prices"}
-                    </button>
-                  )}
-                  {priceRefreshMsg && (
-                    <span className="text-xs font-semibold text-emerald-700">{priceRefreshMsg}</span>
-                  )}
-                </div>
-                {/* Ξεχωριστή γραμμή, ΟΧΙ μέσα στο ίδιο flex-wrap row με τα
-                    παραπάνω -- όταν τίτλος/μερίδες/κουμπί/μήνυμα μαζί δεν
-                    χωρούσαν σε μία γραμμή, αυτό το κουτί "τυλιγόταν" σε
-                    απρόβλεπτη θέση και το αναδυόμενο dropdown αποτελεσμάτων
-                    (που είναι απόλυτα τοποθετημένο ΚΑΤΩ από αυτό) εμφανιζόταν
-                    "κρεμασμένο" κάπου αλλού στη σελίδα, χωρίς να φαίνεται
-                    καθόλου το ίδιο το πλαίσιο αναζήτησης. Με δική του γραμμή,
-                    έχει πάντα σταθερό, προβλέψιμο πλάτος. */}
-                <div className="relative flex items-center gap-1.5" ref={ingredientSearchRef}>
-                  <select
-                    value={ingredientUnitFilter}
-                    onChange={(e) => { setIngredientUnitFilter(e.target.value); setShowIngredientSearch(true); }}
-                    className="erp-select text-xs py-1.5 w-20"
-                    title={t("filterUnit")}
-                  >
-                    <option value="">{locale === "gr" ? "Μονάδα" : "Unit"}</option>
-                    {ingredientUnits.map((u) => <option key={u} value={u}>{u}</option>)}
-                  </select>
-                  <input
-                    type="text"
-                    value={ingredientSearchTerm}
-                    onChange={(e) => { setIngredientSearchTerm(e.target.value); setShowIngredientSearch(true); }}
-                    onFocus={() => setShowIngredientSearch(true)}
-                    placeholder={locale === "gr" ? "🔍 Αναζήτηση υλικού…" : "🔍 Search ingredient…"}
-                    className="erp-input text-xs py-1.5 w-56"
-                    autoComplete="off"
-                  />
-                  {/* ΔΙΟΡΘΩΣΗ (τελική): το dropdown δεν είναι πια εδώ, μέσα στη
-                      σειρά -- τηλεμεταφέρεται (portal) στο <body> παρακάτω,
-                      ΕΞΩ από το scrollable σώμα του modal, ώστε να ΜΗΝ κόβεται
-                      πια ("δεν ανοίγει όλο") -- βλέπε σχόλιο στο
-                      ingredientDropdownRef πιο πάνω για το γιατί. */}
-                  {showIngredientSearch && (ingredientSearchTerm.trim() || ingredientUnitFilter) && searchDropdownPos &&
-                    createPortal(
-                      <div
-                        ref={ingredientDropdownRef}
-                        className="fixed z-[9999] max-w-[95vw] max-h-[34rem] overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-2xl"
-                        style={{ top: searchDropdownPos.top, right: searchDropdownPos.right, width: "38rem" }}
-                      >
+                    {showIngredientSearch && ingredientSearchTerm.trim() && (
+                      <div className="absolute right-0 z-30 mt-1 w-80 max-h-72 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-2xl">
                         {ingredientSearchResults.length === 0 ? (
-                          <div className="px-4 py-4 text-base text-slate-400 text-center">
+                          <div className="px-3 py-3 text-xs text-slate-400 text-center">
                             {locale === "gr" ? "Δεν βρέθηκαν υλικά" : "No ingredients found"}
                           </div>
                         ) : (
-                          <table className="w-full text-base">
+                          <table className="w-full text-xs">
                             <tbody>
                               {ingredientSearchResults.map((ing) => (
                                 <tr
@@ -1197,114 +589,48 @@ export default function RecipePage() {
                                   onClick={() => addIngredientToRecipe(ing)}
                                   className="cursor-pointer hover:bg-blue-50 border-b border-slate-50"
                                 >
-                                  <td className="px-5 py-3.5">
-                                    <div className="font-semibold text-slate-800 text-base">{locale === "gr" ? ing.name : (ing.nameEn || ing.name)}</div>
-                                    <div className="flex items-center gap-3 flex-wrap text-sm mt-1">
-                                      <span className="text-slate-400">{ing.sku}</span>
-                                      {(() => {
-                                        const rp = resultPrices[ing.id];
-                                        if (rp === "loading" || rp === undefined) {
-                                          return <span className="text-slate-300">…</span>;
-                                        }
-                                        if (rp === "error") {
-                                          return <span className="text-slate-400">€{Number(ing.basePrice).toFixed(2)}/{ing.unit}</span>;
-                                        }
-                                        if (rp.priceSource === "none") {
-                                          return (
-                                            <span className="text-amber-600 font-semibold">
-                                              ⚠️ {locale === "gr" ? "χωρίς τιμή" : "no price"}
-                                            </span>
-                                          );
-                                        }
-                                        return (
-                                          <span className="text-emerald-600 font-semibold">
-                                            ✅ €{rp.unitCost.toFixed(2)}/{rp.unit}
-                                          </span>
-                                        );
-                                      })()}
-                                    </div>
+                                  <td className="px-3 py-2">
+                                    <div className="font-medium text-slate-700">{locale === "gr" ? ing.name : (ing.nameEn || ing.name)}</div>
+                                    <div className="text-slate-400">{ing.sku} · €{Number(ing.basePrice).toFixed(2)}/{ing.unit}</div>
                                   </td>
                                 </tr>
                               ))}
                             </tbody>
                           </table>
                         )}
-                      </div>,
-                      document.body
+                      </div>
                     )}
+                  </div>
                 </div>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="erp-table">
-                  <thead>
-                    <tr>
-                      <th>#</th>
-                      <th className="min-w-[220px]">{t("fieldProduct")}</th>
-                      <th className="min-w-[160px]">{t("fieldQuantity")}</th>
-                      <th className="min-w-[80px]">{t("fieldUnit")}</th>
-                      <th>{locale === "gr" ? "Τιμή Μερίδας" : "Portion Price"}</th>
-                      <th>{locale === "gr" ? `Ποσότητα (${targetPortions || 0} μερ.)` : `Qty (${targetPortions || 0} ptn)`}</th>
-                      <th>{locale === "gr" ? `Κόστος (${targetPortions || 0} μερ.)` : `Cost (${targetPortions || 0} ptn)`}</th>
-                      <th>{locale === "gr" ? "Σύνολο" : "Total"}</th>
-                      <th></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {recipeItems.length === 0 ? (
-                      <tr><td colSpan={9} className="text-center py-6 text-slate-400">{t("noData")}</td></tr>
-                    ) : recipeItems.filter((item): item is typeof item & { id: number } => item.id != null).map((item, i) => {
-                      const toggleable = isWeightUnit(item.unit);
-                      const displayUnit = toggleable ? (rowUnitDisplay[item.id] || (item.unit.toLowerCase() as "kg" | "g")) : item.unit;
-                      const dispQty = toggleable ? convertQty(Number(item.quantity || 0), item.unit, displayUnit) : Number(item.quantity || 0);
-                      const dispBatchQty = toggleable ? convertQty(batchQtyBase(item), item.unit, displayUnit) : batchQtyBase(item);
-                      return (
+                <div className="overflow-x-auto">
+                  <table className="erp-table">
+                    <thead>
+                      <tr>
+                        <th>#</th>
+                        <th className="min-w-[220px]">{t("fieldProduct")}</th>
+                        <th>{t("fieldQuantity")}</th>
+                        <th>{t("fieldUnit")}</th>
+                        <th>{locale === "gr" ? "Τιμή Μονάδας" : "Unit Cost"}</th>
+                        <th>{locale === "gr" ? "Σύνολο" : "Total"}</th>
+                        <th></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {recipeItems.length === 0 ? (
+                        <tr><td colSpan={7} className="text-center py-6 text-slate-400">{t("noData")}</td></tr>
+                      ) : recipeItems.filter((item): item is typeof item & { id: number } => item.id != null).map((item, i) => (
                         <tr key={item.id} className={savingIngredientRowId === item.id ? "opacity-50" : ""}>
                           <td className="text-xs text-slate-400">{i + 1}</td>
                           <td className="min-w-[220px] font-medium">{item.ingredientName}</td>
                           <td>
                             <input
-                              key={displayUnit}
-                              type="number" defaultValue={dispQty}
-                              onBlur={(e) => {
-                                const displayVal = Number(e.target.value);
-                                const baseVal = toggleable ? convertQty(displayVal, displayUnit, item.unit) : displayVal;
-                                updateIngredientRow(item.id, "quantity", Number(baseVal.toFixed(4)));
-                              }}
-                              className="erp-input text-xs py-1 w-24" style={{ minWidth: "6rem" }} step="0.001"
+                              type="number" defaultValue={item.quantity}
+                              onBlur={(e) => updateIngredientRow(item.id, "quantity", Number(e.target.value))}
+                              className="erp-input text-xs py-1 w-20" step="0.001"
                             />
                           </td>
-                          <td>
-                            {toggleable ? (
-                              <select
-                                value={displayUnit}
-                                onChange={(e) => setRowUnitDisplay(prev => ({ ...prev, [item.id]: e.target.value as "kg" | "g" }))}
-                                className="erp-input text-xs py-1 w-16"
-                              >
-                                <option value="kg">kg</option>
-                                <option value="g">g</option>
-                              </select>
-                            ) : (
-                              // Μονάδες εκτός kg/g (π.χ. ΤΕΜ, L, ml) δεν είχαν
-                              // ΚΑΝΕΝΑ τρόπο διόρθωσης -- έμεναν σαν απλό,
-                              // μη-επεξεργάσιμο κείμενο. Τώρα είναι πάντα
-                              // επεξεργάσιμο πεδίο, ώστε να διορθώνεται
-                              // χειροκίνητα μια λάθος μονάδα (π.χ. από
-                              // παλιά/χαλασμένη εισαγωγή δεδομένων).
-                              <input
-                                key={item.unit}
-                                type="text"
-                                defaultValue={item.unit}
-                                onBlur={(e) => {
-                                  const newUnit = e.target.value.trim();
-                                  if (newUnit && newUnit !== item.unit) updateIngredientRow(item.id, "unit", newUnit);
-                                }}
-                                className="erp-input text-xs py-1 w-16"
-                              />
-                            )}
-                          </td>
-                          <td>€{pricePerPortion(item).toFixed(3)}</td>
-                          <td>{dispBatchQty.toFixed(toggleable && displayUnit === "g" ? 0 : 3)} {displayUnit}</td>
-                          <td className="font-semibold">€{batchPrice(item).toFixed(2)}</td>
+                          <td>{item.unit}</td>
+                          <td>€{Number(item.unitCost).toFixed(2)}</td>
                           <td className="font-semibold">€{Number(item.totalCost).toFixed(2)}</td>
                           <td>
                             <button onClick={() => deleteIngredientRow(item.id)} disabled={savingIngredientRowId === item.id} className="text-red-400 hover:text-red-600">
@@ -1312,67 +638,31 @@ export default function RecipePage() {
                             </button>
                           </td>
                         </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-          {!selectedRecipe && (
-            <div className="erp-card mb-6 p-6 text-center text-sm text-slate-400">
-              {locale === "gr"
-                ? "Αποθήκευσε πρώτα τη συνταγή (💾 Αποθήκευση Συνταγής) για να εμφανιστεί εδώ ο πίνακας υλικών και να μπορείς να προσθέσεις υλικά."
-                : "Save the recipe first (💾 Save Recipe) — the ingredients table will appear here once it's saved."}
-            </div>
-          )}
-
-          {/* Plating Gallery — κρύβεται στην εκτύπωση (κενά placeholders,
-              δεν έχει νόημα να τυπώνονται). */}
-          <div id="plating-gallery-section" className="erp-card">
-            <div className="erp-card-header"><h3 className="font-semibold">📸 {t("fieldPlating")}</h3></div>
-            <div className="p-6">
-              {!selectedRecipe && (
-                <div className="text-xs text-slate-400 mb-2">
-                  {locale === "gr" ? "Αποθήκευσε πρώτα τη συνταγή για να μπορείς να ανεβάσεις φωτογραφίες." : "Save the recipe first to upload photos."}
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
-              )}
-              <div className="grid grid-cols-3 gap-4">
-                {[0, 1, 2].map((slot) => {
-                  let images: string[] = [];
-                  try { images = JSON.parse(form.platingImages || "[]"); } catch { images = []; }
-                  const url = images[slot];
-                  return (
-                    <div key={slot}>
-                      <input
-                        type="file" accept="image/*" id={`plating-slot-${slot}`} className="hidden"
-                        disabled={!selectedRecipe || uploadingSlot !== null}
-                        onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadPlatingImage(slot, f); e.target.value = ""; }}
-                      />
-                      {url ? (
-                        <div className="relative">
-                          <img src={url} alt={`plating-${slot}`} className="w-full h-32 object-cover rounded-xl border border-slate-200" />
-                          <button type="button" onClick={() => removePlatingImage(slot)} className="absolute top-1 right-1 bg-white/90 text-red-500 rounded-full w-6 h-6 text-xs shadow">✕</button>
-                        </div>
-                      ) : (
-                        <label
-                          htmlFor={`plating-slot-${slot}`}
-                          className={`border-2 border-dashed border-slate-300 rounded-xl p-8 text-center hover:border-blue-400 transition-colors flex flex-col items-center justify-center h-32 ${selectedRecipe ? "cursor-pointer" : "cursor-not-allowed opacity-50"}`}
-                        >
-                          <div className="text-3xl mb-2">{uploadingSlot === slot ? "…" : "📷"}</div>
-                          <div className="text-xs text-slate-400">
-                            {uploadingSlot === slot ? (locale === "gr" ? "Ανεβαίνει…" : "Uploading…") : (locale === "gr" ? `Εικόνα ${slot + 1}` : `Image ${slot + 1}`)}
-                          </div>
-                        </label>
-                      )}
+              </div>
+            )}
+
+            {/* Plating Gallery */}
+            <div className="erp-card">
+              <div className="erp-card-header"><h3 className="font-semibold">📸 {t("fieldPlating")}</h3></div>
+              <div className="p-6">
+                <div className="grid grid-cols-3 gap-4">
+                  {[1, 2, 3].map(n => (
+                    <div key={n} className="border-2 border-dashed border-slate-300 rounded-xl p-8 text-center hover:border-blue-400 transition-colors cursor-pointer">
+                      <div className="text-3xl mb-2">📷</div>
+                      <div className="text-xs text-slate-400">{locale === "gr" ? `Εικόνα ${n}` : `Image ${n}`}</div>
                     </div>
-                  );
-                })}
+                  ))}
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      </Modal>
+        )}
+      </div>
+      )}
 
       {/* Search Modal */}
       <Modal isOpen={showSearch} onClose={() => setShowSearch(false)} title={t("btnSearchRestore")} size="lg">

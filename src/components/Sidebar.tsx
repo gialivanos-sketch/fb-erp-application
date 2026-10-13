@@ -7,7 +7,6 @@ import { RoleGuard } from "./RoleGuard";
 
 const procurementLinks = [
   { key: "navSupplierQuotes", href: "/supplier-quotes", icon: "📊" },
-  { key: "navSkuMapping", href: "/sku-mapping", icon: "🏷️" },
   { key: "navDraftOrder", href: "/draft-order", icon: "📝" },
   { key: "navSupplierCRM", href: "/supplier-crm", icon: "🏢" },
   { key: "navPayments", href: "/payments", icon: "💳" },
@@ -31,7 +30,6 @@ const kitchenLinks = [
 
 const adminLinks = [
   { key: "navUserManagement", href: "/user-management", icon: "👥" },
-  { key: "navBusinessProfile", href: "/profile", icon: "🏬" },
 ];
 
 export default function Sidebar() {

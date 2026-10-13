@@ -24,7 +24,6 @@ export const translations: Record<string, { gr: string; en: string }> = {
   navMenuArchive: { gr: "Αρχείο Μενού", en: "Menu Archive" },
   navUnits: { gr: "Πίνακες Μονάδων", en: "Units & Conversions" },
   navPrepList: { gr: "Mise en Place", en: "Mise en Place" },
-  navSkuMapping: { gr: "Ομαδοποίηση Ειδών (SKU)", en: "SKU Grouping" },
 
   // Sidebar sections
   sectionProcurement: { gr: "ΑΓΟΡΕΣ & ΕΙΣΠΡΑΞΕΙΣ", en: "PROCUREMENT & LEDGERS" },
@@ -229,7 +228,6 @@ export const translations: Record<string, { gr: string; en: string }> = {
 
   // User Management & Access Control
   navUserManagement: { gr: "Διαχείριση Χρηστών", en: "User Management" },
-  navBusinessProfile: { gr: "Καρτέλα Επιχείρησης", en: "Business Profile" },
   sectionAdmin: { gr: "ΔΙΑΧΕΙΡΙΣΗ", en: "ADMINISTRATION" },
   headerUserManagement: { gr: "Διαχείριση Χρηστών & Ρόλων", en: "User & Role Management" },
   headerExcelIngestion: { gr: "Εισαγωγή Δεδομένων Excel", en: "Excel Data Ingestion" },
@@ -255,39 +253,6 @@ export const translations: Record<string, { gr: string; en: string }> = {
   ingestionHistory: { gr: "Ιστορικό Εισαγωγών", en: "Ingestion History" },
   confirmRoleChange: { gr: "Αλλαγή ρόλου χρήστη; Οι περιορισμοί πρόσβασης θα εφαρμοστούν άμεσα.", en: "Change user role? Access restrictions apply immediately." },
   loggedInAs: { gr: "Συνδεδεμένος ως", en: "Logged in as" },
-
-  // Φίλτρα + μαζική διαγραφή στη σελίδα Υλικών
-  filterUnit: { gr: "Μονάδα", en: "Unit" },
-  filterAllUnits: { gr: "Όλες οι μονάδες", en: "All units" },
-  filterActiveStatus: { gr: "Κατάσταση", en: "Status" },
-  filterAllStatuses: { gr: "Όλα", en: "All" },
-  filterActiveOnly: { gr: "Μόνο Ενεργά", en: "Active only" },
-  filterInactiveOnly: { gr: "Μόνο Ανενεργά", en: "Inactive only" },
-  filterUsage: { gr: "Χρήση σε Συνταγές", en: "Recipe Usage" },
-  filterUsageAll: { gr: "Όλα", en: "All" },
-  filterUsageUnused: { gr: "Χωρίς χρήση σε συνταγή", en: "Not used in any recipe" },
-  filterUsageUsed: { gr: "Χρησιμοποιούνται", en: "Used in a recipe" },
-  filterZeroPrice: { gr: "Μόνο χωρίς τιμή (€0,00)", en: "Only with no price (€0.00)" },
-  badgeUnused: { gr: "Αχρησιμοποίητο", en: "Unused" },
-  selectAllFiltered: { gr: "Επιλογή όλων (φιλτραρισμένα)", en: "Select all (filtered)" },
-  selectedCount: { gr: "επιλεγμένα", en: "selected" },
-  btnDeleteSelected: { gr: "🗑️ Διαγραφή Επιλεγμένων", en: "🗑️ Delete Selected" },
-  confirmBulkDelete: { gr: "Διαγραφή των επιλεγμένων υλικών; Αν κάποιο χρησιμοποιείται ήδη σε συνταγή, θα παραλειφθεί με ασφάλεια.", en: "Delete the selected ingredients? Any already used in a recipe will be safely skipped." },
-  bulkDeleteResult: { gr: "Διαγράφηκαν", en: "Deleted" },
-  bulkDeleteSkipped: { gr: "παραλείφθηκαν (χρησιμοποιούνται σε συνταγή)", en: "skipped (in use by a recipe)" },
-  showingOf: { gr: "από", en: "of" },
-
-  // Φίλτρο/σήμανση "Ομαδοποίηση SKU" στη σελίδα Υλικών -- δείχνει ποια
-  // υλικά ΔΕΝ έχουν ούτε άμεση σύνδεση με προϊόν προμηθευτή, ούτε δική
-  // τους καταχώρηση στην Ομαδοποίηση Ειδών (SKU Mapping), άρα δεν
-  // μπορούν να βρουν αυτόματη τιμή από ιστορικό παραγγελιών.
-  filterGrouping: { gr: "Ομαδοποίηση SKU", en: "SKU Grouping" },
-  filterGroupingAll: { gr: "Όλα", en: "All" },
-  filterGroupingUngrouped: { gr: "Χωρίς Ομάδα SKU", en: "No SKU group" },
-  filterGroupingGrouped: { gr: "Με Ομάδα SKU", en: "Has SKU group" },
-  badgeNoSkuGroup: { gr: "Χωρίς Ομάδα SKU", en: "No SKU group" },
-  kpiNoSkuGroup: { gr: "Χωρίς Ομάδα SKU", en: "No SKU group" },
-  kpiNoSkuGroupSubtitle: { gr: "Δεν βρίσκουν τιμή αυτόματα — άνοιξε την Ομαδοποίηση Ειδών", en: "Can't auto-price — open SKU Grouping" },
 }
 
 export function t(locale: Locale, key: string): string {

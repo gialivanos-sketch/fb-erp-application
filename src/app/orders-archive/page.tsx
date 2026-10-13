@@ -1,25 +1,9 @@
 "use client";
-import { useState, useMemo, useRef, useEffect } from "react";
-import { createPortal } from "react-dom";
+import { useState } from "react";
 import { useLanguage } from "@/lib/context";
 import { PageHeader, FilterBar, KpiCard, Badge, Modal } from "@/components/shared";
-import type { Order, SupplierProduct, BusinessProfile } from "@/lib/types";
+import type { Order } from "@/lib/types";
 import * as db from "@/lib/supabaseData";
-
-// Strips Greek tonos accents and διαλυτικά (diaeresis) and upper-cases, so
-// the product lookup below matches regardless of accents — same helper as
-// the one in src/app/draft-order/page.tsx.
-const GREEK_ACCENT_MAP: Record<string, string> = {
-  "Ά": "Α", "Έ": "Ε", "Ή": "Η", "Ί": "Ι", "Ϊ": "Ι", "Ό": "Ο", "Ύ": "Υ", "Ϋ": "Υ", "Ώ": "Ω",
-  "ά": "α", "έ": "ε", "ή": "η", "ί": "ι", "ϊ": "ι", "ΐ": "ι", "ό": "ο", "ύ": "υ", "ϋ": "υ", "ΰ": "υ", "ώ": "ω",
-};
-function normalizeGreek(s: string): string {
-  let out = "";
-  for (const ch of s) out += GREEK_ACCENT_MAP[ch] ?? ch;
-  return out.toUpperCase();
-}
-
-const EMPTY_BUSINESS_INFO: BusinessProfile = { name: "", address: "", phone: "", email: "", taxId: "", logoDataUrl: null };
 
 interface RestoreItem {
   id?: number;
@@ -39,8 +23,6 @@ interface RestoreItem {
 export default function OrdersArchivePage() {
   const { t, locale, data, refreshAll } = useLanguage();
   const orders = data.orders;
-  const suppliers = data.suppliers;
-  const supplierProducts = data.supplierProducts;
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
   const [filterDateFrom, setFilterDateFrom] = useState("");
@@ -53,107 +35,6 @@ export default function OrdersArchivePage() {
   const [restoreItems, setRestoreItems] = useState<RestoreItem[]>([]);
   const [restoreInvoiceNum, setRestoreInvoiceNum] = useState("");
   const [restoreMsg, setRestoreMsg] = useState("");
-  // ids of existing (already-saved) items removed during this correction —
-  // deleted from the database only when the correction is saved.
-  const [removedItemIds, setRemovedItemIds] = useState<number[]>([]);
-  // "add a missed product" mini-form, shown under the correction table
-  const [newItemName, setNewItemName] = useState("");
-  const [newItemQty, setNewItemQty] = useState(1);
-  const [newItemUnit, setNewItemUnit] = useState("kg");
-  const [newItemPrice, setNewItemPrice] = useState(0);
-  const [newItemVat, setNewItemVat] = useState(24);
-  const [newItemDiscount, setNewItemDiscount] = useState(0);
-  // Product lookup dropdown for the "Add Product" mini-form — same
-  // behaviour as the "Προσθήκη Είδους" search on the Draft Order sheet
-  // (src/app/draft-order/page.tsx): type a name, pick a supplier's
-  // current quote from the list, and unit/price fill in automatically.
-  const [newItemLookupDismissed, setNewItemLookupDismissed] = useState(false);
-  const newItemSearchRef = useRef<HTMLInputElement>(null);
-  const newItemDropdownRef = useRef<HTMLDivElement>(null);
-  const [newItemDropdownPos, setNewItemDropdownPos] = useState<{ top: number; left: number; width: number } | null>(null);
-  // Buyer letterhead info, needed to resend the corrected order by email
-  // from this screen — same source as the Draft Order page's "Αποστολή
-  // Email" (Profile → Business Card settings).
-  const [businessProfile, setBusinessProfile] = useState<BusinessProfile>(EMPTY_BUSINESS_INFO);
-  useEffect(() => {
-    let cancelled = false;
-    db.fetchBusinessProfile()
-      .then((profile) => { if (!cancelled && profile) setBusinessProfile(profile); })
-      .catch(() => {});
-    return () => { cancelled = true; };
-  }, []);
-
-  // Every "Εισαγωγή Προσφοράς" upload adds new supplier_products rows
-  // rather than replacing old ones, so this keeps only the newest quote
-  // per (supplier, product name) — otherwise the lookup below could
-  // offer a stale, superseded price.
-  const latestSupplierProducts = useMemo(() => {
-    const latestByKey = new Map<string, SupplierProduct>();
-    for (const p of supplierProducts) {
-      const key = p.supplierId + "||" + p.productName.trim().toLowerCase();
-      const existing = latestByKey.get(key);
-      if (!existing || new Date(p.createdAt || 0).getTime() > new Date(existing.createdAt || 0).getTime()) {
-        latestByKey.set(key, p);
-      }
-    }
-    return [...latestByKey.values()];
-  }, [supplierProducts]);
-
-  const normalizedNewItemQuery = normalizeGreek(newItemName.trim());
-  const newItemResults = useMemo(() => {
-    if (!normalizedNewItemQuery) return [];
-    return latestSupplierProducts
-      .filter((p) => p.isActive !== false)
-      .filter(
-        (p) =>
-          normalizeGreek(p.productName).includes(normalizedNewItemQuery) ||
-          normalizeGreek(p.productNameEn || "").includes(normalizedNewItemQuery)
-      )
-      .sort((a, b) => Number(a.basePrice) - Number(b.basePrice));
-  }, [latestSupplierProducts, normalizedNewItemQuery]);
-  const showNewItemLookup = newItemName.trim().length > 0 && newItemResults.length > 0 && !newItemLookupDismissed;
-
-  function selectNewItemProduct(p: SupplierProduct) {
-    setNewItemName(locale === "gr" ? p.productName : (p.productNameEn || p.productName));
-    setNewItemUnit(p.unit);
-    setNewItemPrice(Number(p.basePrice));
-    setNewItemLookupDismissed(true);
-  }
-
-  // Close the lookup when clicking outside either the input or the
-  // (portaled) dropdown itself.
-  useEffect(() => {
-    function handleClickOutside(e: MouseEvent) {
-      const target = e.target as Node;
-      const insideInput = newItemSearchRef.current?.contains(target);
-      const insideDropdown = newItemDropdownRef.current?.contains(target);
-      if (!insideInput && !insideDropdown) setNewItemLookupDismissed(true);
-    }
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
-  // The dropdown is rendered via a portal straight to <body> (not as a
-  // sibling inside the modal), because the Modal's own body wrapper is
-  // `overflow-y-auto` and clips any absolutely-positioned child no matter
-  // how it's sized — the same clipping bug fixed earlier on the recipe
-  // ingredient search. Position is tracked in fixed coordinates instead.
-  useEffect(() => {
-    if (!showNewItemLookup) { setNewItemDropdownPos(null); return; }
-    function updatePos() {
-      const el = newItemSearchRef.current;
-      if (!el) return;
-      const rect = el.getBoundingClientRect();
-      setNewItemDropdownPos({ top: rect.bottom + 4, left: rect.left, width: Math.max(rect.width, 280) });
-    }
-    updatePos();
-    window.addEventListener("scroll", updatePos, true);
-    window.addEventListener("resize", updatePos);
-    return () => {
-      window.removeEventListener("scroll", updatePos, true);
-      window.removeEventListener("resize", updatePos);
-    };
-  }, [showNewItemLookup, newItemName]);
 
   const filtered = orders.filter(o => {
     if (!o) return false;
@@ -204,37 +85,8 @@ export default function OrdersArchivePage() {
       vatAmount: Number(i.vatAmount || 0),
       grossAmount: Number(i.grossAmount || 0),
     })));
-    setRemovedItemIds([]);
-    setNewItemName(""); setNewItemQty(1); setNewItemUnit("kg"); setNewItemPrice(0); setNewItemVat(24); setNewItemDiscount(0);
     setRestoreMsg("");
     setShowRestore(true);
-  }
-
-  function removeRestoreItem(idx: number) {
-    setRestoreItems(prev => {
-      const item = prev[idx];
-      if (item?.id != null) setRemovedItemIds(ids => [...ids, item.id as number]);
-      return prev.filter((_, i) => i !== idx);
-    });
-  }
-
-  function addRestoreItem() {
-    if (!newItemName.trim() || newItemQty <= 0) return;
-    const net = newItemPrice * newItemQty * (1 - newItemDiscount / 100);
-    const vatAmt = net * (newItemVat / 100);
-    setRestoreItems(prev => [...prev, {
-      productName: newItemName.trim(),
-      orderedQuantity: newItemQty,
-      deliveredQuantity: newItemQty,
-      unit: newItemUnit,
-      basePrice: newItemPrice,
-      vatPercent: newItemVat,
-      discountPercent: newItemDiscount,
-      netAmount: net,
-      vatAmount: vatAmt,
-      grossAmount: net + vatAmt,
-    }]);
-    setNewItemName(""); setNewItemQty(1); setNewItemPrice(0); setNewItemDiscount(0);
   }
 
   function updateRestoreItem(idx: number, field: string, value: number | string) {
@@ -262,12 +114,10 @@ export default function OrdersArchivePage() {
       await db.updateOrderStatus(selectedOrder.id, {
         invoiceNumber: restoreInvoiceNum, status: "delivered", totalNet, totalVat, totalGross,
       });
-      // Existing items are updated, brand-new ones (added during this
-      // correction) are inserted, and ones the person removed are deleted
-      // — all in parallel, since each is an independent row with no
-      // ordering dependency between these writes.
-      await Promise.all([
-        ...restoreItems
+      // Line items are updated in parallel — each is an independent row,
+      // so there's no ordering dependency between these writes.
+      await Promise.all(
+        restoreItems
           .filter((item) => item.id != null)
           .map((item) =>
             db.updateOrderItem(item.id as number, {
@@ -277,18 +127,8 @@ export default function OrdersArchivePage() {
               vatAmount: item.vatAmount,
               grossAmount: item.grossAmount,
             })
-          ),
-        ...restoreItems
-          .filter((item) => item.id == null)
-          .map((item) =>
-            db.addOrderItem(selectedOrder.id, {
-              productName: item.productName, orderedQuantity: item.orderedQuantity, deliveredQuantity: item.deliveredQuantity,
-              unit: item.unit, basePrice: item.basePrice, vatPercent: item.vatPercent, discountPercent: item.discountPercent,
-              netAmount: item.netAmount, vatAmount: item.vatAmount, grossAmount: item.grossAmount,
-            })
-          ),
-        ...removedItemIds.map((id) => db.deleteOrderItem(id)),
-      ]);
+          )
+      );
       await refreshAll();
       setRestoreMsg(locale === "gr" ? "✅ Παραγγελία ενημερώθηκε και τιμολόγιο καταχωρήθηκε!" : "✅ Order updated and invoice recorded!");
       setTimeout(() => { setShowRestore(false); setRestoreMsg(""); }, 1500);
@@ -297,66 +137,6 @@ export default function OrdersArchivePage() {
     } finally {
       setSaving(false);
     }
-  }
-
-  // Resends the order to the supplier by email straight from this
-  // correction screen, reflecting whatever was just edited (added item,
-  // corrected price/quantity) — no need to rebuild it on the Draft Order
-  // sheet. Per-line totals show the net amount (quantity × unit price),
-  // matching the printed order form; VAT and grand total are shown once
-  // at the end, not folded into each line.
-  function sendRestoreEmail() {
-    if (!selectedOrder) return;
-    const supplier = suppliers.find((s) => s.id === selectedOrder.supplierId);
-    if (!supplier?.contactEmail) {
-      alert(locale === "gr" ? "⚠️ Ο προμηθευτής δεν έχει καταχωρημένο email." : "⚠️ This supplier has no email on file.");
-      return;
-    }
-    const totalNet = restoreItems.reduce((s, i) => s + i.netAmount, 0);
-    const totalVat = restoreItems.reduce((s, i) => s + i.vatAmount, 0);
-    const totalGross = restoreItems.reduce((s, i) => s + i.grossAmount, 0);
-    const RULE = "----------------------------------------";
-    const supplierLabel = locale === "gr" ? supplier.name : (supplier.nameEn || supplier.name);
-    const subject = (locale === "gr" ? "Παραγγελία" : "Order") + ` — ${supplierLabel} — ${selectedOrder.orderDate}`;
-    const bodyLines: string[] = [];
-    bodyLines.push(locale === "gr" ? "ΔΕΛΤΙΟ ΠΑΡΑΓΓΕΛΙΑΣ" : "PURCHASE ORDER");
-    bodyLines.push(RULE);
-    bodyLines.push("");
-    if (businessProfile.name) bodyLines.push(businessProfile.name);
-    if (businessProfile.address) bodyLines.push(businessProfile.address);
-    const businessContactLine = [businessProfile.phone, businessProfile.email, businessProfile.taxId ? `ΑΦΜ: ${businessProfile.taxId}` : ""].filter(Boolean).join("  •  ");
-    if (businessContactLine) bodyLines.push(businessContactLine);
-    bodyLines.push("");
-    bodyLines.push((locale === "gr" ? "Αρ. Παραγγελίας" : "Order No.") + `: ${selectedOrder.orderNumber}`);
-    bodyLines.push((locale === "gr" ? "Ημερομηνία" : "Date") + `: ${selectedOrder.orderDate}`);
-    if (restoreInvoiceNum) bodyLines.push((locale === "gr" ? "Αρ. Τιμολογίου" : "Invoice No.") + `: ${restoreInvoiceNum}`);
-    bodyLines.push("");
-    bodyLines.push(RULE);
-    bodyLines.push(locale === "gr" ? "ΠΡΟΣ ΠΡΟΜΗΘΕΥΤΗ" : "SUPPLIER");
-    bodyLines.push(RULE);
-    bodyLines.push(supplierLabel);
-    const supplierContactLine = [supplier.contactEmail, supplier.contactPhone, supplier.address].filter(Boolean).join("  •  ");
-    if (supplierContactLine) bodyLines.push(supplierContactLine);
-    bodyLines.push("");
-    bodyLines.push(RULE);
-    bodyLines.push(locale === "gr" ? "ΕΙΔΗ ΠΑΡΑΓΓΕΛΙΑΣ" : "ORDER ITEMS");
-    bodyLines.push(RULE);
-    restoreItems.forEach((i, idx) => {
-      bodyLines.push(`${idx + 1}. ${i.productName}`);
-      bodyLines.push(`   ${i.deliveredQuantity || i.orderedQuantity} ${i.unit} × €${i.basePrice.toFixed(2)}  =  €${i.netAmount.toFixed(2)}`);
-    });
-    bodyLines.push("");
-    bodyLines.push(RULE);
-    bodyLines.push((locale === "gr" ? "Καθαρή Αξία" : "Net Amount") + `: €${totalNet.toFixed(2)}`);
-    bodyLines.push((locale === "gr" ? "ΦΠΑ" : "VAT") + `: €${totalVat.toFixed(2)}`);
-    bodyLines.push((locale === "gr" ? "ΓΕΝΙΚΟ ΣΥΝΟΛΟ" : "GRAND TOTAL") + `: €${totalGross.toFixed(2)}`);
-    bodyLines.push(RULE);
-    if (selectedOrder.notes) {
-      bodyLines.push("");
-      bodyLines.push((locale === "gr" ? "Σημειώσεις" : "Notes") + `: ${selectedOrder.notes}`);
-    }
-    const body = bodyLines.join("\n");
-    window.location.href = `mailto:${supplier.contactEmail}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
   }
 
   return (
@@ -460,16 +240,12 @@ export default function OrdersArchivePage() {
                     <th>{t("fieldNetAmount")}</th>
                     <th>{t("fieldGrossAmount")}</th>
                     <th>{locale === "gr" ? "Διαφορά" : "Diff"}</th>
-                    <th></th>
                   </tr>
                 </thead>
                 <tbody>
                   {restoreItems.map((item, i) => (
                     <tr key={i}>
-                      <td className="font-medium">
-                        {item.productName}
-                        {item.id == null && <span className="ml-2"><Badge color="green">{locale === "gr" ? "ΝΕΟ" : "NEW"}</Badge></span>}
-                      </td>
+                      <td className="font-medium">{item.productName}</td>
                       <td>{item.orderedQuantity}</td>
                       <td>
                         <input type="number" value={item.deliveredQuantity || ""} onChange={e => updateRestoreItem(i, "deliveredQuantity", Number(e.target.value))}
@@ -485,71 +261,19 @@ export default function OrdersArchivePage() {
                       <td className={(item.deliveredQuantity < item.orderedQuantity) ? "text-red-600 font-semibold" : "text-emerald-600"}>
                         {((item.deliveredQuantity || 0) - item.orderedQuantity).toFixed(2)} {item.unit}
                       </td>
-                      <td>
-                        <button onClick={() => removeRestoreItem(i)} className="text-red-400 hover:text-red-600 text-sm" title={locale === "gr" ? "Αφαίρεση προϊόντος" : "Remove product"}>
-                          ✕
-                        </button>
-                      </td>
                     </tr>
                   ))}
-                  {restoreItems.length === 0 && (
-                    <tr><td colSpan={9} className="text-center py-4 text-slate-400">{t("noData")}</td></tr>
-                  )}
                 </tbody>
               </table>
-            </div>
-
-            {/* Add a product missed off the original order */}
-            <div className="bg-slate-50 rounded-lg p-3 mt-3">
-              <h5 className="text-xs font-semibold text-slate-600 mb-2">
-                ➕ {locale === "gr" ? "Προσθήκη Προϊόντος" : "Add Product"}
-              </h5>
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
-                <input ref={newItemSearchRef} type="text" value={newItemName}
-                  onChange={e => { setNewItemName(e.target.value); setNewItemLookupDismissed(false); }}
-                  placeholder={locale === "gr" ? "Όνομα προϊόντος" : "Product name"} className="erp-input text-sm sm:col-span-2 lg:col-span-1" autoComplete="off" />
-                <input type="number" value={newItemQty} onChange={e => setNewItemQty(Number(e.target.value))} placeholder="Qty" className="erp-input text-sm" min="0" step="0.01" />
-                <select value={newItemUnit} onChange={e => setNewItemUnit(e.target.value)} className="erp-select text-sm">
-                  <option value="kg">kg</option><option value="g">g</option><option value="L">L</option><option value="ml">ml</option><option value="pcs">pcs</option>
-                </select>
-                <input type="number" value={newItemPrice || ""} onChange={e => setNewItemPrice(Number(e.target.value))} placeholder={t("fieldBasePrice")} className="erp-input text-sm" step="0.01" />
-                <input type="number" value={newItemVat} onChange={e => setNewItemVat(Number(e.target.value))} placeholder="VAT %" className="erp-input text-sm" />
-                <input type="number" value={newItemDiscount} onChange={e => setNewItemDiscount(Number(e.target.value))} placeholder="Disc %" className="erp-input text-sm" />
-              </div>
-              <button onClick={addRestoreItem} className="erp-btn-success text-xs mt-2">+ {t("btnAdd")}</button>
             </div>
           </div>
 
           <div className="flex gap-2 pt-2 border-t">
             <button onClick={handleSaveRestore} disabled={saving} className="erp-btn-primary">{saving ? "…" : "💾"} {t("btnSaveOrder")}</button>
-            <button onClick={sendRestoreEmail} disabled={saving || restoreItems.length === 0} className="erp-btn-secondary">📧 {t("btnSendEmail")}</button>
             <button onClick={() => setShowRestore(false)} disabled={saving} className="erp-btn-ghost">{t("btnCancel")}</button>
           </div>
         </div>
       </Modal>
-
-      {showNewItemLookup && newItemDropdownPos && createPortal(
-        <div
-          ref={newItemDropdownRef}
-          className="fixed z-[9999] max-h-72 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-2xl"
-          style={{ top: newItemDropdownPos.top, left: newItemDropdownPos.left, width: newItemDropdownPos.width }}
-        >
-          <table className="w-full text-sm">
-            <tbody>
-              {newItemResults.map((p) => (
-                <tr key={p.id} onClick={() => selectNewItemProduct(p)} className="cursor-pointer hover:bg-blue-50 border-b border-slate-100 last:border-0">
-                  <td className="px-3 py-2">
-                    <div className="font-medium text-slate-800">{p.productName}</div>
-                    <div className="text-xs text-slate-400">{locale === "gr" ? p.supplierName : (p.supplierNameEn || p.supplierName)}</div>
-                  </td>
-                  <td className="px-3 py-2 text-right font-semibold text-emerald-700 whitespace-nowrap">€{Number(p.basePrice).toFixed(2)}/{p.unit}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>,
-        document.body
-      )}
     </div>
   );
 }

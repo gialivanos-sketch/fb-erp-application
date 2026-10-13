@@ -2,6 +2,7 @@
 import { AppProvider, useApp } from "@/lib/context";
 import Sidebar from "./Sidebar";
 import AuthScreen from "./AuthScreen";
+import ClaudeChat from "./ClaudeChat";
 
 // Lives inside AppProvider (needs useApp()) and decides what the person
 // actually sees: the sign-in/sign-up screen while unauthenticated, a
@@ -31,6 +32,7 @@ function AppGate({ children }: { children: React.ReactNode }) {
           {children}
         </div>
       </main>
+      <ClaudeChat />
     </div>
   );
 }

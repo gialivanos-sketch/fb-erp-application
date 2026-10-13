@@ -186,8 +186,6 @@ export interface Recipe {
   sellingPrice: string;
   menuPriceVat: string;
   menuPriceFinal: string;
-  caloriesPerPortion?: string;
-  gramsPerPortion?: string;
   isActive: boolean | null;
   createdAt?: string;
   ingredients: RecipeIngredient[];
@@ -249,20 +247,6 @@ export interface IngestionLog {
   status: string;
   errors: string | null;
   createdAt: string;
-}
-
-// ============================================================
-// Business Profile — the company's own letterhead info, shown on
-// printed/emailed purchase orders. A single settings row (not part
-// of AppDatabase — fetched on demand by the pages that need it).
-// ============================================================
-export interface BusinessProfile {
-  name: string;
-  address: string;
-  phone: string;
-  email: string;
-  taxId: string;
-  logoDataUrl: string | null;
 }
 
 // ============================================================

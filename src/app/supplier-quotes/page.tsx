@@ -7,19 +7,6 @@ import * as db from "@/lib/supabaseData";
 import type { SupplierProduct } from "@/lib/types";
 
 interface CartItem extends SupplierProduct { quantity: number; }
-const CATEGORY_LABELS: Record<string, { gr: string; en: string }> = {
-  Produce: { gr: "Λαχανικά/Φρούτα", en: "Produce" },
-  Grocery: { gr: "Παντοπωλείο", en: "Grocery" },
-  Seafood: { gr: "Θαλασσινά", en: "Seafood" },
-  Cleaning: { gr: "Καθαριότητα", en: "Cleaning" },
-  Beverages: { gr: "Ποτά", en: "Beverages" },
-  Meat: { gr: "Κρέας", en: "Meat" },
-  Dairy: { gr: "Γαλακτοκομικά", en: "Dairy" },
-     IceCream: { gr: "Παγωτά", en: "Ice Cream" },
-   Bakery: { gr: "Ψωμιά/Αρτοποιίας", en: "Bakery" },
-   Frozen: { gr: "Κατεψυγμένα Τρόφιμα", en: "Frozen Foods" },
-};
-const CATEGORY_OPTIONS = Object.keys(CATEGORY_LABELS);
 
 export default function SupplierQuotesPage() {
   const { t, locale, data, refreshAll } = useApp();
@@ -31,7 +18,6 @@ export default function SupplierQuotesPage() {
   const [grade, setGrade] = useState("");
   const [region, setRegion] = useState("");
   const [showBasket, setShowBasket] = useState(false);
-  const [onlyLatest, setOnlyLatest] = useState(true);
   // Import Modal
   const [showImport, setShowImport] = useState(false);
   const [importSupplier, setImportSupplier] = useState(0);
@@ -50,28 +36,8 @@ export default function SupplierQuotesPage() {
   const [deleteMsg, setDeleteMsg] = useState("");
   const [deleting, setDeleting] = useState(false);
 
-  // Every "Εισαγωγή Προσφοράς" upload INSERTS new supplier_products rows —
-  // it never overwrites or replaces older quotes for the same product. So
-  // over time the same product name (from the same supplier) accumulates
-  // many rows, one per upload, with no built-in way to tell which is
-  // current. Here we keep, per (supplier, product name), only the row with
-  // the newest `createdAt` — that is "the latest quote" the user asked for.
-  const latestProducts = useMemo(() => {
-    const latestByKey = new Map<string, SupplierProduct>();
-    for (const p of products) {
-      const key = p.supplierId + "||" + p.productName.trim().toLowerCase();
-      const existing = latestByKey.get(key);
-      if (!existing || new Date(p.createdAt || 0).getTime() > new Date(existing.createdAt || 0).getTime()) {
-        latestByKey.set(key, p);
-      }
-    }
-    return [...latestByKey.values()];
-  }, [products]);
-
-  const baseProducts = onlyLatest ? latestProducts : products;
-
   const filtered = useMemo(() => {
-    let result = [...baseProducts];
+    let result = [...products];
     if (search) {
       const s = search.toLowerCase();
       result = result.filter((p) => p.productName.toLowerCase().includes(s) || (p.productNameEn && p.productNameEn.toLowerCase().includes(s)));
@@ -80,17 +46,11 @@ export default function SupplierQuotesPage() {
     if (grade) result = result.filter((p) => p.qualityGrade === grade);
     if (region) result = result.filter((p) => p.regionOfOrigin === region);
     return result;
-  }, [baseProducts, search, category, grade, region]);
+  }, [products, search, category, grade, region]);
 
-  const categories = [...new Set(baseProducts.map((p) => p.category))].sort();
-  const grades = [...new Set(baseProducts.map((p) => p.qualityGrade).filter(Boolean))].sort();
-  const regions = [...new Set(baseProducts.map((p) => p.regionOfOrigin).filter(Boolean))].sort();
-  const fmtDate = (iso?: string) => {
-    if (!iso) return "—";
-    const d = new Date(iso);
-    if (isNaN(d.getTime())) return "—";
-    return d.toLocaleDateString(locale === "gr" ? "el-GR" : "en-GB", { day: "2-digit", month: "2-digit", year: "numeric" });
-  };
+  const categories = [...new Set(products.map((p) => p.category))].sort();
+  const grades = [...new Set(products.map((p) => p.qualityGrade).filter(Boolean))].sort();
+  const regions = [...new Set(products.map((p) => p.regionOfOrigin).filter(Boolean))].sort();
   const totalCartValue = cart.reduce((s, i) => s + Number(i.basePrice) * i.quantity, 0);
   const fmt = (n: number) => "€" + n.toFixed(2);
 
@@ -108,14 +68,6 @@ export default function SupplierQuotesPage() {
   }
 
   function clearFilters() { setSearch(""); setCategory(""); setGrade(""); setRegion(""); }
-  async function handleCategoryChange(id: number, newCategory: string) {
-  try {
-    await db.updateSupplierProductCategory(id, newCategory);
-    await refreshAll();
-  } catch (err) {
-    alert(locale === "gr" ? "⚠️ Αποτυχία ενημέρωσης κατηγορίας: " + String(err) : "⚠️ Failed to update category: " + String(err));
-  }
-}
 
   function openFilePicker() {
     fileInputRef.current?.click();
@@ -244,11 +196,7 @@ export default function SupplierQuotesPage() {
           <label className="erp-label">{t("filterByCategory")}</label>
           <select value={category} onChange={(e) => setCategory(e.target.value)} className="erp-select">
             <option value="">{t("filterAll")}</option>
-            {categories.map((c) => (
-  <option key={c} value={c}>
-    {c ? (locale === "gr" ? (CATEGORY_LABELS[c]?.gr ?? c) : (CATEGORY_LABELS[c]?.en ?? c)) : (locale === "gr" ? "(χωρίς κατηγορία)" : "(no category)")}
-  </option>
-))}
+            {categories.map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
         </div>
         <div>
@@ -264,15 +212,6 @@ export default function SupplierQuotesPage() {
             <option value="">{t("filterAll")}</option>
             {regions.map((r) => <option key={r} value={r!}>{r}</option>)}
           </select>
-        </div>
-        <div>
-          <label className="erp-label">&nbsp;</label>
-          <label className="flex items-center gap-2 h-[38px] px-1 cursor-pointer select-none">
-            <input type="checkbox" checked={onlyLatest} onChange={(e) => setOnlyLatest(e.target.checked)} className="w-4 h-4" />
-            <span className="text-sm font-semibold text-slate-700">
-              {locale === "gr" ? "Μόνο τελευταία προσφορά ανά προϊόν" : "Latest quote per product only"}
-            </span>
-          </label>
         </div>
       </FilterBar>
 
@@ -292,7 +231,6 @@ export default function SupplierQuotesPage() {
                     <th>{t("fieldSupplier")}</th>
                     <th>{t("fieldCategory")}</th>
                     <th>{locale === "gr" ? "Τιμή/Μονάδα" : "Price/Unit"}</th>
-                    <th>{locale === "gr" ? "Ημ/νία Προσφοράς" : "Quote Date"}</th>
                     <th>{t("fieldQualityGrade")}</th>
                     <th>{t("fieldRegion")}</th>
                     <th>{locale === "gr" ? "Σύμβαση" : "Contract"}</th>
@@ -301,7 +239,7 @@ export default function SupplierQuotesPage() {
                 </thead>
                 <tbody>
                   {filtered.length === 0 ? (
-                    <tr><td colSpan={10} className="text-center py-8 text-slate-400">{t("noData")}</td></tr>
+                    <tr><td colSpan={9} className="text-center py-8 text-slate-400">{t("noData")}</td></tr>
                   ) : filtered.map((p) => {
                     const same = filtered.filter((x) => x.productName === p.productName);
                     const minPrice = Math.min(...same.map((x) => Number(x.basePrice)));
@@ -314,19 +252,11 @@ export default function SupplierQuotesPage() {
                           {p.productNameEn && <div className="text-xs text-slate-400">{p.productNameEn}</div>}
                         </td>
                         <td className="text-sm">{locale === "gr" ? p.supplierName : (p.supplierNameEn || p.supplierName)}</td>
-                       <td>
-  <select value={p.category || ""} onChange={(e) => handleCategoryChange(p.id, e.target.value)} className="erp-select text-xs py-1">
-    <option value="">— {locale === "gr" ? "Χωρίς κατηγορία" : "No category"} —</option>
-    {CATEGORY_OPTIONS.map((c) => (
-      <option key={c} value={c}>{locale === "gr" ? CATEGORY_LABELS[c].gr : CATEGORY_LABELS[c].en}</option>
-    ))}
-  </select>
-</td>
+                        <td><Badge color="grey">{p.category}</Badge></td>
                         <td className="font-semibold text-emerald-700">
                           {fmt(Number(p.basePrice))}/{p.unit}
                           {isCheapest && <span className="ml-1 text-xs bg-emerald-100 text-emerald-700 px-1 rounded">{t("lowestPrice")}</span>}
                         </td>
-                        <td className="text-sm text-slate-500">{fmtDate(p.createdAt)}</td>
                         <td><Badge color={p.qualityGrade === "Grade A" ? "green" : "amber"}>{p.qualityGrade}</Badge></td>
                         <td className="text-sm">{p.regionOfOrigin}</td>
                         <td>{p.isContractPrice ? <Badge color="blue">🔒</Badge> : <span className="text-slate-300">—</span>}</td>
@@ -403,7 +333,7 @@ export default function SupplierQuotesPage() {
             <div>
               <label className="erp-label">{t("fieldCategory")}</label>
               <select value={importCategory} onChange={(e) => setImportCategory(e.target.value)} className="erp-select">
-                {CATEGORY_OPTIONS.map((c) => <option key={c} value={c}>{locale === "gr" ? CATEGORY_LABELS[c].gr : CATEGORY_LABELS[c].en}</option>)}
+                {["Produce","Grocery","Seafood","Cleaning","Beverages","Meat","Dairy"].map((c) => <option key={c} value={c}>{c}</option>)}
               </select>
             </div>
           </div>
