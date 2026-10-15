@@ -300,25 +300,24 @@ export async function POST(req: NextRequest) {
     r++; // κενό
 
     // ════════════════════════════════════════════════════
-    // ΤΕΧΝΙΚΟΣ ΟΔΗΓΟΣ
+    // ΤΕΧΝΙΚΟΣ ΟΔΗΓΟΣ (πάντα εμφανίζεται)
     // ════════════════════════════════════════════════════
-    if (recipe.technicalGuide) {
-      ws.mergeCells(`A${r}:H${r}`);
-      ws.getCell(`A${r}`).value     = isGr ? "ΤΕΧΝΙΚΟΣ ΟΔΗΓΟΣ / TECHNICAL GUIDE" : "TECHNICAL GUIDE";
-      ws.getCell(`A${r}`).font      = bold(10);
-      ws.getCell(`A${r}`).fill      = fill(YLW);
-      ws.getCell(`A${r}`).alignment = { horizontal: "center", vertical: "middle" };
-      ws.getCell(`A${r}`).border    = med();
-      ws.getRow(r).height = 22;
-      r++;
+    ws.mergeCells(`A${r}:H${r}`);
+    ws.getCell(`A${r}`).value     = isGr ? "ΤΕΧΝΙΚΟΣ ΟΔΗΓΟΣ / TECHNICAL GUIDE" : "TECHNICAL GUIDE";
+    ws.getCell(`A${r}`).font      = bold(10);
+    ws.getCell(`A${r}`).fill      = fill(YLW);
+    ws.getCell(`A${r}`).alignment = { horizontal: "center", vertical: "middle" };
+    ws.getCell(`A${r}`).border    = med();
+    ws.getRow(r).height = 20;
+    r++;
 
-      ws.mergeCells(`A${r}:H${r}`);
-      ws.getCell(`A${r}`).value     = recipe.technicalGuide;
-      ws.getCell(`A${r}`).alignment = { wrapText: true, vertical: "top" };
-      ws.getCell(`A${r}`).border    = thin();
-      ws.getRow(r).height = 80;
-      r++;
-    }
+    ws.mergeCells(`A${r}:H${r}`);
+    ws.getCell(`A${r}`).value     = recipe.technicalGuide || "";
+    ws.getCell(`A${r}`).alignment = { wrapText: true, vertical: "top" };
+    ws.getCell(`A${r}`).border    = thin();
+    // Αν υπάρχει κείμενο δώσε μεγαλύτερο ύψος, αλλιώς δώσε χώρο για χειρόγραφη συμπλήρωση
+    ws.getRow(r).height = recipe.technicalGuide ? 70 : 50;
+    r++;
 
     r++; // κενό
 
