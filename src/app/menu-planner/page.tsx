@@ -54,7 +54,7 @@ export default function MenuPlannerPage() {
     const cost = Number(recipe.totalCost);
     const sell = cost > 0 ? cost / (1 - Number(recipe.profitMarginPercent || 60) / 100) : 0;
     const portionYield = Number(recipe.portionYield) || 1;
-    setMenuRecipes(prev => [...prev, {
+    const newRow: MenuRecipe = {
       recipeId: recipe.id,
       recipeName: recipe.name,
       portions: portionType === "kg" ? 1 : portionYield,
@@ -62,7 +62,8 @@ export default function MenuPlannerPage() {
       foodCost: cost.toFixed(2),
       sellingPrice: sell.toFixed(2),
       profitMargin: recipe.profitMarginPercent || "60",
-    }]);
+    };
+    setMenuRecipes(prev => [...prev, newRow]);
     setShowAddRecipe(false);
     setRecipeSearch("");
   }
