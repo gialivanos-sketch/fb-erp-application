@@ -272,3 +272,12 @@ export interface AppDatabase {
   // even after deletions.
   nextIds: Record<string, number>;
 }
+
+export interface BusinessProfile {
+  name: string;
+  address: string;
+  phone: string;
+  email: string;
+  taxId: string;
+  logoDataUrl: string | null;
+}
