@@ -58,6 +58,43 @@ export default function DraftOrderPage() {
   // (300ms after the person stops typing) rather than firing on every
   // keystroke — a network round trip per character would feel laggy and
   // needlessly load the database.
+  // On first mount: check if supplier-quotes page handed us a cart via localStorage
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("draftOrderCart");
+      if (!raw) return;
+      localStorage.removeItem("draftOrderCart");
+      const cartItems: Array<{ id: number; supplierId: number; productName: string; quantity: number; unit: string; basePrice: number | string; vatPercent?: number; qualityGrade?: string | null; regionOfOrigin?: string | null }> = JSON.parse(raw);
+      if (!Array.isArray(cartItems) || cartItems.length === 0) return;
+      const loaded: OrderItemDraft[] = cartItems.map((c) => {
+        const price = Number(c.basePrice) || 0;
+        const qty = Number(c.quantity) || 1;
+        const vat = Number(c.vatPercent) || 24;
+        const { net, vatAmt, gross } = { net: price * qty, vatAmt: price * qty * (vat / 100), gross: price * qty * (1 + vat / 100) };
+        return {
+          supplierId: c.supplierId,
+          supplierProductId: c.id,
+          productName: c.productName,
+          orderedQuantity: qty,
+          unit: c.unit || "kg",
+          basePrice: price,
+          vatPercent: vat,
+          discountPercent: 0,
+          netAmount: net,
+          vatAmount: vatAmt,
+          grossAmount: gross,
+          qualityGrade: c.qualityGrade ?? null,
+          regionOfOrigin: c.regionOfOrigin ?? null,
+        };
+      });
+      setItems(loaded);
+      // Auto-select supplier if all items share the same one
+      const supplierIds = [...new Set(loaded.map((i) => i.supplierId).filter(Boolean))];
+      if (supplierIds.length === 1 && supplierIds[0]) setSelectedSupplier(supplierIds[0]!);
+    } catch {}
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const [lookupDismissed, setLookupDismissed] = useState(false);
   const [lookupResults, setLookupResults] = useState<SupplierProduct[]>([]);
   const [lookupLoading, setLookupLoading] = useState(false);

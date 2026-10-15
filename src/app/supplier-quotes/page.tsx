@@ -308,7 +308,15 @@ export default function SupplierQuotesPage() {
                     <span>{locale === "gr" ? "Σύνολο" : "Total"}</span>
                     <span className="text-emerald-600">{fmt(totalCartValue)}</span>
                   </div>
-                  <a href="/draft-order" className="erp-btn-primary w-full justify-center no-underline">
+                  <a
+                    href="/draft-order"
+                    className="erp-btn-primary w-full justify-center no-underline"
+                    onClick={() => {
+                      try {
+                        localStorage.setItem("draftOrderCart", JSON.stringify(cart));
+                      } catch {}
+                    }}
+                  >
                     {locale === "gr" ? "Μεταφορά σε Παραγγελία" : "Transfer to Order"}
                   </a>
                 </div>
