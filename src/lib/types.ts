@@ -199,6 +199,7 @@ export interface MenuRecipe {
   recipeId: number;
   recipeName: string;
   portions: number;
+  portionType: "portion" | "kg"; // "portion" = μερίδα, "kg" = κιλό (μπουφές)
   foodCost: string;
   sellingPrice: string;
   profitMargin: string;

@@ -289,7 +289,8 @@ create table if not exists public.menu_recipes (
   menu_id bigint not null references public.menus(id) on delete cascade,
   recipe_id bigint references public.recipes(id) on delete set null,
   recipe_name text not null,
-  portions integer not null default 1,
+  portions numeric(10,3) not null default 1,
+  portion_type text not null default 'portion' check (portion_type in ('portion', 'kg')),
   food_cost numeric(12,2) not null default 0,
   selling_price numeric(12,2) not null default 0,
   profit_margin numeric(5,2) not null default 0

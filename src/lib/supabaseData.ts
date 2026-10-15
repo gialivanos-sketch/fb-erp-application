@@ -1296,7 +1296,7 @@ export async function fetchMenus(): Promise<Menu[]> {
   if (error) throw error;
   const result: Menu[] = [];
   for (const m of menus ?? []) {
-    const { data: recipes, error: recError } = await client.from("menu_recipes").select("id, menu_id, recipe_id, recipe_name, portions, food_cost, selling_price, profit_margin").eq("menu_id", m.id);
+    const { data: recipes, error: recError } = await client.from("menu_recipes").select("id, menu_id, recipe_id, recipe_name, portions, portion_type, food_cost, selling_price, profit_margin").eq("menu_id", m.id);
     if (recError) throw recError;
     result.push({
       id: m.id, title: m.title, titleEn: m.title_en, status: m.status, totalRecipes: m.total_recipes,
@@ -1304,6 +1304,7 @@ export async function fetchMenus(): Promise<Menu[]> {
       createdAt: m.created_at,
       recipes: (recipes ?? []).map((r): MenuRecipe => ({
         id: r.id, menuId: r.menu_id, recipeId: r.recipe_id ?? 0, recipeName: r.recipe_name, portions: r.portions,
+        portionType: (r.portion_type ?? "portion") as "portion" | "kg",
         foodCost: numToStr(r.food_cost), sellingPrice: numToStr(r.selling_price), profitMargin: numToStr(r.profit_margin),
       })),
     });
@@ -1335,6 +1336,7 @@ export async function upsertMenu(menu: Omit<Menu, "id" | "createdAt"> & { id?: n
     const { error: recError } = await client.from("menu_recipes").insert(
       menu.recipes.map((r) => ({
         menu_id: menuId, recipe_id: r.recipeId || null, recipe_name: r.recipeName, portions: r.portions,
+        portion_type: r.portionType ?? "portion",
         food_cost: strToNum(r.foodCost), selling_price: strToNum(r.sellingPrice), profit_margin: strToNum(r.profitMargin),
       }))
     );
