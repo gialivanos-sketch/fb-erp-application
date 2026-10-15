@@ -572,7 +572,7 @@ export default function RecipePage() {
                     style={{
                       position: "fixed",
                       top: dropdownRect.bottom + 4,
-                      left: dropdownRect.left,
+                      right: window.innerWidth - dropdownRect.right,
                       width: Math.max(dropdownRect.width, 420),
                       zIndex: 9999,
                     }}
