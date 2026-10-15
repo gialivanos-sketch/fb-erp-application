@@ -413,9 +413,9 @@ export default function DraftOrderPage() {
                       {group.items.map((item, idx) => (
                         <tr key={idx}>
                           <td className="text-xs text-slate-400">{idx + 1}</td>
-                          <td><input type="text" value={item.productName} onChange={(e) => updateItemField(idx, "productName", e.target.value)} className="erp-input text-xs py-1" /></td>
+                          <td><input type="text" value={item.productName} onChange={(e) => updateItemField(idx, "productName", e.target.value)} className="erp-input text-xs py-1 min-w-[180px]" /></td>
                           <td><input type="number" value={item.orderedQuantity} onChange={(e) => updateItemField(idx, "orderedQuantity", Number(e.target.value))} className="erp-input text-xs py-1 w-20" step="0.01" /></td>
-                          <td className="text-sm">{item.unit}</td>
+                          <td className="text-sm min-w-[70px]">{item.unit}</td>
                           <td><input type="number" value={item.basePrice} onChange={(e) => updateItemField(idx, "basePrice", Number(e.target.value))} className="erp-input text-xs py-1 w-20" step="0.01" /></td>
                           <td>{item.vatPercent}%</td>
                           <td>{item.discountPercent}%</td>
@@ -446,9 +446,9 @@ export default function DraftOrderPage() {
                   ) : items.map((item, i) => (
                     <tr key={i}>
                       <td className="text-xs text-slate-400">{i + 1}</td>
-                      <td><input type="text" value={item.productName} onChange={(e) => updateItemField(i, "productName", e.target.value)} className="erp-input text-xs py-1" /></td>
+                      <td><input type="text" value={item.productName} onChange={(e) => updateItemField(i, "productName", e.target.value)} className="erp-input text-xs py-1 min-w-[180px]" /></td>
                       <td><input type="number" value={item.orderedQuantity} onChange={(e) => updateItemField(i, "orderedQuantity", Number(e.target.value))} className="erp-input text-xs py-1 w-20" step="0.01" /></td>
-                      <td className="text-sm">{item.unit}</td>
+                      <td className="text-sm min-w-[70px]">{item.unit}</td>
                       <td><input type="number" value={item.basePrice} onChange={(e) => updateItemField(i, "basePrice", Number(e.target.value))} className="erp-input text-xs py-1 w-20" step="0.01" /></td>
                       <td><input type="number" value={item.vatPercent} onChange={(e) => updateItemField(i, "vatPercent", Number(e.target.value))} className="erp-input text-xs py-1 w-16" /></td>
                       <td><input type="number" value={item.discountPercent} onChange={(e) => updateItemField(i, "discountPercent", Number(e.target.value))} className="erp-input text-xs py-1 w-16" /></td>
