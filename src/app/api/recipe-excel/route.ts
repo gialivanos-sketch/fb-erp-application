@@ -4,6 +4,7 @@ import ExcelJS from "exceljs";
 // POST /api/recipe-excel
 // Body: { recipe, ingredients, locale, costing }
 export async function POST(req: NextRequest) {
+  try {
   const { recipe, ingredients, locale, costing } = await req.json();
 
   const isGr     = locale === "gr";
@@ -207,6 +208,7 @@ export async function POST(req: NextRequest) {
   ];
 
   costLines.forEach(([label, val, isBold]) => {
+    // label cell (A:E merged)
     ws.mergeCells(`A${r}:E${r}`);
     const lCell = ws.getCell(`A${r}`);
     lCell.value     = label;
@@ -214,7 +216,7 @@ export async function POST(req: NextRequest) {
     lCell.fill      = isBold ? fillSolid(GRN) : { type: "pattern", pattern: "solid", fgColor: { argb: "FFFAFAFA" } };
     lCell.border    = borderThin();
 
-    ws.getCell(`F${r}`).value = "";
+    // value cell (F:G merged) — merge FIRST, then set value
     ws.mergeCells(`F${r}:G${r}`);
     const vCell = ws.getCell(`F${r}`);
     vCell.value     = val;
@@ -264,4 +266,11 @@ export async function POST(req: NextRequest) {
       "Content-Disposition": `attachment; filename="${filename}"`,
     },
   });
+  } catch (err) {
+    console.error("[recipe-excel] ERROR:", err);
+    return new NextResponse(
+      JSON.stringify({ error: String(err) }),
+      { status: 500, headers: { "Content-Type": "application/json" } }
+    );
+  }
 }

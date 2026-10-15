@@ -20,7 +20,12 @@ async function exportRecipeIngredients(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ recipe, ingredients, locale, costing }),
   });
-  if (!res.ok) { alert("Σφάλμα εξαγωγής Excel"); return; }
+  if (!res.ok) {
+    let msg = "Σφάλμα εξαγωγής Excel";
+    try { const j = await res.json(); msg += ": " + j.error; } catch {}
+    alert(msg);
+    return;
+  }
 
   const blob = await res.blob();
   const url  = URL.createObjectURL(blob);
