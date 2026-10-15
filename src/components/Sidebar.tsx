@@ -19,6 +19,7 @@ const procurementLinks = [
 const kitchenLinks = [
   { key: "navIngredients", href: "/ingredients", icon: "🥘" },
   { key: "navRecipe", href: "/recipe", icon: "👨‍🍳" },
+  { key: "navImportRecipes", href: "/import-recipes", icon: "📥" },
   { key: "navRecipeIngredients", href: "/recipe-ingredients", icon: "🧂" },
   { key: "navRecipeCosting", href: "/recipe-costing", icon: "💰" },
   { key: "navConsumption", href: "/consumption", icon: "📈" },

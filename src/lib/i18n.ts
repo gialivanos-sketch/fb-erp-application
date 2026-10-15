@@ -15,6 +15,7 @@ export const translations: Record<string, { gr: string; en: string }> = {
   navOrderHistory: { gr: "Ιστορικό Στοιχείων", en: "Order History" },
   navInventory: { gr: "Απογραφή Αποθέματος", en: "Inventory Count" },
   navInventoryArchive: { gr: "Αρχείο Απογραφής", en: "Inventory Archive" },
+  navImportRecipes: { gr: "Εισαγωγή Συνταγών", en: "Import Recipes" },
   navIngredients: { gr: "Υλικά", en: "Ingredients" },
   navRecipe: { gr: "Φόρμα Συνταγής", en: "Recipe Form" },
   navRecipeIngredients: { gr: "Υλικά Συνταγών", en: "Recipe Ingredients" },
