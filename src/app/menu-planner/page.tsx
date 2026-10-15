@@ -30,6 +30,7 @@ export default function MenuPlannerPage() {
   const [supplierOptions, setSupplierOptions] = useState<Record<string, { supplierProductId: number; productName: string; basePrice: string; supplierId: number; supplierName: string; unit: string }[]>>({});
   const [loadingOptions, setLoadingOptions] = useState<string | null>(null); // ingredient name που φορτώνει options
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [excludedItems, setExcludedItems] = useState<Set<string>>(new Set()); // υλικά που εξαιρούνται από παραγγελία
 
   // Φιλτράρισμα συνταγών βάσει αναζήτησης
   const filteredRecipes = useMemo(() => {
@@ -47,6 +48,7 @@ export default function MenuPlannerPage() {
     setShowConsumption(true);
     setSupplierPrices({});
     setSupplierOptions({});
+    setExcludedItems(new Set());
     try {
       // 1. Φόρτωσε υλικά για κάθε συνταγή
       const fetched: Record<number, { name: string; unit: string; qty: number; unitCost: number }[]> = {};
@@ -136,8 +138,39 @@ export default function MenuPlannerPage() {
         }
       }
     }
-    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name, "el"));
-  }, [showConsumption, menuRecipes, allRecipes, recipeIngredients, coverCount, supplierPrices]);
+    return Array.from(map.values())
+      .filter(item => !excludedItems.has(item.name))
+      .sort((a, b) => a.name.localeCompare(b.name, "el"));
+  }, [showConsumption, menuRecipes, allRecipes, recipeIngredients, coverCount, supplierPrices, excludedItems]);
+
+  const toggleExclude = useCallback((name: string) => {
+    setExcludedItems(prev => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name); else next.add(name);
+      return next;
+    });
+  }, []);
+
+  // Excluded items (για εμφάνιση στο κάτω μέρος)
+  const excludedList = useMemo(() => {
+    if (!showConsumption) return [];
+    const map = new Map<string, { name: string; unit: string; qty: number }>();
+    for (const mr of menuRecipes) {
+      const recipe = allRecipes.find(r => r.id === mr.recipeId);
+      const ings = recipeIngredients[mr.recipeId] || [];
+      const portionYield = Number(recipe?.portionYield) || 1;
+      const multiplier = mr.portionType === "portion" ? coverCount / portionYield : 1;
+      for (const ing of ings) {
+        if (!excludedItems.has(ing.name)) continue;
+        const key = `${ing.name}__${ing.unit}`;
+        const existing = map.get(key);
+        const qty = ing.qty * multiplier;
+        if (existing) existing.qty += qty;
+        else map.set(key, { name: ing.name, unit: ing.unit, qty });
+      }
+    }
+    return Array.from(map.values());
+  }, [showConsumption, menuRecipes, allRecipes, recipeIngredients, coverCount, excludedItems]);
 
   // Group by supplier for email / purchase order
   const bySupplier = useMemo(() => {
@@ -572,6 +605,7 @@ export default function MenuPlannerPage() {
                     <th>{locale === "gr" ? "Τιμή/μον." : "Unit Price"}</th>
                     <th>{locale === "gr" ? "Προμηθευτής" : "Supplier"}</th>
                     <th>{locale === "gr" ? "Σύνολο" : "Total"}</th>
+                    <th title={locale === "gr" ? "Εξαίρεση από παραγγελία" : "Exclude from order"}>✕</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -621,13 +655,20 @@ export default function MenuPlannerPage() {
                         <td className={item.hasPrice ? "text-emerald-700 font-medium" : "text-slate-300"}>
                           {item.hasPrice ? fmt(item.cost) : "—"}
                         </td>
+                        <td className="text-center">
+                          <button
+                            onClick={() => toggleExclude(item.name)}
+                            className="text-red-400 hover:text-red-600 text-sm font-bold"
+                            title={locale === "gr" ? "Εξαίρεση από παραγγελία" : "Exclude from order"}
+                          >✕</button>
+                        </td>
                       </tr>
                     );
                   })}
                 </tbody>
                 <tfoot>
                   <tr className="bg-slate-50 font-bold">
-                    <td colSpan={6} className="text-right">{t("total")}:</td>
+                    <td colSpan={7} className="text-right">{t("total")}:</td>
                     <td className="text-emerald-700">{fmt(consumptionItems.reduce((s, i) => s + i.cost, 0))}</td>
                   </tr>
                 </tfoot>
@@ -638,6 +679,27 @@ export default function MenuPlannerPage() {
                     ? "Τα τονισμένα υλικά δεν βρέθηκαν στις προσφορές — τιμή 0."
                     : "Highlighted items have no supplier price — cost shown as 0."}
                 </p>
+              )}
+              {excludedList.length > 0 && (
+                <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-lg">
+                  <p className="text-xs font-semibold text-red-700 mb-2">
+                    🚫 {locale === "gr" ? "Εξαιρεθέντα από παραγγελία:" : "Excluded from order:"}
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {excludedList.map(ex => (
+                      <button
+                        key={ex.name}
+                        onClick={() => toggleExclude(ex.name)}
+                        className="inline-flex items-center gap-1 text-xs bg-white border border-red-300 text-red-700 rounded px-2 py-1 hover:bg-red-100"
+                        title={locale === "gr" ? "Κλικ για επαναφορά" : "Click to restore"}
+                      >
+                        <span>{ex.name}</span>
+                        <span className="text-slate-400">({ex.qty % 1 === 0 ? ex.qty.toFixed(0) : ex.qty.toFixed(3)} {ex.unit})</span>
+                        <span className="text-green-600 font-bold ml-1">↩</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
               )}
             </div>
           )}
