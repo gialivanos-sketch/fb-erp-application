@@ -4,6 +4,7 @@ import { useLanguage } from "@/lib/context";
 import { PageHeader, Badge, Modal } from "@/components/shared";
 import type { Recipe } from "@/lib/types";
 import * as db from "@/lib/supabaseData";
+import type { OrderItem } from "@/lib/types";
 
 const ALLERGEN_LIST = [
   "gluten","dairy","eggs","fish","shellfish","nuts",
@@ -70,7 +71,7 @@ export default function RecipePage() {
 
   // Αναζήτηση υλικών από order_items
   const [ingSearch, setIngSearch] = useState("");
-  const [ingResults, setIngResults] = useState<db.OrderItem[]>([]);
+  const [ingResults, setIngResults] = useState<OrderItem[]>([]);
   const [ingLoading, setIngLoading] = useState(false);
   const [showIngDropdown, setShowIngDropdown] = useState(false);
   const ingSearchRef = useRef<HTMLDivElement>(null);
@@ -119,7 +120,7 @@ export default function RecipePage() {
 
   // ─── Προσθήκη υλικού από order_items στη draft λίστα ────────────────────────
 
-  function addIngredientFromOrderItem(item: db.OrderItem) {
+  function addIngredientFromOrderItem(item: OrderItem) {
     const key = crypto.randomUUID();
     const unitCost = Number(item.basePrice ?? 0);
     setDraftItems((prev) => [
