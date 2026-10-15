@@ -1296,13 +1296,15 @@ export async function fetchMenus(): Promise<Menu[]> {
   if (error) throw error;
   const result: Menu[] = [];
   for (const m of menus ?? []) {
-    const { data: recipes, error: recError } = await client.from("menu_recipes").select("id, menu_id, recipe_id, recipe_name, portions, portion_type, food_cost, selling_price, profit_margin").eq("menu_id", m.id);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: recipes, error: recError } = await (client.from("menu_recipes") as any).select("id, menu_id, recipe_id, recipe_name, portions, portion_type, food_cost, selling_price, profit_margin").eq("menu_id", m.id);
     if (recError) throw recError;
     result.push({
       id: m.id, title: m.title, titleEn: m.title_en, status: m.status, totalRecipes: m.total_recipes,
       totalPortions: m.total_portions, avgProfitMargin: numToStr(m.avg_profit_margin), totalFoodCost: numToStr(m.total_food_cost),
       createdAt: m.created_at,
-      recipes: (recipes ?? []).map((r): MenuRecipe => ({
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      recipes: (recipes ?? []).map((r: any): MenuRecipe => ({
         id: r.id, menuId: r.menu_id, recipeId: r.recipe_id ?? 0, recipeName: r.recipe_name, portions: r.portions,
         portionType: (r.portion_type ?? "portion") as "portion" | "kg",
         foodCost: numToStr(r.food_cost), sellingPrice: numToStr(r.selling_price), profitMargin: numToStr(r.profit_margin),
@@ -1333,7 +1335,8 @@ export async function upsertMenu(menu: Omit<Menu, "id" | "createdAt"> & { id?: n
     menuId = data.id as number;
   }
   if (menu.recipes.length > 0) {
-    const { error: recError } = await client.from("menu_recipes").insert(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error: recError } = await (client.from("menu_recipes") as any).insert(
       menu.recipes.map((r) => ({
         menu_id: menuId, recipe_id: r.recipeId || null, recipe_name: r.recipeName, portions: r.portions,
         portion_type: r.portionType ?? "portion",

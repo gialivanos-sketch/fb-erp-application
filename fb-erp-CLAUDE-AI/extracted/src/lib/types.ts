@@ -36,6 +36,8 @@ export interface SupplierProduct {
   category: string;
   unit: string;
   basePrice: string;
+  listPrice: string | null;
+  discountPercent: string;
   qualityGrade: string | null;
   regionOfOrigin: string | null;
   isContractPrice: boolean | null;
@@ -197,6 +199,7 @@ export interface MenuRecipe {
   recipeId: number;
   recipeName: string;
   portions: number;
+  portionType: "portion" | "kg"; // "portion" = μερίδα, "kg" = κιλό (μπουφές)
   foodCost: string;
   sellingPrice: string;
   profitMargin: string;
@@ -271,4 +274,13 @@ export interface AppDatabase {
   // Auto-incrementing id counters, one per entity, so ids never collide
   // even after deletions.
   nextIds: Record<string, number>;
+}
+
+export interface BusinessProfile {
+  name: string;
+  address: string;
+  phone: string;
+  email: string;
+  taxId: string;
+  logoDataUrl: string | null;
 }
