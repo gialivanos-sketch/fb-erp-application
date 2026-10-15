@@ -6,7 +6,7 @@ import { PageHeader, Badge, Modal } from "@/components/shared";
 import type { Recipe, OrderItem } from "@/lib/types";
 import * as db from "@/lib/supabaseData";
 
-// ─── Excel export — κάρτα συνταγής ίδια δομή με PDF (SheetJS CDN) ───────────
+// ─── Excel export — server-side μέσω /api/recipe-excel (ExcelJS) ─────────────
 async function exportRecipeIngredients(
   recipe: Recipe | null,
   ingredients: DraftIngredient[],
@@ -14,196 +14,22 @@ async function exportRecipeIngredients(
   costing: { rawMaterial: number; total: number; selling: number; menuVat: number; menuFinal: number }
 ) {
   if (!recipe) return;
-  if (!(window as unknown as Record<string, unknown>).XLSX) {
-    await new Promise<void>((resolve, reject) => {
-      const s = document.createElement("script");
-      s.src = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
-      s.onload = () => resolve();
-      s.onerror = reject;
-      document.head.appendChild(s);
-    });
-  }
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const XLSX = (window as any).XLSX;
 
-  const isGr     = locale === "gr";
-  const portions = Number(recipe.portionYield) || 1;
-  const allergens: string[] = Array.isArray(recipe.allergens) ? recipe.allergens as string[] :
-    typeof recipe.allergens === "string" ? JSON.parse(recipe.allergens || "[]") : [];
-  const totalGrams = ingredients.reduce((s, i) =>
-    s + (i.unit === "ΓΡΑΜΜΑΡΙΑ" || i.unit === "GR" ? i.quantity : 0), 0);
-
-  // Κοστολόγηση footer
-  const perPortion     = costing.menuFinal;
-  const profitPerPortion = perPortion - (costing.total / portions);
-  const costPct        = perPortion > 0 ? (costing.total / portions / perPortion * 100) : 0;
-  const profitPct      = perPortion > 0 ? (profitPerPortion / perPortion * 100) : 0;
-  const today          = new Date().toLocaleDateString("el-GR");
-
-  const wb  = XLSX.utils.book_new();
-  const ws: Record<string, unknown> = {};
-  let r = 0;
-
-  const C = (col: number) => XLSX.utils.encode_cell({ c: col, r });
-  const BLU = "1A5276"; // header blue
-  const LBL = "D6EAF8"; // light blue για επικεφαλίδες στηλών
-  const GRN = "E9F7EF";
-  const YLW = "FEF9E7";
-
-  type CellStyle = { font?: Record<string,unknown>; fill?: Record<string,unknown>; alignment?: Record<string,unknown>; border?: Record<string,unknown> };
-
-  function wc(col: number, val: unknown, style?: CellStyle) {
-    const addr = C(col);
-    ws[addr] = {
-      v: val,
-      t: typeof val === "number" ? "n" : "s",
-      s: style ?? {},
-    };
-  }
-  const bold   = (sz=11): CellStyle => ({ font: { bold: true, sz, color: { rgb: "000000" } } });
-  const hdrBlu = (sz=9): CellStyle => ({ font: { bold: true, sz, color: { rgb: "FFFFFF" } }, fill: { fgColor: { rgb: BLU }, patternType: "solid" }, alignment: { horizontal: "center", vertical: "center" } });
-  const hdrLbl = (sz=9): CellStyle => ({ font: { bold: true, sz }, fill: { fgColor: { rgb: LBL }, patternType: "solid" } });
-  const grn    = (sz=9): CellStyle => ({ font: { bold: true, sz }, fill: { fgColor: { rgb: GRN }, patternType: "solid" } });
-  const ylw    = (sz=9): CellStyle => ({ font: { bold: true, sz }, fill: { fgColor: { rgb: YLW }, patternType: "solid" } });
-  const right  = (): CellStyle => ({ alignment: { horizontal: "right" } });
-  const merge  = (s: {r:number;c:number}, e: {r:number;c:number}) => ({ s, e });
-
-  const merges: {s:{r:number;c:number};e:{r:number;c:number}}[] = [];
-
-  // ── ROW 0: Τίτλος "RECIPE BUILDER" ──
-  wc(0, "RECIPE BUILDER", hdrBlu(14));
-  wc(1, ""); wc(2, ""); wc(3, ""); wc(4, ""); wc(5, ""); wc(6, "");
-  wc(7, ""); wc(8, ""); wc(9, "");
-  merges.push(merge({r,c:0},{r,c:9}));
-  r++;
-
-  // ── ROW 1: Ετικέτα ονόματος ──
-  wc(0, isGr ? "ΟΝΟΜΑ ΣΥΝΤΑΓΗΣ:" : "RECIPE NAME:", bold());
-  wc(1, recipe.name.toUpperCase(), { font: { bold: true, sz: 13 } });
-  merges.push(merge({r,c:1},{r,c:7}));
-  wc(8, isGr ? "ΜΕΡΙΔΕΣ:" : "PORTIONS:", bold(9));
-  wc(9, recipe.portionYield, { font: { bold: true, sz: 12 } });
-  r++;
-
-  // ── ROW 2: Ονομασία EN + αλλεργίες ──
-  wc(0, isGr ? "ΟΝΟΜΑΣΙΑ (EN):" : "NAME (EN):", {});
-  wc(1, recipe.nameEn ?? "", {});
-  merges.push(merge({r,c:1},{r,c:5}));
-  wc(6, isGr ? "ΑΛΛΕΡΓΙΕΣ:" : "ALLERGENS:", bold(9));
-  wc(7, allergens.join(", ") || "—", {});
-  merges.push(merge({r,c:7},{r,c:9}));
-  r++;
-  r++; // κενό
-
-  // ── ROW 4+: Επικεφαλίδα πίνακα υλικών ──
-  const ING_COLS = [
-    isGr ? "ΥΛΙΚΟ" : "INGREDIENT",         // col 0 — wide
-    isGr ? "ΜΟΝΑΔΕΣ" : "UNITS",            // col 1
-    isGr ? "ΤΙΜΗ/ΜΟΝΑΔΑ €" : "PRICE/UNIT €", // col 2
-    isGr ? "ΠΟΣΟΤΗΤΑ/ΜΕΡΙΔΑ" : "QTY/PORTION", // col 3
-    isGr ? "ΣΥΝΟΛΙΚΗ ΠΟΣΟΤΗΤΑ" : "TOTAL QTY",  // col 4
-    isGr ? "ΚΟΣΤΟΣ ΥΛΙΚΩΝ/ΜΕΡΙΔΑ €" : "COST/PORTION €", // col 5
-    isGr ? "ΚΟΣΤΟΣ ΣΥΝΟΛΟ €" : "TOTAL COST €",           // col 6
-  ];
-  ING_COLS.forEach((h, c) => wc(c, h, hdrLbl(9)));
-  r++;
-
-  // ── Γραμμές υλικών (min 20) ──
-  const MIN_ROWS = 20;
-  ingredients.forEach((ing) => {
-    wc(0, ing.productName.toUpperCase(), {});
-    wc(1, ing.unit.toUpperCase(), {});
-    wc(2, Number(ing.unitCost), right());
-    wc(3, Number((ing.quantity / portions).toFixed(6)), right());
-    wc(4, Number(ing.quantity), right());
-    wc(5, Number((ing.totalCost / portions).toFixed(6)), right());
-    wc(6, Number(ing.totalCost), right());
-    r++;
+  const res = await fetch("/api/recipe-excel", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ recipe, ingredients, locale, costing }),
   });
-  for (let i = ingredients.length; i < MIN_ROWS; i++) {
-    wc(0, ""); wc(1, ""); wc(2, ""); wc(3, ""); wc(4, ""); wc(5, ""); wc(6, "");
-    r++;
-  }
+  if (!res.ok) { alert("Σφάλμα εξαγωγής Excel"); return; }
 
-  // ── Γραμμή συνόλων (τύπου "totals bar") ──
-  wc(0, isGr ? "ΓΡΑΜΜΑΡΙΑ/ΜΕΡΙΔΑ:" : "GRAMS/PORTION:", grn(9));
-  wc(1, Number((totalGrams / portions).toFixed(3)), grn(9));
-  wc(2, "");
-  wc(3, isGr ? "ΚΟΣΤΟΣ/ΜΕΡΙΔΑ:" : "COST/PORTION:", grn(9));
-  wc(4, Number((costing.rawMaterial / portions).toFixed(4)), grn(9));
-  wc(5, isGr ? "ΣΥΝΟΛΙΚΑ ΓΡΑΜΜΑΡΙΑ:" : "TOTAL GRAMS:", grn(9));
-  wc(6, Number(totalGrams.toFixed(3)), grn(9));
-  r++;
-  r++;
-
-  // ── ΚΟΣΤΟΛΟΓΗΣΗ — επικεφαλίδα ──
-  wc(0, isGr ? "ΚΟΣΤΟΛΟΓΗΣΗ" : "COSTING", hdrBlu(10));
-  wc(1, ""); wc(2, ""); wc(3, ""); wc(4, ""); wc(5, ""); wc(6, "");
-  merges.push(merge({r,c:0},{r,c:6}));
-  r++;
-
-  const costLines: [string, unknown][] = [
-    [isGr ? "Κόστος Υλικών (Raw Material)" : "Raw Material Cost",  costing.rawMaterial],
-    [isGr ? "Κόστος Εργασίας (Labor)"      : "Labor Cost",         Number(recipe.laborCost)],
-    [isGr ? "Γενικά Έξοδα (Overhead)"      : "Overhead",           Number(recipe.overheadCost)],
-    [isGr ? "ΣΥΝΟΛΙΚΟ ΚΟΣΤΟΣ"              : "TOTAL COST",         costing.total],
-    [isGr ? "Περιθώριο Κέρδους %"          : "Profit Margin %",    Number(recipe.profitMarginPercent)],
-    [isGr ? "Τιμή Πώλησης (χωρίς ΦΠΑ)"    : "Selling Price (ex VAT)", costing.selling],
-    [isGr ? "Τιμή Μενού (ΦΠΑ 24%)"        : "Menu Price (VAT 24%)", costing.menuVat],
-    [isGr ? "ΤΙΜΗ ΠΩΛΗΣΗΣ ΜΕΡΙΔΑΣ"        : "SELLING PRICE/PORTION", perPortion],
-    [isGr ? "ΚΕΡΔΟΣ/ΜΕΡΙΔΑ"               : "PROFIT/PORTION",     profitPerPortion],
-    [isGr ? "ΚΟΣΤΟΣ %"                     : "COST %",             costPct],
-    [isGr ? "ΚΕΡΔΟΣ %"                     : "PROFIT %",           profitPct],
-  ];
-  costLines.forEach(([label, val]) => {
-    const isTotal = (label as string).startsWith(isGr ? "ΣΥΝΟΛ" : "TOTAL") ||
-                    (label as string).startsWith(isGr ? "ΤΙΜΗ ΠΩΛΗ" : "SELLING") ||
-                    (label as string).startsWith(isGr ? "ΚΕΡΔΟΣ/Μ" : "PROFIT/P");
-    const st = isTotal ? bold(10) : {};
-    wc(0, label, st);
-    merges.push(merge({r,c:0},{r,c:4}));
-    wc(5, "");
-    wc(6, val, { ...st, ...right() });
-    r++;
-  });
-  r++;
-
-  // ── ΤΕΧΝΙΚΟΣ ΟΔΗΓΟΣ ──
-  if (recipe.technicalGuide) {
-    wc(0, isGr ? "ΤΕΧΝΙΚΟΣ ΟΔΗΓΟΣ / TECHNICAL GUIDE" : "TECHNICAL GUIDE", ylw(10));
-    merges.push(merge({r,c:0},{r,c:6}));
-    r++;
-    wc(0, recipe.technicalGuide, { alignment: { wrapText: true } });
-    merges.push(merge({r,c:0},{r,c:6}));
-    r++;
-  }
-  r++;
-
-  // ── Footer ──
-  wc(0, isGr ? "ΗΜΕΡΟΜΗΝΙΑ ΕΚΤΥΠΩΣΕΙΣ:" : "PRINT DATE:", bold(9));
-  wc(1, today, bold(9));
-  r++;
-
-  // Ορισμός εύρους + πλάτη στηλών
-  ws["!ref"]   = XLSX.utils.encode_range({ s: { c: 0, r: 0 }, e: { c: 9, r: r } });
-  ws["!cols"]  = [
-    { wch: 38 }, // 0 Υλικό
-    { wch: 12 }, // 1 Μονάδες
-    { wch: 14 }, // 2 Τιμή/μον
-    { wch: 14 }, // 3 Ποσ/μερίδα
-    { wch: 14 }, // 4 Συνολική ποσ
-    { wch: 20 }, // 5 Κόστος/μερίδα
-    { wch: 16 }, // 6 Κόστος σύνολο
-    { wch: 14 }, // 7
-    { wch: 14 }, // 8
-    { wch: 10 }, // 9
-  ];
-  ws["!merges"] = merges;
-
-  XLSX.utils.book_append_sheet(wb, ws, isGr ? "Συνταγή" : "Recipe");
-
+  const blob = await res.blob();
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement("a");
   const safeName = recipe.name.replace(/[^a-zA-Z0-9Ͱ-Ͽ_-]/g, "_").slice(0, 40);
-  XLSX.writeFile(wb, `${safeName}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  a.href     = url;
+  a.download = `${safeName}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 // ─── PDF export — κάρτα συνταγής τύπου Recipe Builder ────────────────────────
