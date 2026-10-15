@@ -6,9 +6,14 @@ import { PageHeader, Badge, Modal } from "@/components/shared";
 import type { Recipe, OrderItem } from "@/lib/types";
 import * as db from "@/lib/supabaseData";
 
-// ─── Excel export (SheetJS CDN — loaded on demand) ───────────────────────────
-async function exportRecipesExcel(recipes: Recipe[], locale: string) {
-  // Φόρτωσε SheetJS δυναμικά
+// ─── Excel export — υλικά μίας συνταγής (SheetJS CDN) ───────────────────────
+async function exportRecipeIngredients(
+  recipe: Recipe | null,
+  ingredients: DraftIngredient[],
+  locale: string,
+  costing: { rawMaterial: number; total: number; selling: number; menuVat: number; menuFinal: number }
+) {
+  if (!recipe) return;
   if (!(window as unknown as Record<string, unknown>).XLSX) {
     await new Promise<void>((resolve, reject) => {
       const s = document.createElement("script");
@@ -21,35 +26,57 @@ async function exportRecipesExcel(recipes: Recipe[], locale: string) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const XLSX = (window as any).XLSX;
 
-  const rows = recipes.map((r) => ({
-    [locale === "gr" ? "Κωδικός" : "Code"]: r.id,
-    [locale === "gr" ? "Όνομα" : "Name"]: r.name,
-    [locale === "gr" ? "Όνομα (EN)" : "Name (EN)"]: r.nameEn ?? "",
-    [locale === "gr" ? "Μερίδες" : "Portions"]: Number(r.portionYield),
-    [locale === "gr" ? "Μονάδα" : "Unit"]: r.portionUnit,
-    [locale === "gr" ? "Κόστος Υλικών €" : "Raw Material €"]: Number(r.totalRawMaterialCost),
-    [locale === "gr" ? "Εργασία €" : "Labor €"]: Number(r.laborCost),
-    [locale === "gr" ? "Γεν.Έξοδα €" : "Overhead €"]: Number(r.overheadCost),
-    [locale === "gr" ? "Συνολικό Κόστος €" : "Total Cost €"]: Number(r.totalCost),
-    [locale === "gr" ? "Περιθώριο %" : "Margin %"]: Number(r.profitMarginPercent),
-    [locale === "gr" ? "Τιμή Πώλησης €" : "Selling Price €"]: Number(r.sellingPrice),
-    [locale === "gr" ? "Τιμή Μενού (ΦΠΑ) €" : "Menu Price (VAT) €"]: Number(r.menuPriceVat),
-    [locale === "gr" ? "Τιμή/Μερίδα €" : "Price/Portion €"]: Number(r.menuPriceFinal),
-    [locale === "gr" ? "Αλλεργίες" : "Allergens"]:
-      Array.isArray(r.allergens) ? r.allergens.join(", ") :
-      typeof r.allergens === "string" ? JSON.parse(r.allergens || "[]").join(", ") : "",
+  // Φύλλο 1: Υλικά
+  const ingRows = ingredients.map((ing, i) => ({
+    "#": i + 1,
+    [locale === "gr" ? "Υλικό" : "Ingredient"]: ing.productName,
+    [locale === "gr" ? "Προμηθευτής" : "Supplier"]: ing.supplierName ?? "",
+    [locale === "gr" ? "Ποσότητα" : "Qty"]: ing.quantity,
+    [locale === "gr" ? "Μονάδα" : "Unit"]: ing.unit,
+    [locale === "gr" ? "Τιμή/μον. €" : "Unit Cost €"]: Number(ing.unitCost),
+    [locale === "gr" ? "Σύνολο €" : "Total €"]: Number(ing.totalCost),
   }));
+  const wsIng = XLSX.utils.json_to_sheet(ingRows);
+  wsIng["!cols"] = [{ wch: 4 }, { wch: 35 }, { wch: 20 }, { wch: 10 }, { wch: 8 }, { wch: 14 }, { wch: 12 }];
 
-  const ws = XLSX.utils.json_to_sheet(rows);
-  // Πλάτη στηλών
-  ws["!cols"] = [
-    { wch: 8 }, { wch: 30 }, { wch: 30 }, { wch: 10 }, { wch: 8 },
-    { wch: 16 }, { wch: 12 }, { wch: 12 }, { wch: 16 },
-    { wch: 12 }, { wch: 16 }, { wch: 20 }, { wch: 16 }, { wch: 30 },
+  // Φύλλο 2: Κοστολόγηση
+  const costRows = [
+    { "": locale === "gr" ? "Συνταγή" : "Recipe", " ": recipe.name },
+    { "": locale === "gr" ? "Μερίδες" : "Portions", " ": `${recipe.portionYield} ${recipe.portionUnit}` },
+    { "": "", " ": "" },
+    { "": locale === "gr" ? "Κόστος Υλικών €" : "Raw Material €", " ": costing.rawMaterial },
+    { "": locale === "gr" ? "Εργασία €" : "Labor €", " ": Number(recipe.laborCost) },
+    { "": locale === "gr" ? "Γεν.Έξοδα €" : "Overhead €", " ": Number(recipe.overheadCost) },
+    { "": locale === "gr" ? "Συνολικό Κόστος €" : "Total Cost €", " ": costing.total },
+    { "": locale === "gr" ? "Περιθώριο %" : "Margin %", " ": Number(recipe.profitMarginPercent) },
+    { "": locale === "gr" ? "Τιμή Πώλησης €" : "Selling Price €", " ": costing.selling },
+    { "": locale === "gr" ? "Τιμή Μενού (ΦΠΑ 24%) €" : "Menu Price (VAT 24%) €", " ": costing.menuVat },
+    { "": locale === "gr" ? "Τιμή/Μερίδα €" : "Price/Portion €", " ": costing.menuFinal },
   ];
+  const wsCost = XLSX.utils.json_to_sheet(costRows);
+  wsCost["!cols"] = [{ wch: 28 }, { wch: 20 }];
+
+  // Φύλλο 3: Γενικά στοιχεία + Αλλεργίες + Τεχνικός Οδηγός
+  const allergens: string[] = Array.isArray(recipe.allergens) ? recipe.allergens as string[] :
+    typeof recipe.allergens === "string" ? JSON.parse(recipe.allergens || "[]") : [];
+  const infoRows = [
+    { "": locale === "gr" ? "Ονομασία (ΕΛ)" : "Name (GR)", " ": recipe.name },
+    { "": locale === "gr" ? "Ονομασία (EN)" : "Name (EN)", " ": recipe.nameEn ?? "" },
+    { "": locale === "gr" ? "Μερίδες" : "Portions", " ": `${recipe.portionYield} ${recipe.portionUnit}` },
+    { "": locale === "gr" ? "Αλλεργίες" : "Allergens", " ": allergens.join(", ") || "—" },
+    { "": "", " ": "" },
+    { "": locale === "gr" ? "Τεχνικός Οδηγός" : "Technical Guide", " ": recipe.technicalGuide ?? "" },
+  ];
+  const wsInfo = XLSX.utils.json_to_sheet(infoRows);
+  wsInfo["!cols"] = [{ wch: 22 }, { wch: 80 }];
+
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, locale === "gr" ? "Συνταγές" : "Recipes");
-  XLSX.writeFile(wb, `recipes_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  XLSX.utils.book_append_sheet(wb, wsInfo,  locale === "gr" ? "Στοιχεία" : "Details");
+  XLSX.utils.book_append_sheet(wb, wsIng,   locale === "gr" ? "Υλικά" : "Ingredients");
+  XLSX.utils.book_append_sheet(wb, wsCost,  locale === "gr" ? "Κοστολόγηση" : "Costing");
+
+  const safeName = recipe.name.replace(/[^a-zA-Z0-9Ͱ-Ͽ_-]/g, "_").slice(0, 40);
+  XLSX.writeFile(wb, `${safeName}_${new Date().toISOString().slice(0, 10)}.xlsx`);
 }
 
 // ─── PDF export — ανοίγει νέο tab με print-ready κάρτα ───────────────────────
@@ -518,12 +545,20 @@ export default function RecipePage() {
               ← {locale === "gr" ? "Πίσω" : "Back"}
             </button>
             {selectedRecipe && (
-              <button
-                onClick={() => printRecipePDF(selectedRecipe, draftItems, locale)}
-                className="erp-btn-secondary"
-              >
-                🖨️ PDF
-              </button>
+              <>
+                <button
+                  onClick={() => exportRecipeIngredients(selectedRecipe, draftItems, locale, costing)}
+                  className="erp-btn-secondary"
+                >
+                  📊 Excel
+                </button>
+                <button
+                  onClick={() => printRecipePDF(selectedRecipe, draftItems, locale)}
+                  className="erp-btn-secondary"
+                >
+                  🖨️ PDF
+                </button>
+              </>
             )}
             <button onClick={saveRecipe} disabled={saving} className="erp-btn-success">
               {saving ? "…" : "💾"} {locale === "gr" ? "Αποθήκευση" : "Save"}
@@ -535,17 +570,10 @@ export default function RecipePage() {
       {/* ── LIST VIEW ─────────────────────────────────────────────────────── */}
       {view === "list" && (
         <div className="erp-card">
-          <div className="erp-card-header flex items-center justify-between">
+          <div className="erp-card-header">
             <h3 className="font-semibold">
               📋 {locale === "gr" ? "Αρχείο Συνταγών" : "Recipe Archive"} — {recipes.length}
             </h3>
-            <button
-              onClick={() => exportRecipesExcel(recipes, locale)}
-              className="erp-btn-secondary text-xs gap-1"
-              disabled={recipes.length === 0}
-            >
-              📊 {locale === "gr" ? "Εξαγωγή Excel" : "Export Excel"}
-            </button>
           </div>
           <div className="overflow-x-auto">
             <table className="erp-table">
@@ -906,18 +934,26 @@ export default function RecipePage() {
 
           {/* Αποθήκευση */}
           <div className="flex justify-between items-center pb-6">
-            <button
-              onClick={() => {
-                if (selectedRecipe) {
-                  printRecipePDF(selectedRecipe, draftItems, locale);
-                } else {
-                  alert(locale === "gr" ? "Αποθήκευσε πρώτα τη συνταγή για να την εκτυπώσεις." : "Save the recipe first before printing.");
-                }
-              }}
-              className="erp-btn-secondary gap-1"
-            >
-              🖨️ {locale === "gr" ? "Εκτύπωση / PDF" : "Print / PDF"}
-            </button>
+            <div className="flex gap-2">
+              <button
+                onClick={() => {
+                  if (selectedRecipe) exportRecipeIngredients(selectedRecipe, draftItems, locale, costing);
+                  else alert(locale === "gr" ? "Αποθήκευσε πρώτα τη συνταγή." : "Save the recipe first.");
+                }}
+                className="erp-btn-secondary"
+              >
+                📊 {locale === "gr" ? "Excel" : "Excel"}
+              </button>
+              <button
+                onClick={() => {
+                  if (selectedRecipe) printRecipePDF(selectedRecipe, draftItems, locale);
+                  else alert(locale === "gr" ? "Αποθήκευσε πρώτα τη συνταγή." : "Save the recipe first.");
+                }}
+                className="erp-btn-secondary"
+              >
+                🖨️ {locale === "gr" ? "PDF / Εκτύπωση" : "Print / PDF"}
+              </button>
+            </div>
             <div className="flex gap-3">
               <button onClick={() => setView("list")} className="erp-btn-ghost">
                 {locale === "gr" ? "Ακύρωση" : "Cancel"}
