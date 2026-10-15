@@ -976,6 +976,19 @@ export async function upsertRecipe(recipe: Omit<Recipe, "id" | "createdAt"> & { 
 // τους γραμμή, ώστε προσθήκη/επεξεργασία/διαγραφή ενός υλικού να
 // μην αγγίζει καθόλου τα υπόλοιπα υλικά της ίδιας συνταγής.
 // ------------------------------------------------------------
+// Φέρνει τα υλικά μιας συγκεκριμένης συνταγής απευθείας από τη ΒΔ
+// (χωρίς να περνάει από το global context). Χρησιμοποιείται όταν
+// ανοίγει η φόρμα μιας συνταγής, για να διασφαλίσουμε ότι τα υλικά
+// φορτώνονται πάντα σωστά ανεξάρτητα από το μέγεθος του dataset.
+export async function fetchRecipeIngredients(recipeId: number): Promise<RecipeIngredient[]> {
+  const { data, error } = await requireClient()
+    .from("recipe_ingredients")
+    .select("id, recipe_id, ingredient_id, ingredient_name, quantity, unit, unit_cost, total_cost, wastage_factor, requires_prep, prep_notes")
+    .eq("recipe_id", recipeId);
+  if (error) throw error;
+  return (data ?? []).map(mapRecipeIngredient);
+}
+
 export async function addRecipeIngredient(recipeId: number, item: RecipeIngredient): Promise<number> {
   const { data, error } = await requireClient()
     .from("recipe_ingredients")

@@ -482,7 +482,7 @@ export default function RecipePage() {
 
   // ─── Φόρτωση υπάρχουσας συνταγής ─────────────────────────────────────────────
 
-  function loadRecipe(r: Recipe) {
+  async function loadRecipe(r: Recipe) {
     setSelectedRecipe(r);
     setForm({
       name: r.name,
@@ -495,19 +495,36 @@ export default function RecipePage() {
       overheadCost: r.overheadCost,
       profitMarginPercent: r.profitMarginPercent,
     });
-    // Φόρτωσε τα υπάρχοντα υλικά ως draft items
-    setDraftItems(
-      (r.ingredients || []).map((ing) => ({
-        _key: crypto.randomUUID(),
-        productName: ing.ingredientName,
-        unit: ing.unit,
-        unitCost: Number(ing.unitCost),
-        supplierName: null,
-        quantity: Number(ing.quantity),
-        totalCost: Number(ing.totalCost),
-      }))
-    );
     setView("form");
+    // Φόρτωσε τα υλικά απευθείας από τη ΒΔ — όχι από το context
+    // που μπορεί να είναι ελλιπές λόγω Supabase row limit.
+    try {
+      const freshIngredients = await db.fetchRecipeIngredients(r.id);
+      setDraftItems(
+        freshIngredients.map((ing) => ({
+          _key: crypto.randomUUID(),
+          productName: ing.ingredientName,
+          unit: ing.unit,
+          unitCost: Number(ing.unitCost),
+          supplierName: null,
+          quantity: Number(ing.quantity),
+          totalCost: Number(ing.totalCost),
+        }))
+      );
+    } catch {
+      // fallback στα υλικά του context αν το live fetch αποτύχει
+      setDraftItems(
+        (r.ingredients || []).map((ing) => ({
+          _key: crypto.randomUUID(),
+          productName: ing.ingredientName,
+          unit: ing.unit,
+          unitCost: Number(ing.unitCost),
+          supplierName: null,
+          quantity: Number(ing.quantity),
+          totalCost: Number(ing.totalCost),
+        }))
+      );
+    }
   }
 
   // ─── Αποθήκευση συνταγής + υλικών ────────────────────────────────────────────
