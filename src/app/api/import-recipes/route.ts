@@ -20,8 +20,13 @@ import type { Database } from "@/lib/database.types";
 
 function buildClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-  return createClient<Database>(url, key);
+  // Use service role key to bypass RLS for server-side bulk import
+  const key =
+    process.env.SUPABASE_SERVICE_ROLE_KEY ??
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+  return createClient<Database>(url, key, {
+    auth: { persistSession: false },
+  });
 }
 
 // Normalize a string for fuzzy matching: lowercase, collapse spaces,
