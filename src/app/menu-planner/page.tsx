@@ -1,8 +1,8 @@
 "use client";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { useLanguage } from "@/lib/context";
 import { PageHeader, KpiCard, Badge, Modal } from "@/components/shared";
-import type { Recipe, Menu, MenuRecipe } from "@/lib/types";
+import type { Recipe, Menu, MenuRecipe, Supplier } from "@/lib/types";
 import * as db from "@/lib/supabaseData";
 
 export default function MenuPlannerPage() {
@@ -29,6 +29,7 @@ export default function MenuPlannerPage() {
   // supplierOptions: ingredientName -> διαθέσιμοι προμηθευτές (για dropdown)
   const [supplierOptions, setSupplierOptions] = useState<Record<string, { supplierProductId: number; productName: string; basePrice: string; supplierId: number; supplierName: string; unit: string }[]>>({});
   const [loadingOptions, setLoadingOptions] = useState<string | null>(null); // ingredient name που φορτώνει options
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
 
   // Φιλτράρισμα συνταγών βάσει αναζήτησης
   const filteredRecipes = useMemo(() => {
@@ -65,11 +66,13 @@ export default function MenuPlannerPage() {
       // 2. Συλλογή μοναδικών ονομάτων υλικών
       const allIngNames = [...new Set(Object.values(fetched).flat().map(i => i.name))];
 
-      // 3. Φόρτωσε τιμές από ingredient_supplier_map
-      if (allIngNames.length > 0) {
-        const prices = await db.fetchIngredientSupplierMap(allIngNames);
-        setSupplierPrices(prices);
-      }
+      // 3. Φόρτωσε τιμές από ingredient_supplier_map + suppliers
+      const [prices, sups] = await Promise.all([
+        allIngNames.length > 0 ? db.fetchIngredientSupplierMap(allIngNames) : Promise.resolve({}),
+        db.fetchSuppliers(),
+      ]);
+      setSupplierPrices(prices);
+      setSuppliers(sups);
     } catch {
       // αν αποτύχει, τα υλικά μένουν χωρίς τιμές
     } finally {
@@ -135,6 +138,63 @@ export default function MenuPlannerPage() {
     }
     return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name, "el"));
   }, [showConsumption, menuRecipes, allRecipes, recipeIngredients, coverCount, supplierPrices]);
+
+  // Group by supplier for email / purchase order
+  const bySupplier = useMemo(() => {
+    const map = new Map<string, typeof consumptionItems>();
+    for (const c of consumptionItems) {
+      if (!c.hasPrice || !c.supplierName) continue;
+      if (!map.has(c.supplierName)) map.set(c.supplierName, []);
+      map.get(c.supplierName)!.push(c);
+    }
+    return map;
+  }, [consumptionItems]);
+
+  const sendOrderEmail = useCallback((supplierName: string, items: typeof consumptionItems) => {
+    const sup = suppliers.find(s => s.name === supplierName || s.nameEn === supplierName);
+    const toEmail = sup?.contactEmail ?? "";
+    const today = new Date().toLocaleDateString("el-GR", { day: "2-digit", month: "2-digit", year: "numeric" });
+    const menuName = selectedMenu?.title ?? menuTitle;
+
+    const subject = `Παραγγελία Υλικών – NOE BEACH CLUB – ${today}`;
+    const rows = items.map((item, i) =>
+      `${i + 1}. ${item.name}  |  Ποσ.: ${item.qty % 1 === 0 ? item.qty.toFixed(0) : item.qty.toFixed(3)} ${item.unit}  |  Τιμή/μον.: €${item.unitCost.toFixed(2)}  |  Σύνολο: €${item.cost.toFixed(2)}`
+    ).join("\n");
+    const total = items.reduce((s, i) => s + i.cost, 0);
+
+    const body = [
+      `Αγαπητοί,`,
+      ``,
+      `Σας αποστέλλουμε την παραγγελία υλικών για το μενού "${menuName}" ημερομηνίας ${today}.`,
+      ``,
+      `─────────────────────────────────────`,
+      `ΠΑΡΑΓΓΕΛΙΑ ΥΛΙΚΩΝ`,
+      `Ημερομηνία: ${today}`,
+      `Μενού: ${menuName}`,
+      `Προμηθευτής: ${supplierName}`,
+      `─────────────────────────────────────`,
+      ``,
+      rows,
+      ``,
+      `─────────────────────────────────────`,
+      `ΣΥΝΟΛΟ ΠΑΡΑΓΓΕΛΙΑΣ: €${total.toFixed(2)}`,
+      `─────────────────────────────────────`,
+      ``,
+      `Παρακαλούμε επιβεβαιώστε τη λήψη και τη διαθεσιμότητα των ειδών.`,
+      ``,
+      `Με εκτίμηση,`,
+      `NOE BEACH CLUB`,
+    ].join("\n");
+
+    const mailto = `mailto:${toEmail}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    const a = document.createElement("a");
+    a.href = mailto;
+    a.target = "_blank";
+    a.rel = "noopener";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  }, [suppliers, selectedMenu, menuTitle]);
 
   function loadMenu(menu: Menu) {
     if (!menu) return;
@@ -579,6 +639,27 @@ export default function MenuPlannerPage() {
                     : "Highlighted items have no supplier price — cost shown as 0."}
                 </p>
               )}
+            </div>
+          )}
+
+          {/* Κουμπιά αποστολής παραγγελίας ανά προμηθευτή */}
+          {bySupplier.size > 0 && (
+            <div className="border-t pt-3 mt-2">
+              <p className="text-xs text-slate-500 mb-2 font-medium">
+                📧 {locale === "gr" ? "Αποστολή Παραγγελίας ανά Προμηθευτή:" : "Send Order by Supplier:"}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {Array.from(bySupplier.entries()).map(([supplierName, items]) => (
+                  <button
+                    key={supplierName}
+                    onClick={() => sendOrderEmail(supplierName, items)}
+                    className="erp-btn-secondary text-xs"
+                    title={`Αποστολή παραγγελίας στον ${supplierName}`}
+                  >
+                    📧 {supplierName} — €{items.reduce((s, i) => s + i.cost, 0).toFixed(2)}
+                  </button>
+                ))}
+              </div>
             </div>
           )}
 
