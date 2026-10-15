@@ -245,8 +245,7 @@ export default function RecipePage() {
           if (old.id) await db.deleteRecipeIngredient(old.id).catch(() => {});
         }
       } else {
-        const created = await db.createRecipeDetails(details);
-        recipeId = created.id;
+        recipeId = await db.createRecipeDetails(details);
       }
 
       // Αποθήκευσε τα draft υλικά ως recipe_ingredients
