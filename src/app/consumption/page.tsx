@@ -3,7 +3,7 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import { useLanguage } from "@/lib/context";
 import { PageHeader, KpiCard, Badge } from "@/components/shared";
 import * as db from "@/lib/supabaseData";
-import type { Menu, Recipe } from "@/lib/types";
+import type { Menu, Recipe, Supplier } from "@/lib/types";
 
 interface ConsumptionLine {
   name: string;
@@ -39,6 +39,7 @@ export default function ConsumptionPage() {
 
   const [menus, setMenus] = useState<Menu[]>([]);
   const [recipes, setRecipes] = useState<Recipe[]>([]);
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [selectedMenuId, setSelectedMenuId] = useState<number>(0);
 
   // ingredients per recipeId
@@ -50,10 +51,11 @@ export default function ConsumptionPage() {
   const [supplierOptions, setSupplierOptions] = useState<SupplierOptionsMap>({});
   const [loadingOptions, setLoadingOptions] = useState<string | null>(null);
 
-  // load menus + recipes once
+  // load menus + recipes + suppliers once
   useEffect(() => {
     db.fetchMenus().then(setMenus).catch(console.error);
     db.fetchRecipes().then(setRecipes).catch(console.error);
+    db.fetchSuppliers().then(setSuppliers).catch(console.error);
   }, []);
 
   // load ingredients whenever selected menu changes
@@ -156,6 +158,48 @@ export default function ConsumptionPage() {
   }, []);
 
   const fmt = (n: number) => `€${n.toFixed(2)}`;
+
+  const sendOrderEmail = useCallback((supplierName: string, items: ConsumptionLine[]) => {
+    const supplier = suppliers.find(s => s.name === supplierName || s.nameEn === supplierName);
+    const toEmail = supplier?.contactEmail ?? "";
+    const today = new Date().toLocaleDateString("el-GR", { day: "2-digit", month: "2-digit", year: "numeric" });
+    const menuTitle = menu?.title ?? "";
+
+    const subject = `Παραγγελία Υλικών – NOE BEACH CLUB – ${today}`;
+
+    const rows = items.map((item, i) =>
+      `${i + 1}. ${item.name}  |  Ποσ.: ${item.totalQty % 1 === 0 ? item.totalQty.toFixed(0) : item.totalQty.toFixed(3)} ${item.unit}  |  Τιμή/μον.: €${item.unitCost.toFixed(2)}  |  Σύνολο: €${item.totalCost.toFixed(2)}`
+    ).join("\n");
+
+    const total = items.reduce((s, i) => s + i.totalCost, 0);
+
+    const body = [
+      `Αγαπητοί,`,
+      ``,
+      `Σας αποστέλλουμε την παραγγελία υλικών για το μενού "${menuTitle}" ημερομηνίας ${today}.`,
+      ``,
+      `─────────────────────────────────────`,
+      `ΠΑΡΑΓΓΕΛΙΑ ΥΛΙΚΩΝ`,
+      `Ημερομηνία: ${today}`,
+      `Μενού: ${menuTitle}`,
+      `Προμηθευτής: ${supplierName}`,
+      `─────────────────────────────────────`,
+      ``,
+      rows,
+      ``,
+      `─────────────────────────────────────`,
+      `ΣΥΝΟΛΟ ΠΑΡΑΓΓΕΛΙΑΣ: €${total.toFixed(2)}`,
+      `─────────────────────────────────────`,
+      ``,
+      `Παρακαλούμε επιβεβαιώστε τη λήψη και τη διαθεσιμότητα των ειδών.`,
+      ``,
+      `Με εκτίμηση,`,
+      `NOE BEACH CLUB`,
+    ].join("\n");
+
+    const mailto = `mailto:${toEmail}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    window.location.href = mailto;
+  }, [suppliers, menu]);
 
   // Group by supplier for purchase order summary
   const bySupplier = useMemo(() => {
@@ -322,9 +366,18 @@ export default function ConsumptionPage() {
           <div className="p-4 space-y-4">
             {Array.from(bySupplier.entries()).map(([supplier, items]) => (
               <div key={supplier} className="border border-slate-200 rounded-lg overflow-hidden">
-                <div className="bg-slate-100 px-4 py-2 font-semibold text-slate-700 flex justify-between">
+                <div className="bg-slate-100 px-4 py-2 font-semibold text-slate-700 flex justify-between items-center">
                   <span>🏪 {supplier}</span>
-                  <span className="text-emerald-700">{fmt(items.reduce((s, i) => s + i.totalCost, 0))}</span>
+                  <div className="flex items-center gap-3">
+                    <span className="text-emerald-700">{fmt(items.reduce((s, i) => s + i.totalCost, 0))}</span>
+                    <button
+                      onClick={() => sendOrderEmail(supplier, items)}
+                      className="erp-btn-primary text-xs py-1 px-3"
+                      title={locale === "gr" ? "Αποστολή παραγγελίας στον προμηθευτή" : "Send order to supplier"}
+                    >
+                      📧 {locale === "gr" ? "Αποστολή Παραγγελίας" : "Send Order"}
+                    </button>
+                  </div>
                 </div>
                 <table className="erp-table text-sm">
                   <thead>
