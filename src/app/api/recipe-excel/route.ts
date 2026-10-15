@@ -5,274 +5,352 @@ import ExcelJS from "exceljs";
 // Body: { recipe, ingredients, locale, costing }
 export async function POST(req: NextRequest) {
   try {
-  const { recipe, ingredients, locale, costing } = await req.json();
+    const { recipe, ingredients, locale, costing } = await req.json();
 
-  const isGr     = locale === "gr";
-  const portions = Number(recipe.portionYield) || 1;
-  const allergens: string[] = Array.isArray(recipe.allergens)
-    ? recipe.allergens
-    : JSON.parse(recipe.allergens || "[]");
+    const isGr     = locale === "gr";
+    const portions = Number(recipe.portionYield) || 1;
+    const allergens: string[] = Array.isArray(recipe.allergens)
+      ? recipe.allergens
+      : JSON.parse(recipe.allergens || "[]");
 
-  const totalGrams = (ingredients as {unit:string;quantity:number}[]).reduce(
-    (s: number, i) => s + (["ΓΡΑΜΜΑΡΙΑ","GR","g","gr"].includes(i.unit.toUpperCase()) ? i.quantity : 0), 0
-  );
-  const perPortion       = costing.menuFinal;
-  const profitPerPortion = perPortion - costing.total / portions;
-  const costPct          = perPortion > 0 ? (costing.total / portions / perPortion * 100) : 0;
-  const profitPct        = perPortion > 0 ? (profitPerPortion / perPortion * 100) : 0;
-  const today            = new Date().toLocaleDateString("el-GR");
+    const totalGrams = (ingredients as { unit: string; quantity: number }[]).reduce(
+      (s, i) => s + (["ΓΡΑΜΜΑΡΙΑ", "GR", "G", "g", "gr"].includes(i.unit.toUpperCase()) ? Number(i.quantity) : 0),
+      0
+    );
+    const perPortion       = Number(costing.menuFinal) || 0;
+    const profitPerPortion = perPortion - (Number(costing.total) || 0) / portions;
+    const costPct          = perPortion > 0 ? ((Number(costing.total) || 0) / portions / perPortion * 100) : 0;
+    const profitPct        = perPortion > 0 ? (profitPerPortion / perPortion * 100) : 0;
+    const today            = new Date().toLocaleDateString("el-GR");
 
-  // ── Χρώματα ──
-  const BLU = "1A5276";
-  const LBL = "D6EAF8";
-  const GRN = "E9F7EF";
-  const YLW = "FEF9E7";
-  const WHT = "FFFFFF";
+    // ── Χρώματα ──
+    const BLU  = "1A5276";  // σκούρο μπλε (headers)
+    const LBL  = "D6EAF8";  // ανοιχτό μπλε (label cells)
+    const GRN  = "D5F5E3";  // πράσινο (totals)
+    const YLW  = "FEF9E7";  // κίτρινο (technical guide)
+    const LGRY = "F2F3F4";  // ανοιχτό γκρι (zebra / alternate)
+    const WHT  = "FFFFFF";
 
-  const wb = new ExcelJS.Workbook();
-  const ws = wb.addWorksheet(isGr ? "Συνταγή" : "Recipe");
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet(isGr ? "Συνταγή" : "Recipe");
 
-  // Πλάτη στηλών (A–J)
-  ws.columns = [
-    { width: 38 }, // A — Υλικό
-    { width: 12 }, // B — Μονάδες
-    { width: 14 }, // C — Τιμή/μον
-    { width: 14 }, // D — Ποσ/μερίδα
-    { width: 16 }, // E — Συνολική ποσ
-    { width: 20 }, // F — Κόστος/μερίδα
-    { width: 16 }, // G — Κόστος σύνολο
-    { width: 14 }, // H
-    { width: 14 }, // I
-    { width: 10 }, // J
-  ];
-
-  type FillSolid = { type: "pattern"; pattern: "solid"; fgColor: { argb: string } };
-  function fillSolid(hex: string): FillSolid {
-    return { type: "pattern", pattern: "solid", fgColor: { argb: `FF${hex}` } };
-  }
-  function fontBold(sz: number, color = "000000"): Partial<ExcelJS.Font> {
-    return { bold: true, size: sz, color: { argb: `FF${color}` } };
-  }
-  function borderThin(): Partial<ExcelJS.Borders> {
-    const s = { style: "thin" as const, color: { argb: "FFCCCCCC" } };
-    return { top: s, left: s, bottom: s, right: s };
-  }
-
-  let r = 1; // γραμμή (1-based για ExcelJS)
-
-  // ── ROW 1: RECIPE BUILDER header ──
-  ws.mergeCells(`A${r}:J${r}`);
-  const hdrCell = ws.getCell(`A${r}`);
-  hdrCell.value        = "RECIPE BUILDER";
-  hdrCell.font         = { bold: true, size: 16, italic: true, color: { argb: `FF${WHT}` } };
-  hdrCell.fill         = fillSolid(BLU);
-  hdrCell.alignment    = { horizontal: "center", vertical: "middle" };
-  ws.getRow(r).height  = 28;
-  r++;
-
-  // ── ROW 2: Ονομασία label + τιμή + Μερίδες ──
-  ws.getCell(`A${r}`).value = isGr ? "ΟΝΟΜΑ ΣΥΝΤΑΓΗΣ:" : "RECIPE NAME:";
-  ws.getCell(`A${r}`).font  = fontBold(10);
-  ws.mergeCells(`B${r}:H${r}`);
-  ws.getCell(`B${r}`).value     = recipe.name.toUpperCase();
-  ws.getCell(`B${r}`).font      = { bold: true, size: 13 };
-  ws.getCell(`I${r}`).value     = isGr ? "ΜΕΡΙΔΕΣ:" : "PORTIONS:";
-  ws.getCell(`I${r}`).font      = fontBold(10, BLU);
-  ws.getCell(`I${r}`).fill      = fillSolid("D6EAF8");
-  ws.getCell(`I${r}`).alignment = { horizontal: "center" };
-  ws.getCell(`J${r}`).value     = recipe.portionYield;
-  ws.getCell(`J${r}`).font      = { bold: true, size: 13 };
-  ws.getCell(`J${r}`).fill      = fillSolid("D6EAF8");
-  ws.getCell(`J${r}`).alignment = { horizontal: "center" };
-  ws.getRow(r).height = 22;
-  r++;
-
-  // ── ROW 3: EN ονομασία + Αλλεργίες ──
-  ws.getCell(`A${r}`).value = isGr ? "ΟΝΟΜΑΣΙΑ (EN):" : "NAME (EN):";
-  ws.mergeCells(`B${r}:F${r}`);
-  ws.getCell(`B${r}`).value = recipe.nameEn ?? "";
-  ws.getCell(`G${r}`).value = isGr ? "ΑΛΛΕΡΓΙΕΣ:" : "ALLERGENS:";
-  ws.getCell(`G${r}`).font  = fontBold(9);
-  ws.mergeCells(`H${r}:J${r}`);
-  ws.getCell(`H${r}`).value = allergens.join(", ") || "—";
-  r++;
-  r++; // κενό
-
-  // ── ROW 5: Επικεφαλίδα πίνακα υλικών ──
-  const ingHdrs = [
-    isGr ? "ΥΛΙΚΟ" : "INGREDIENT",
-    isGr ? "ΜΟΝΑΔΕΣ" : "UNITS",
-    isGr ? "ΤΙΜΗ/ΜΟΝΑΔΑ €" : "PRICE/UNIT €",
-    isGr ? "ΠΟΣΟΤΗΤΑ/ΜΕΡΙΔΑ" : "QTY/PORTION",
-    isGr ? "ΣΥΝΟΛΙΚΗ ΠΟΣΟΤΗΤΑ" : "TOTAL QTY",
-    isGr ? "ΚΟΣΤΟΣ ΥΛΙΚΩΝ/ΜΕΡΙΔΑ €" : "COST/PORTION €",
-    isGr ? "ΚΟΣΤΟΣ ΣΥΝΟΛΟ €" : "TOTAL COST €",
-  ];
-  const cols = ["A","B","C","D","E","F","G"] as const;
-  ingHdrs.forEach((h, i) => {
-    const cell = ws.getCell(`${cols[i]}${r}`);
-    cell.value     = h;
-    cell.font      = fontBold(9, WHT);
-    cell.fill      = fillSolid(BLU);
-    cell.alignment = { horizontal: "center", wrapText: true };
-    cell.border    = borderThin();
-  });
-  ws.getRow(r).height = 30;
-  r++;
-
-  // ── Γραμμές υλικών ──
-  const MIN_ROWS = 20;
-  (ingredients as {productName:string;unit:string;unitCost:number;quantity:number;totalCost:number}[]).forEach((ing) => {
-    const row = ws.getRow(r);
-    const vals = [
-      ing.productName.toUpperCase(),
-      ing.unit.toUpperCase(),
-      Number(ing.unitCost),
-      Number((ing.quantity / portions).toFixed(6)),
-      Number(ing.quantity),
-      Number((ing.totalCost / portions).toFixed(6)),
-      Number(ing.totalCost),
+    // ── Πλάτη στηλών A–H (8 στήλες) ──
+    ws.columns = [
+      { width: 36 }, // A — Υλικό / Labels
+      { width: 10 }, // B — Μονάδες
+      { width: 13 }, // C — Τιμή/μον
+      { width: 14 }, // D — Ποσ/μερίδα
+      { width: 15 }, // E — Συνολική ποσ
+      { width: 20 }, // F — Κόστος/μερίδα
+      { width: 15 }, // G — Κόστος σύνολο
+      { width: 14 }, // H — Τιμές κοστολόγησης
     ];
-    vals.forEach((v, i) => {
-      const cell = ws.getCell(`${cols[i]}${r}`);
-      cell.value     = v;
-      cell.border    = borderThin();
-      cell.alignment = i === 0 ? { horizontal: "left" } : { horizontal: "right" };
-    });
-    row.height = 16;
+
+    // ── Βοηθητικές συναρτήσεις ──
+    type FS = { type: "pattern"; pattern: "solid"; fgColor: { argb: string } };
+    const fill = (hex: string): FS => ({ type: "pattern", pattern: "solid", fgColor: { argb: `FF${hex}` } });
+    const bold = (sz: number, col = "000000"): Partial<ExcelJS.Font> => ({ bold: true, size: sz, color: { argb: `FF${col}` } });
+    const thin = (): Partial<ExcelJS.Borders> => {
+      const s = { style: "thin" as const, color: { argb: "FFBBBBBB" } };
+      return { top: s, left: s, bottom: s, right: s };
+    };
+    const med = (): Partial<ExcelJS.Borders> => {
+      const s = { style: "medium" as const, color: { argb: "FF888888" } };
+      return { top: s, left: s, bottom: s, right: s };
+    };
+
+    let r = 1;
+
+    // ════════════════════════════════════════════════════
+    // ROW 1 — RECIPE BUILDER (full-width header)
+    // ════════════════════════════════════════════════════
+    ws.mergeCells(`A${r}:H${r}`);
+    const hdr = ws.getCell(`A${r}`);
+    hdr.value     = "RECIPE BUILDER";
+    hdr.font      = { bold: true, size: 18, italic: true, color: { argb: `FF${WHT}` } };
+    hdr.fill      = fill(BLU);
+    hdr.alignment = { horizontal: "center", vertical: "middle" };
+    ws.getRow(r).height = 32;
     r++;
-  });
-  // Κενές γραμμές μέχρι MIN_ROWS
-  for (let i = (ingredients as unknown[]).length; i < MIN_ROWS; i++) {
-    cols.forEach(c => {
-      ws.getCell(`${c}${r}`).border = borderThin();
-    });
-    ws.getRow(r).height = 16;
+
+    // ════════════════════════════════════════════════════
+    // ROW 2 — Όνομα ΕΛ | Μερίδες
+    // ════════════════════════════════════════════════════
+    ws.getCell(`A${r}`).value     = isGr ? "ΟΝΟΜΑ ΣΥΝΤΑΓΗΣ:" : "RECIPE NAME:";
+    ws.getCell(`A${r}`).font      = bold(9, BLU);
+    ws.getCell(`A${r}`).fill      = fill(LBL);
+    ws.getCell(`A${r}`).alignment = { horizontal: "left", vertical: "middle" };
+    ws.getCell(`A${r}`).border    = thin();
+
+    ws.mergeCells(`B${r}:F${r}`);
+    ws.getCell(`B${r}`).value     = (recipe.name || "").toUpperCase();
+    ws.getCell(`B${r}`).font      = { bold: true, size: 14 };
+    ws.getCell(`B${r}`).alignment = { horizontal: "left", vertical: "middle" };
+    ws.getCell(`B${r}`).border    = thin();
+
+    ws.getCell(`G${r}`).value     = isGr ? "ΜΕΡΙΔΕΣ:" : "PORTIONS:";
+    ws.getCell(`G${r}`).font      = bold(9, BLU);
+    ws.getCell(`G${r}`).fill      = fill(LBL);
+    ws.getCell(`G${r}`).alignment = { horizontal: "center", vertical: "middle" };
+    ws.getCell(`G${r}`).border    = thin();
+
+    ws.getCell(`H${r}`).value     = recipe.portionYield;
+    ws.getCell(`H${r}`).font      = { bold: true, size: 14 };
+    ws.getCell(`H${r}`).fill      = fill(LBL);
+    ws.getCell(`H${r}`).alignment = { horizontal: "center", vertical: "middle" };
+    ws.getCell(`H${r}`).border    = thin();
+    ws.getRow(r).height = 24;
     r++;
-  }
 
-  // ── Totals bar ──
-  ws.mergeCells(`A${r}:B${r}`);
-  ws.getCell(`A${r}`).value     = isGr ? "ΓΡΑΜΜΑΡΙΑ/ΜΕΡΙΔΑ:" : "GRAMS/PORTION:";
-  ws.getCell(`A${r}`).font      = fontBold(9, WHT);
-  ws.getCell(`A${r}`).fill      = fillSolid(BLU);
-  ws.getCell(`A${r}`).alignment = { horizontal: "center" };
-  // value
-  ws.getCell(`C${r}`).value     = Number((totalGrams / portions).toFixed(3));
-  ws.getCell(`C${r}`).font      = fontBold(10);
-  ws.getCell(`C${r}`).fill      = fillSolid(LBL);
-  ws.getCell(`C${r}`).alignment = { horizontal: "center" };
+    // ════════════════════════════════════════════════════
+    // ROW 3 — Όνομα EN | Αλλεργίες
+    // ════════════════════════════════════════════════════
+    ws.getCell(`A${r}`).value     = isGr ? "ΟΝΟΜΑΣΙΑ (EN):" : "NAME (EN):";
+    ws.getCell(`A${r}`).font      = bold(9, BLU);
+    ws.getCell(`A${r}`).fill      = fill(LGRY);
+    ws.getCell(`A${r}`).border    = thin();
 
-  ws.getCell(`D${r}`).value     = isGr ? "ΚΟΣΤΟΣ/ΜΕΡΙΔΑ:" : "COST/PORTION:";
-  ws.getCell(`D${r}`).font      = fontBold(9, WHT);
-  ws.getCell(`D${r}`).fill      = fillSolid(BLU);
-  ws.getCell(`D${r}`).alignment = { horizontal: "center" };
-  ws.getCell(`E${r}`).value     = Number((costing.rawMaterial / portions).toFixed(4));
-  ws.getCell(`E${r}`).font      = fontBold(10);
-  ws.getCell(`E${r}`).fill      = fillSolid(LBL);
-  ws.getCell(`E${r}`).alignment = { horizontal: "center" };
+    ws.mergeCells(`B${r}:C${r}`);
+    ws.getCell(`B${r}`).value     = recipe.nameEn ?? "";
+    ws.getCell(`B${r}`).border    = thin();
 
-  ws.getCell(`F${r}`).value     = isGr ? "ΣΥΝΟΛΙΚΑ ΓΡΑΜΜΑΡΙΑ:" : "TOTAL GRAMS:";
-  ws.getCell(`F${r}`).font      = fontBold(9, WHT);
-  ws.getCell(`F${r}`).fill      = fillSolid(BLU);
-  ws.getCell(`F${r}`).alignment = { horizontal: "center" };
-  ws.getCell(`G${r}`).value     = Number(totalGrams.toFixed(3));
-  ws.getCell(`G${r}`).font      = fontBold(10);
-  ws.getCell(`G${r}`).fill      = fillSolid(LBL);
-  ws.getCell(`G${r}`).alignment = { horizontal: "center" };
-  ws.getRow(r).height = 20;
-  r++;
-  r++; // κενό
+    ws.getCell(`D${r}`).value     = isGr ? "ΑΛΛΕΡΓΙΕΣ:" : "ALLERGENS:";
+    ws.getCell(`D${r}`).font      = bold(9, BLU);
+    ws.getCell(`D${r}`).fill      = fill(LGRY);
+    ws.getCell(`D${r}`).border    = thin();
 
-  // ── ΚΟΣΤΟΛΟΓΗΣΗ header ──
-  ws.mergeCells(`A${r}:G${r}`);
-  ws.getCell(`A${r}`).value     = isGr ? "ΚΟΣΤΟΛΟΓΗΣΗ" : "COSTING";
-  ws.getCell(`A${r}`).font      = fontBold(12, WHT);
-  ws.getCell(`A${r}`).fill      = fillSolid(BLU);
-  ws.getCell(`A${r}`).alignment = { horizontal: "center" };
-  ws.getRow(r).height = 22;
-  r++;
+    ws.mergeCells(`E${r}:H${r}`);
+    ws.getCell(`E${r}`).value     = allergens.join(", ") || "—";
+    ws.getCell(`E${r}`).font      = { size: 9, italic: true };
+    ws.getCell(`E${r}`).border    = thin();
+    ws.getRow(r).height = 18;
+    r++;
 
-  const costLines: [string, number | string, boolean][] = [
-    [isGr ? "Κόστος Υλικών (Raw Material)" : "Raw Material Cost",     costing.rawMaterial,                false],
-    [isGr ? "Κόστος Εργασίας (Labor)"      : "Labor Cost",            Number(recipe.laborCost),           false],
-    [isGr ? "Γενικά Έξοδα (Overhead)"      : "Overhead",              Number(recipe.overheadCost),        false],
-    [isGr ? "ΣΥΝΟΛΙΚΟ ΚΟΣΤΟΣ"              : "TOTAL COST",            costing.total,                      true ],
-    [isGr ? "Περιθώριο Κέρδους %"          : "Profit Margin %",       `${recipe.profitMarginPercent}%`,   false],
-    [isGr ? "Τιμή Πώλησης (χωρίς ΦΠΑ)"    : "Selling Price (ex VAT)",costing.selling,                    false],
-    [isGr ? "Τιμή Μενού (ΦΠΑ 24%)"        : "Menu Price (VAT 24%)",  costing.menuVat,                    false],
-    [isGr ? "ΤΙΜΗ ΠΩΛΗΣΗΣ ΜΕΡΙΔΑΣ"        : "SELLING PRICE/PORTION", perPortion,                         true ],
-    [isGr ? "ΚΕΡΔΟΣ/ΜΕΡΙΔΑ"               : "PROFIT/PORTION",        profitPerPortion,                   true ],
-    [isGr ? "ΚΟΣΤΟΣ %"                     : "COST %",                `${costPct.toFixed(2)}%`,           false],
-    [isGr ? "ΚΕΡΔΟΣ %"                     : "PROFIT %",              `${profitPct.toFixed(2)}%`,         false],
-  ];
+    // κενό διαχωριστικό
+    ws.getRow(r).height = 6;
+    r++;
 
-  costLines.forEach(([label, val, isBold]) => {
-    // label cell (A:E merged)
-    ws.mergeCells(`A${r}:E${r}`);
-    const lCell = ws.getCell(`A${r}`);
-    lCell.value     = label;
-    lCell.font      = isBold ? fontBold(10) : { size: 9 };
-    lCell.fill      = isBold ? fillSolid(GRN) : { type: "pattern", pattern: "solid", fgColor: { argb: "FFFAFAFA" } };
-    lCell.border    = borderThin();
+    // ════════════════════════════════════════════════════
+    // ROW 5 — Επικεφαλίδα πίνακα υλικών
+    // ════════════════════════════════════════════════════
+    const ingHdrs = [
+      isGr ? "ΥΛΙΚΟ" : "INGREDIENT",
+      isGr ? "ΜΟΝΑΔΕΣ" : "UNITS",
+      isGr ? "ΤΙΜΗ/ΜΟΝΑΔΑ €" : "PRICE/UNIT",
+      isGr ? "ΠΟΣΟΤΗΤΑ/ΜΕΡΙΔΑ" : "QTY/PORTION",
+      isGr ? "ΣΥΝΟΛΙΚΗ ΠΟΣΟΤΗΤΑ" : "TOTAL QTY",
+      isGr ? "ΚΟΣΤΟΣ/ΜΕΡΙΔΑ €" : "COST/PORTION",
+      isGr ? "ΚΟΣΤΟΣ ΣΥΝΟΛΟ €" : "TOTAL COST",
+      "",  // H κενό
+    ];
+    const COLS = ["A", "B", "C", "D", "E", "F", "G", "H"] as const;
+    ingHdrs.forEach((h, i) => {
+      const cell = ws.getCell(`${COLS[i]}${r}`);
+      cell.value     = h;
+      cell.font      = bold(9, WHT);
+      cell.fill      = fill(BLU);
+      cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+      cell.border    = med();
+    });
+    ws.getRow(r).height = 32;
+    r++;
 
-    // value cell (F:G merged) — merge FIRST, then set value
+    // ════════════════════════════════════════════════════
+    // Γραμμές υλικών
+    // ════════════════════════════════════════════════════
+    const MIN_ROWS = 20;
+    type Ing = { productName: string; unit: string; unitCost: number; quantity: number; totalCost: number };
+    const ingList = ingredients as Ing[];
+
+    ingList.forEach((ing, idx) => {
+      const isEven  = idx % 2 === 1;
+      const rowFill = isEven ? fill(LGRY) : fill(WHT);
+      const vals: (string | number)[] = [
+        (ing.productName || "").toUpperCase(),
+        (ing.unit || "").toUpperCase(),
+        Number(ing.unitCost),
+        Number((ing.quantity / portions).toFixed(6)),
+        Number(ing.quantity),
+        Number((ing.totalCost / portions).toFixed(6)),
+        Number(ing.totalCost),
+      ];
+      vals.forEach((v, i) => {
+        const cell      = ws.getCell(`${COLS[i]}${r}`);
+        cell.value      = v;
+        cell.fill       = rowFill;
+        cell.border     = thin();
+        cell.alignment  = i === 0 ? { horizontal: "left", vertical: "middle" } : { horizontal: "right", vertical: "middle" };
+        if (i >= 2) cell.numFmt = "#,##0.0000";
+      });
+      ws.getCell(`H${r}`).border = thin();
+      ws.getRow(r).height = 17;
+      r++;
+    });
+
+    // Κενές γραμμές μέχρι MIN_ROWS
+    for (let i = ingList.length; i < MIN_ROWS; i++) {
+      COLS.forEach(c => {
+        ws.getCell(`${c}${r}`).border = thin();
+        ws.getCell(`${c}${r}`).fill   = i % 2 === 1 ? fill(LGRY) : fill(WHT);
+      });
+      ws.getRow(r).height = 17;
+      r++;
+    }
+
+    // ════════════════════════════════════════════════════
+    // Totals bar
+    // ════════════════════════════════════════════════════
+    ws.mergeCells(`A${r}:B${r}`);
+    ws.getCell(`A${r}`).value     = isGr ? "ΓΡΑΜΜΑΡΙΑ / ΜΕΡΙΔΑ:" : "GRAMS / PORTION:";
+    ws.getCell(`A${r}`).font      = bold(9, WHT);
+    ws.getCell(`A${r}`).fill      = fill(BLU);
+    ws.getCell(`A${r}`).alignment = { horizontal: "center", vertical: "middle" };
+    ws.getCell(`A${r}`).border    = med();
+
+    ws.getCell(`C${r}`).value     = Number((totalGrams / portions).toFixed(3));
+    ws.getCell(`C${r}`).font      = bold(11);
+    ws.getCell(`C${r}`).fill      = fill(GRN);
+    ws.getCell(`C${r}`).alignment = { horizontal: "center", vertical: "middle" };
+    ws.getCell(`C${r}`).border    = med();
+    ws.getCell(`C${r}`).numFmt    = "#,##0.000";
+
+    ws.getCell(`D${r}`).value     = isGr ? "ΚΟΣΤΟΣ / ΜΕΡΙΔΑ:" : "COST / PORTION:";
+    ws.getCell(`D${r}`).font      = bold(9, WHT);
+    ws.getCell(`D${r}`).fill      = fill(BLU);
+    ws.getCell(`D${r}`).alignment = { horizontal: "center", vertical: "middle" };
+    ws.getCell(`D${r}`).border    = med();
+
+    ws.getCell(`E${r}`).value     = Number((Number(costing.rawMaterial) / portions).toFixed(4));
+    ws.getCell(`E${r}`).font      = bold(11);
+    ws.getCell(`E${r}`).fill      = fill(GRN);
+    ws.getCell(`E${r}`).alignment = { horizontal: "center", vertical: "middle" };
+    ws.getCell(`E${r}`).border    = med();
+    ws.getCell(`E${r}`).numFmt    = "€#,##0.0000";
+
     ws.mergeCells(`F${r}:G${r}`);
-    const vCell = ws.getCell(`F${r}`);
-    vCell.value     = val;
-    vCell.font      = isBold ? fontBold(11) : { size: 10 };
-    vCell.fill      = isBold ? fillSolid(GRN) : { type: "pattern", pattern: "solid", fgColor: { argb: "FFFAFAFA" } };
-    vCell.alignment = { horizontal: "right" };
-    vCell.border    = borderThin();
+    ws.getCell(`F${r}`).value     = isGr ? "ΣΥΝΟΛΙΚΑ ΓΡΑΜΜΑΡΙΑ:" : "TOTAL GRAMS:";
+    ws.getCell(`F${r}`).font      = bold(9, WHT);
+    ws.getCell(`F${r}`).fill      = fill(BLU);
+    ws.getCell(`F${r}`).alignment = { horizontal: "center", vertical: "middle" };
+    ws.getCell(`F${r}`).border    = med();
+
+    ws.getCell(`H${r}`).value     = Number(totalGrams.toFixed(3));
+    ws.getCell(`H${r}`).font      = bold(11);
+    ws.getCell(`H${r}`).fill      = fill(GRN);
+    ws.getCell(`H${r}`).alignment = { horizontal: "center", vertical: "middle" };
+    ws.getCell(`H${r}`).border    = med();
+    ws.getCell(`H${r}`).numFmt    = "#,##0.000";
+    ws.getRow(r).height = 22;
     r++;
-  });
-  r++; // κενό
+    r++; // κενό
 
-  // ── ΤΕΧΝΙΚΟΣ ΟΔΗΓΟΣ ──
-  if (recipe.technicalGuide) {
-    ws.mergeCells(`A${r}:G${r}`);
-    ws.getCell(`A${r}`).value     = isGr ? "ΤΕΧΝΙΚΟΣ ΟΔΗΓΟΣ / TECHNICAL GUIDE" : "TECHNICAL GUIDE";
-    ws.getCell(`A${r}`).font      = fontBold(10);
-    ws.getCell(`A${r}`).fill      = fillSolid(YLW);
-    ws.getCell(`A${r}`).alignment = { horizontal: "center" };
-    ws.getRow(r).height = 20;
+    // ════════════════════════════════════════════════════
+    // ΚΟΣΤΟΛΟΓΗΣΗ header
+    // ════════════════════════════════════════════════════
+    ws.mergeCells(`A${r}:H${r}`);
+    ws.getCell(`A${r}`).value     = isGr ? "ΚΟΣΤΟΛΟΓΗΣΗ" : "COSTING";
+    ws.getCell(`A${r}`).font      = bold(13, WHT);
+    ws.getCell(`A${r}`).fill      = fill(BLU);
+    ws.getCell(`A${r}`).alignment = { horizontal: "center", vertical: "middle" };
+    ws.getCell(`A${r}`).border    = med();
+    ws.getRow(r).height = 26;
     r++;
-    ws.mergeCells(`A${r}:G${r}`);
-    ws.getCell(`A${r}`).value     = recipe.technicalGuide;
-    ws.getCell(`A${r}`).alignment = { wrapText: true, vertical: "top" };
-    ws.getRow(r).height = 60;
-    r++;
-  }
-  r++; // κενό
 
-  // ── Footer ──
-  ws.getCell(`A${r}`).value = isGr ? "ΗΜΕΡΟΜΗΝΙΑ ΕΚΤΥΠΩΣΕΙΣ:" : "PRINT DATE:";
-  ws.getCell(`A${r}`).font  = fontBold(9);
-  ws.getCell(`B${r}`).value = today;
-  ws.getCell(`B${r}`).font  = fontBold(10, BLU);
+    // ════════════════════════════════════════════════════
+    // Κοστολόγηση γραμμές
+    // ════════════════════════════════════════════════════
+    type CostRow = { label: string; value: number | string; highlight: boolean };
+    const costLines: CostRow[] = [
+      { label: isGr ? "Κόστος Υλικών (Raw Material)" : "Raw Material Cost",      value: Number(costing.rawMaterial),              highlight: false },
+      { label: isGr ? "Κόστος Εργασίας (Labor)"      : "Labor Cost",             value: Number(recipe.laborCost) || 0,            highlight: false },
+      { label: isGr ? "Γενικά Έξοδα (Overhead)"      : "Overhead",               value: Number(recipe.overheadCost) || 0,         highlight: false },
+      { label: isGr ? "ΣΥΝΟΛΙΚΟ ΚΟΣΤΟΣ"              : "TOTAL COST",             value: Number(costing.total),                    highlight: true  },
+      { label: isGr ? "Περιθώριο Κέρδους %"          : "Profit Margin %",        value: `${recipe.profitMarginPercent || 0}%`,    highlight: false },
+      { label: isGr ? "Τιμή Πώλησης (χωρίς ΦΠΑ)"    : "Selling Price (ex VAT)", value: Number(costing.selling),                  highlight: false },
+      { label: isGr ? "Τιμή Μενού (ΦΠΑ 24%)"        : "Menu Price (VAT 24%)",   value: Number(costing.menuVat),                  highlight: false },
+      { label: isGr ? "ΤΙΜΗ ΠΩΛΗΣΗΣ ΜΕΡΙΔΑΣ"        : "SELLING PRICE / PORTION",value: perPortion,                               highlight: true  },
+      { label: isGr ? "ΚΕΡΔΟΣ / ΜΕΡΙΔΑ"             : "PROFIT / PORTION",       value: profitPerPortion,                         highlight: true  },
+      { label: isGr ? "ΚΟΣΤΟΣ %"                     : "COST %",                 value: `${costPct.toFixed(2)}%`,                 highlight: false },
+      { label: isGr ? "ΚΕΡΔΟΣ %"                     : "PROFIT %",               value: `${profitPct.toFixed(2)}%`,               highlight: false },
+    ];
 
-  // ── Παράγω buffer και επιστρέφω ──
-  const buffer = await wb.xlsx.writeBuffer();
+    costLines.forEach(({ label, value, highlight }, idx) => {
+      const rowBg = highlight ? fill(GRN) : (idx % 2 === 0 ? fill(WHT) : fill(LGRY));
 
-  // ASCII-only fallback name (για Content-Disposition header compatibility)
-  const safeName = (recipe.name as string)
-    .replace(/[^a-zA-Z0-9_-]/g, "_")   // strip ALL non-ASCII — no Unicode in headers
-    .replace(/_+/g, "_")
-    .slice(0, 40)
-    || "recipe";
-  const dateStr  = new Date().toISOString().slice(0, 10);
-  const filename = `${safeName}_${dateStr}.xlsx`;
+      ws.mergeCells(`A${r}:F${r}`);
+      const lCell   = ws.getCell(`A${r}`);
+      lCell.value   = label;
+      lCell.font    = highlight ? bold(10) : { size: 9 };
+      lCell.fill    = rowBg;
+      lCell.border  = thin();
+      lCell.alignment = { horizontal: "left", vertical: "middle", indent: 1 };
 
-  // RFC 5987 encoded version for browsers that support it (preserves Greek name)
-  const utf8Name = encodeURIComponent(`${recipe.name as string}_${dateStr}.xlsx`);
+      ws.mergeCells(`G${r}:H${r}`);
+      const vCell   = ws.getCell(`G${r}`);
+      vCell.value   = value;
+      vCell.font    = highlight ? bold(11) : { size: 10 };
+      vCell.fill    = highlight ? fill(GRN) : rowBg;
+      vCell.border  = thin();
+      vCell.alignment = { horizontal: "right", vertical: "middle" };
+      if (typeof value === "number") vCell.numFmt = "€#,##0.0000";
+      ws.getRow(r).height = highlight ? 20 : 17;
+      r++;
+    });
 
-  return new NextResponse(buffer, {
-    status: 200,
-    headers: {
-      "Content-Type":        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      "Content-Disposition": `attachment; filename="${filename}"; filename*=UTF-8''${utf8Name}`,
-    },
-  });
+    r++; // κενό
+
+    // ════════════════════════════════════════════════════
+    // ΤΕΧΝΙΚΟΣ ΟΔΗΓΟΣ
+    // ════════════════════════════════════════════════════
+    if (recipe.technicalGuide) {
+      ws.mergeCells(`A${r}:H${r}`);
+      ws.getCell(`A${r}`).value     = isGr ? "ΤΕΧΝΙΚΟΣ ΟΔΗΓΟΣ / TECHNICAL GUIDE" : "TECHNICAL GUIDE";
+      ws.getCell(`A${r}`).font      = bold(10);
+      ws.getCell(`A${r}`).fill      = fill(YLW);
+      ws.getCell(`A${r}`).alignment = { horizontal: "center", vertical: "middle" };
+      ws.getCell(`A${r}`).border    = med();
+      ws.getRow(r).height = 22;
+      r++;
+
+      ws.mergeCells(`A${r}:H${r}`);
+      ws.getCell(`A${r}`).value     = recipe.technicalGuide;
+      ws.getCell(`A${r}`).alignment = { wrapText: true, vertical: "top" };
+      ws.getCell(`A${r}`).border    = thin();
+      ws.getRow(r).height = 80;
+      r++;
+    }
+
+    r++; // κενό
+
+    // ════════════════════════════════════════════════════
+    // Footer
+    // ════════════════════════════════════════════════════
+    ws.mergeCells(`A${r}:H${r}`);
+    ws.getCell(`A${r}`).value     = `${isGr ? "ΗΜΕΡΟΜΗΝΙΑ ΕΚΤΥΠΩΣΕΙΣ:" : "PRINT DATE:"}  ${today}`;
+    ws.getCell(`A${r}`).font      = { size: 8, color: { argb: "FF888888" } };
+    ws.getCell(`A${r}`).alignment = { horizontal: "right" };
+
+    // ════════════════════════════════════════════════════
+    // Buffer + Response
+    // ════════════════════════════════════════════════════
+    const buffer = await wb.xlsx.writeBuffer();
+
+    const safeName = (recipe.name as string)
+      .replace(/[^a-zA-Z0-9_-]/g, "_")
+      .replace(/_+/g, "_")
+      .slice(0, 40) || "recipe";
+    const dateStr  = new Date().toISOString().slice(0, 10);
+    const filename = `${safeName}_${dateStr}.xlsx`;
+    const utf8Name = encodeURIComponent(`${recipe.name as string}_${dateStr}.xlsx`);
+
+    return new NextResponse(buffer, {
+      status: 200,
+      headers: {
+        "Content-Type":        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "Content-Disposition": `attachment; filename="${filename}"; filename*=UTF-8''${utf8Name}`,
+      },
+    });
+
   } catch (err) {
     console.error("[recipe-excel] ERROR:", err);
     return new NextResponse(
