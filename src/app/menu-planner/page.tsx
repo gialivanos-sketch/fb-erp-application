@@ -21,6 +21,9 @@ export default function MenuPlannerPage() {
   const [recipeSearch, setRecipeSearch] = useState("");
   const [showConsumption, setShowConsumption] = useState(false);
   const [coverCount, setCoverCount] = useState(1); // αριθμός ατόμων για αναφορά
+  const [loadingIngredients, setLoadingIngredients] = useState(false);
+  // recipeIngredients: recipeId -> ingredients φορτωμένα από DB
+  const [recipeIngredients, setRecipeIngredients] = useState<Record<number, { name: string; unit: string; qty: number; unitCost: number }[]>>({});
 
   // Φιλτράρισμα συνταγών βάσει αναζήτησης
   const filteredRecipes = useMemo(() => {
@@ -32,33 +35,59 @@ export default function MenuPlannerPage() {
     );
   }, [allRecipes, recipeSearch]);
 
+  // Άνοιγμα αναφοράς: φόρτωση υλικών από DB για όλες τις συνταγές του μενού
+  async function openConsumption() {
+    setLoadingIngredients(true);
+    setShowConsumption(true);
+    try {
+      const fetched: Record<number, { name: string; unit: string; qty: number; unitCost: number }[]> = {};
+      for (const mr of menuRecipes) {
+        if (!fetched[mr.recipeId]) {
+          const ings = await db.fetchRecipeIngredients(mr.recipeId);
+          fetched[mr.recipeId] = ings.map(i => ({
+            name: i.ingredientName,
+            unit: i.unit,
+            qty: Number(i.quantity),
+            unitCost: Number(i.unitCost),
+          }));
+        }
+      }
+      setRecipeIngredients(fetched);
+    } catch {
+      // αν αποτύχει, τα υλικά μένουν κενά
+    } finally {
+      setLoadingIngredients(false);
+    }
+  }
+
   // Υπολογισμός ανάλωσης υλικών για δεδομένο αριθμό ατόμων
   const consumptionItems = useMemo(() => {
     if (!showConsumption) return [];
     const map = new Map<string, { name: string; unit: string; qty: number; cost: number }>();
     for (const mr of menuRecipes) {
-      // Βρίσκουμε τη συνταγή στο context
       const recipe = allRecipes.find(r => r.id === mr.recipeId);
-      if (!recipe) continue;
+      const ings = recipeIngredients[mr.recipeId] || [];
+      if (ings.length === 0) continue;
       // Πολλαπλασιαστής: για μερίδα × covers, για kg × 1 (ως έχει)
+      const portionYield = Number(recipe?.portionYield) || 1;
       const multiplier = mr.portionType === "portion"
-        ? coverCount / (Number(recipe.portionYield) || 1)
+        ? coverCount / portionYield
         : 1;
-      for (const ing of recipe.ingredients || []) {
-        const key = `${ing.ingredientName}__${ing.unit}`;
+      for (const ing of ings) {
+        const key = `${ing.name}__${ing.unit}`;
         const existing = map.get(key);
-        const qty = Number(ing.quantity) * multiplier;
-        const cost = Number(ing.totalCost) * multiplier;
+        const qty = ing.qty * multiplier;
+        const cost = ing.qty * ing.unitCost * multiplier;
         if (existing) {
           existing.qty += qty;
           existing.cost += cost;
         } else {
-          map.set(key, { name: ing.ingredientName, unit: ing.unit, qty, cost });
+          map.set(key, { name: ing.name, unit: ing.unit, qty, cost });
         }
       }
     }
     return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name, "el"));
-  }, [showConsumption, menuRecipes, allRecipes, coverCount]);
+  }, [showConsumption, menuRecipes, allRecipes, recipeIngredients, coverCount]);
 
   function loadMenu(menu: Menu) {
     if (!menu) return;
@@ -158,7 +187,7 @@ export default function MenuPlannerPage() {
         <button onClick={newMenu} className="erp-btn-primary">➕ {t("btnNewMenu")}</button>
         {editing && <button onClick={saveMenu} disabled={saving} className="erp-btn-success">{saving ? "…" : "💾"} {t("btnSaveMenu")}</button>}
         {editing && menuRecipes.length > 0 && (
-          <button onClick={() => setShowConsumption(true)} className="erp-btn-secondary">
+          <button onClick={openConsumption} className="erp-btn-secondary">
             📋 {locale === "gr" ? "Αναφορά Ανάλωσης" : "Consumption Report"}
           </button>
         )}
@@ -413,7 +442,12 @@ export default function MenuPlannerPage() {
           </div>
 
           {/* Πίνακας υλικών */}
-          {consumptionItems.length === 0 ? (
+          {loadingIngredients ? (
+            <div className="text-center py-8 text-slate-400">
+              <div className="text-3xl mb-2">⏳</div>
+              <div>{locale === "gr" ? "Φόρτωση υλικών..." : "Loading ingredients..."}</div>
+            </div>
+          ) : consumptionItems.length === 0 ? (
             <div className="text-center py-8 text-slate-400">
               {locale === "gr"
                 ? "Δεν βρέθηκαν υλικά. Οι συνταγές πρέπει να έχουν καταχωρημένα υλικά."
