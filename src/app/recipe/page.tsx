@@ -6,7 +6,7 @@ import { PageHeader, Badge, Modal } from "@/components/shared";
 import type { Recipe, OrderItem } from "@/lib/types";
 import * as db from "@/lib/supabaseData";
 
-// ─── Excel export — υλικά μίας συνταγής (SheetJS CDN) ───────────────────────
+// ─── Excel export — κάρτα συνταγής ίδια δομή με PDF (SheetJS CDN) ───────────
 async function exportRecipeIngredients(
   recipe: Recipe | null,
   ingredients: DraftIngredient[],
@@ -26,238 +26,430 @@ async function exportRecipeIngredients(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const XLSX = (window as any).XLSX;
 
-  // Φύλλο 1: Υλικά
-  const ingRows = ingredients.map((ing, i) => ({
-    "#": i + 1,
-    [locale === "gr" ? "Υλικό" : "Ingredient"]: ing.productName,
-    [locale === "gr" ? "Προμηθευτής" : "Supplier"]: ing.supplierName ?? "",
-    [locale === "gr" ? "Ποσότητα" : "Qty"]: ing.quantity,
-    [locale === "gr" ? "Μονάδα" : "Unit"]: ing.unit,
-    [locale === "gr" ? "Τιμή/μον. €" : "Unit Cost €"]: Number(ing.unitCost),
-    [locale === "gr" ? "Σύνολο €" : "Total €"]: Number(ing.totalCost),
-  }));
-  const wsIng = XLSX.utils.json_to_sheet(ingRows);
-  wsIng["!cols"] = [{ wch: 4 }, { wch: 35 }, { wch: 20 }, { wch: 10 }, { wch: 8 }, { wch: 14 }, { wch: 12 }];
-
+  const isGr     = locale === "gr";
+  const portions = Number(recipe.portionYield) || 1;
   const allergens: string[] = Array.isArray(recipe.allergens) ? recipe.allergens as string[] :
     typeof recipe.allergens === "string" ? JSON.parse(recipe.allergens || "[]") : [];
+  const totalGrams = ingredients.reduce((s, i) =>
+    s + (i.unit === "ΓΡΑΜΜΑΡΙΑ" || i.unit === "GR" ? i.quantity : 0), 0);
 
-  // ── Ένα ενιαίο φύλλο, δομημένο σε ενότητες ──
-  const wb = XLSX.utils.book_new();
+  // Κοστολόγηση footer
+  const perPortion     = costing.menuFinal;
+  const profitPerPortion = perPortion - (costing.total / portions);
+  const costPct        = perPortion > 0 ? (costing.total / portions / perPortion * 100) : 0;
+  const profitPct      = perPortion > 0 ? (profitPerPortion / perPortion * 100) : 0;
+  const today          = new Date().toLocaleDateString("el-GR");
+
+  const wb  = XLSX.utils.book_new();
   const ws: Record<string, unknown> = {};
-  let r = 0; // τρέχουσα γραμμή (0-based)
+  let r = 0;
 
-  function cell(col: number, row: number) {
-    return XLSX.utils.encode_cell({ c: col, r: row });
+  const C = (col: number) => XLSX.utils.encode_cell({ c: col, r });
+  const BLU = "1A5276"; // header blue
+  const LBL = "D6EAF8"; // light blue για επικεφαλίδες στηλών
+  const GRN = "E9F7EF";
+  const YLW = "FEF9E7";
+
+  type CellStyle = { font?: Record<string,unknown>; fill?: Record<string,unknown>; alignment?: Record<string,unknown>; border?: Record<string,unknown> };
+
+  function wc(col: number, val: unknown, style?: CellStyle) {
+    const addr = C(col);
+    ws[addr] = {
+      v: val,
+      t: typeof val === "number" ? "n" : "s",
+      s: style ?? {},
+    };
   }
-  function write(col: number, val: unknown, bold = false, bg?: string) {
-    const c = cell(col, r);
-    ws[c] = { v: val, t: typeof val === "number" ? "n" : "s" };
-    if (bold || bg) {
-      ws[c].s = {
-        font: bold ? { bold: true, sz: 11 } : { sz: 11 },
-        fill: bg ? { fgColor: { rgb: bg }, patternType: "solid" } : undefined,
-      };
-    }
-  }
+  const bold   = (sz=11): CellStyle => ({ font: { bold: true, sz, color: { rgb: "000000" } } });
+  const hdrBlu = (sz=9): CellStyle => ({ font: { bold: true, sz, color: { rgb: "FFFFFF" } }, fill: { fgColor: { rgb: BLU }, patternType: "solid" } });
+  const hdrLbl = (sz=9): CellStyle => ({ font: { bold: true, sz }, fill: { fgColor: { rgb: LBL }, patternType: "solid" } });
+  const grn    = (sz=9): CellStyle => ({ font: { bold: true, sz }, fill: { fgColor: { rgb: GRN }, patternType: "solid" } });
+  const ylw    = (sz=9): CellStyle => ({ font: { bold: true, sz }, fill: { fgColor: { rgb: YLW }, patternType: "solid" } });
+  const right  = (): CellStyle => ({ alignment: { horizontal: "right" } });
+  const merge  = (s: {r:number;c:number}, e: {r:number;c:number}) => ({ s, e });
 
-  // ── ΤΙΤΛΟΣ ────────────────────────────────────
-  write(0, recipe.name, true); write(1, recipe.nameEn ?? ""); r++;
-  write(0, locale === "gr" ? "Μερίδες:" : "Portions:"); write(1, `${recipe.portionYield} ${recipe.portionUnit}`); r++;
-  write(0, locale === "gr" ? "Αλλεργίες:" : "Allergens:"); write(1, allergens.join(", ") || "—"); r++;
-  r++; // κενή γραμμή
+  const merges: {s:{r:number;c:number};e:{r:number;c:number}}[] = [];
 
-  // ── ΥΛΙΚΑ — επικεφαλίδα ───────────────────────
-  const hdr = [
-    "#",
-    locale === "gr" ? "Υλικό" : "Ingredient",
-    locale === "gr" ? "Προμηθευτής" : "Supplier",
-    locale === "gr" ? "Ποσότητα" : "Qty",
-    locale === "gr" ? "Μονάδα" : "Unit",
-    locale === "gr" ? "Τιμή/μον. €" : "Unit Cost €",
-    locale === "gr" ? "Σύνολο €" : "Total €",
-  ];
-  hdr.forEach((h, c) => write(c, h, true, "D9E1F2"));
+  // ── ROW 0: Τίτλος "RECIPE BUILDER" ──
+  wc(0, "RECIPE BUILDER", hdrBlu(14));
+  wc(1, ""); wc(2, ""); wc(3, ""); wc(4, ""); wc(5, ""); wc(6, "");
+  wc(7, isGr ? "ΚΑΡΤΑ ΣΥΝΤΑΓΗΣ" : "RECIPE CARD", hdrBlu(10));
+  merges.push(merge({r,c:0},{r,c:6}));
+  merges.push(merge({r,c:7},{r,c:9}));
   r++;
 
-  // ── ΥΛΙΚΑ — γραμμές ───────────────────────────
-  ingredients.forEach((ing, i) => {
-    write(0, i + 1);
-    write(1, ing.productName);
-    write(2, ing.supplierName ?? "");
-    write(3, ing.quantity);
-    write(4, ing.unit);
-    write(5, Number(ing.unitCost));
-    write(6, Number(ing.totalCost));
+  // ── ROW 1: Ετικέτα ονόματος ──
+  wc(0, isGr ? "ΟΝΟΜΑ ΣΥΝΤΑΓΗΣ:" : "RECIPE NAME:", bold());
+  wc(1, recipe.name.toUpperCase(), { font: { bold: true, sz: 13 } });
+  merges.push(merge({r,c:1},{r,c:7}));
+  wc(8, isGr ? "ΜΕΡΙΔΕΣ:" : "PORTIONS:", bold(9));
+  wc(9, recipe.portionYield, { font: { bold: true, sz: 12 } });
+  r++;
+
+  // ── ROW 2: Ονομασία EN + αλλεργίες ──
+  wc(0, isGr ? "ΟΝΟΜΑΣΙΑ (EN):" : "NAME (EN):", {});
+  wc(1, recipe.nameEn ?? "", {});
+  merges.push(merge({r,c:1},{r,c:5}));
+  wc(6, isGr ? "ΑΛΛΕΡΓΙΕΣ:" : "ALLERGENS:", bold(9));
+  wc(7, allergens.join(", ") || "—", {});
+  merges.push(merge({r,c:7},{r,c:9}));
+  r++;
+  r++; // κενό
+
+  // ── ROW 4+: Επικεφαλίδα πίνακα υλικών ──
+  const ING_COLS = [
+    isGr ? "ΥΛΙΚΟ" : "INGREDIENT",         // col 0 — wide
+    isGr ? "ΜΟΝΑΔΕΣ" : "UNITS",            // col 1
+    isGr ? "ΤΙΜΗ/ΜΟΝΑΔΑ €" : "PRICE/UNIT €", // col 2
+    isGr ? "ΠΟΣΟΤΗΤΑ/ΜΕΡΙΔΑ" : "QTY/PORTION", // col 3
+    isGr ? "ΣΥΝΟΛΙΚΗ ΠΟΣΟΤΗΤΑ" : "TOTAL QTY",  // col 4
+    isGr ? "ΚΟΣΤΟΣ ΥΛΙΚΩΝ/ΜΕΡΙΔΑ €" : "COST/PORTION €", // col 5
+    isGr ? "ΚΟΣΤΟΣ ΣΥΝΟΛΟ €" : "TOTAL COST €",           // col 6
+  ];
+  ING_COLS.forEach((h, c) => wc(c, h, hdrLbl(9)));
+  r++;
+
+  // ── Γραμμές υλικών (min 20) ──
+  const MIN_ROWS = 20;
+  ingredients.forEach((ing) => {
+    wc(0, ing.productName.toUpperCase(), {});
+    wc(1, ing.unit.toUpperCase(), {});
+    wc(2, Number(ing.unitCost), right());
+    wc(3, Number((ing.quantity / portions).toFixed(6)), right());
+    wc(4, Number(ing.quantity), right());
+    wc(5, Number((ing.totalCost / portions).toFixed(6)), right());
+    wc(6, Number(ing.totalCost), right());
     r++;
   });
+  for (let i = ingredients.length; i < MIN_ROWS; i++) {
+    wc(0, ""); wc(1, ""); wc(2, ""); wc(3, ""); wc(4, ""); wc(5, ""); wc(6, "");
+    r++;
+  }
 
-  // Σύνολο υλικών
-  write(5, locale === "gr" ? "Κόστος Υλικών:" : "Raw Material:", true);
-  write(6, costing.rawMaterial, true);
+  // ── Γραμμή συνόλων (τύπου "totals bar") ──
+  wc(0, isGr ? "ΓΡΑΜΜΑΡΙΑ/ΜΕΡΙΔΑ:" : "GRAMS/PORTION:", grn(9));
+  wc(1, Number((totalGrams / portions).toFixed(3)), grn(9));
+  wc(2, "");
+  wc(3, isGr ? "ΚΟΣΤΟΣ/ΜΕΡΙΔΑ:" : "COST/PORTION:", grn(9));
+  wc(4, Number((costing.rawMaterial / portions).toFixed(4)), grn(9));
+  wc(5, isGr ? "ΣΥΝΟΛΙΚΑ ΓΡΑΜΜΑΡΙΑ:" : "TOTAL GRAMS:", grn(9));
+  wc(6, Number(totalGrams.toFixed(3)), grn(9));
   r++;
-  r++; // κενή γραμμή
-
-  // ── ΚΟΣΤΟΛΟΓΗΣΗ — επικεφαλίδα ─────────────────
-  write(0, locale === "gr" ? "ΚΟΣΤΟΛΟΓΗΣΗ" : "COSTING", true, "E2EFDA");
-  write(1, "€", true, "E2EFDA");
   r++;
 
-  const costLines: [string, number][] = [
-    [locale === "gr" ? "Κόστος Υλικών" : "Raw Material",           costing.rawMaterial],
-    [locale === "gr" ? "Κόστος Εργασίας" : "Labor Cost",           Number(recipe.laborCost)],
-    [locale === "gr" ? "Γενικά Έξοδα" : "Overhead",                Number(recipe.overheadCost)],
-    [locale === "gr" ? "Συνολικό Κόστος" : "Total Cost",           costing.total],
-    [locale === "gr" ? "Περιθώριο Κέρδους %" : "Profit Margin %",  Number(recipe.profitMarginPercent)],
-    [locale === "gr" ? "Τιμή Πώλησης" : "Selling Price",           costing.selling],
-    [locale === "gr" ? "Τιμή Μενού (ΦΠΑ 24%)" : "Menu Price (VAT 24%)", costing.menuVat],
-    [locale === "gr" ? "Τιμή ανά Μερίδα" : "Price per Portion",    costing.menuFinal],
+  // ── ΚΟΣΤΟΛΟΓΗΣΗ — επικεφαλίδα ──
+  wc(0, isGr ? "ΚΟΣΤΟΛΟΓΗΣΗ" : "COSTING", hdrBlu(10));
+  wc(1, ""); wc(2, ""); wc(3, ""); wc(4, ""); wc(5, ""); wc(6, "");
+  merges.push(merge({r,c:0},{r,c:6}));
+  r++;
+
+  const costLines: [string, unknown][] = [
+    [isGr ? "Κόστος Υλικών (Raw Material)" : "Raw Material Cost",  costing.rawMaterial],
+    [isGr ? "Κόστος Εργασίας (Labor)"      : "Labor Cost",         Number(recipe.laborCost)],
+    [isGr ? "Γενικά Έξοδα (Overhead)"      : "Overhead",           Number(recipe.overheadCost)],
+    [isGr ? "ΣΥΝΟΛΙΚΟ ΚΟΣΤΟΣ"              : "TOTAL COST",         costing.total],
+    [isGr ? "Περιθώριο Κέρδους %"          : "Profit Margin %",    Number(recipe.profitMarginPercent)],
+    [isGr ? "Τιμή Πώλησης (χωρίς ΦΠΑ)"    : "Selling Price (ex VAT)", costing.selling],
+    [isGr ? "Τιμή Μενού (ΦΠΑ 24%)"        : "Menu Price (VAT 24%)", costing.menuVat],
+    [isGr ? "ΤΙΜΗ ΠΩΛΗΣΗΣ ΜΕΡΙΔΑΣ"        : "SELLING PRICE/PORTION", perPortion],
+    [isGr ? "ΚΕΡΔΟΣ/ΜΕΡΙΔΑ"               : "PROFIT/PORTION",     profitPerPortion],
+    [isGr ? "ΚΟΣΤΟΣ %"                     : "COST %",             costPct],
+    [isGr ? "ΚΕΡΔΟΣ %"                     : "PROFIT %",           profitPct],
   ];
   costLines.forEach(([label, val]) => {
-    write(0, label);
-    write(1, val);
+    const isTotal = (label as string).startsWith(isGr ? "ΣΥΝΟΛ" : "TOTAL") ||
+                    (label as string).startsWith(isGr ? "ΤΙΜΗ ΠΩΛΗ" : "SELLING") ||
+                    (label as string).startsWith(isGr ? "ΚΕΡΔΟΣ/Μ" : "PROFIT/P");
+    const st = isTotal ? bold(10) : {};
+    wc(0, label, st);
+    merges.push(merge({r,c:0},{r,c:4}));
+    wc(5, "");
+    wc(6, val, { ...st, ...right() });
     r++;
   });
-  r++; // κενή
+  r++;
 
-  // ── ΤΕΧΝΙΚΟΣ ΟΔΗΓΟΣ ───────────────────────────
+  // ── ΤΕΧΝΙΚΟΣ ΟΔΗΓΟΣ ──
   if (recipe.technicalGuide) {
-    write(0, locale === "gr" ? "ΤΕΧΝΙΚΟΣ ΟΔΗΓΟΣ" : "TECHNICAL GUIDE", true, "FFF2CC");
+    wc(0, isGr ? "ΤΕΧΝΙΚΟΣ ΟΔΗΓΟΣ / TECHNICAL GUIDE" : "TECHNICAL GUIDE", ylw(10));
+    merges.push(merge({r,c:0},{r,c:6}));
     r++;
-    write(0, recipe.technicalGuide);
+    wc(0, recipe.technicalGuide, { alignment: { wrapText: true } });
+    merges.push(merge({r,c:0},{r,c:6}));
     r++;
   }
+  r++;
 
-  // Εύρος φύλλου
-  ws["!ref"] = XLSX.utils.encode_range({ s: { c: 0, r: 0 }, e: { c: 6, r: r } });
-  ws["!cols"] = [{ wch: 4 }, { wch: 34 }, { wch: 20 }, { wch: 10 }, { wch: 8 }, { wch: 16 }, { wch: 14 }];
+  // ── Footer ──
+  wc(0, isGr ? "ΗΜΕΡΟΜΗΝΙΑ ΕΚΤΥΠΩΣΕΙΣ:" : "PRINT DATE:", bold(9));
+  wc(1, today, bold(9));
+  r++;
 
-  XLSX.utils.book_append_sheet(wb, ws, locale === "gr" ? "Συνταγή" : "Recipe");
+  // Ορισμός εύρους + πλάτη στηλών
+  ws["!ref"]   = XLSX.utils.encode_range({ s: { c: 0, r: 0 }, e: { c: 9, r: r } });
+  ws["!cols"]  = [
+    { wch: 38 }, // 0 Υλικό
+    { wch: 12 }, // 1 Μονάδες
+    { wch: 14 }, // 2 Τιμή/μον
+    { wch: 14 }, // 3 Ποσ/μερίδα
+    { wch: 14 }, // 4 Συνολική ποσ
+    { wch: 20 }, // 5 Κόστος/μερίδα
+    { wch: 16 }, // 6 Κόστος σύνολο
+    { wch: 14 }, // 7
+    { wch: 14 }, // 8
+    { wch: 10 }, // 9
+  ];
+  ws["!merges"] = merges;
+
+  XLSX.utils.book_append_sheet(wb, ws, isGr ? "Συνταγή" : "Recipe");
 
   const safeName = recipe.name.replace(/[^a-zA-Z0-9Ͱ-Ͽ_-]/g, "_").slice(0, 40);
   XLSX.writeFile(wb, `${safeName}_${new Date().toISOString().slice(0, 10)}.xlsx`);
 }
 
-// ─── PDF export — ανοίγει νέο tab με print-ready κάρτα ───────────────────────
+// ─── PDF export — κάρτα συνταγής τύπου Recipe Builder ────────────────────────
 function printRecipePDF(recipe: Recipe, ingredients: DraftIngredient[], locale: string) {
   const allergens: string[] = Array.isArray(recipe.allergens) ? recipe.allergens as string[] :
     typeof recipe.allergens === "string" ? JSON.parse(recipe.allergens || "[]") : [];
 
-  const rows = ingredients.map((ing, i) => `
-    <tr>
-      <td>${i + 1}</td>
-      <td>${ing.productName}</td>
-      <td style="text-align:right">${ing.quantity}</td>
-      <td>${ing.unit}</td>
-      <td style="text-align:right">€${ing.unitCost.toFixed(4)}</td>
-      <td style="text-align:right">€${ing.totalCost.toFixed(3)}</td>
-    </tr>`).join("");
-
-  const totalRaw = ingredients.reduce((s, i) => s + i.totalCost, 0);
-  const labor = Number(recipe.laborCost);
-  const overhead = Number(recipe.overheadCost);
-  const total = totalRaw + labor + overhead;
-  const margin = Number(recipe.profitMarginPercent);
-  const selling = margin < 100 ? total / (1 - margin / 100) : total;
-  const menuVat = selling * 1.24;
-  const portions = Number(recipe.portionYield) || 1;
+  const totalRaw   = ingredients.reduce((s, i) => s + i.totalCost, 0);
+  const labor      = Number(recipe.laborCost);
+  const overhead   = Number(recipe.overheadCost);
+  const total      = totalRaw + labor + overhead;
+  const margin     = Number(recipe.profitMarginPercent);
+  const selling    = margin < 100 ? total / (1 - margin / 100) : total;
+  const menuVat    = selling * 1.24;
+  const portions   = Number(recipe.portionYield) || 1;
   const perPortion = menuVat / portions;
+  const profitPerPortion = perPortion - (total / portions);
+  const costPct    = perPortion > 0 ? (total / portions / perPortion * 100) : 0;
+  const profitPct  = perPortion > 0 ? (profitPerPortion / perPortion * 100) : 0;
+
+  // Εκτιμώμενες θερμίδες/μερίδα (αν θέλουμε placeholder = 0)
+  const totalGrams = ingredients.reduce((s, i) => s + (i.unit === "ΓΡΑΜΜΑΡΙΑ" || i.unit === "GR" ? i.quantity : 0), 0);
+  const gramsPerPortion = totalGrams / portions;
+
+  // Γραμμές υλικών — 20 γραμμές min (με κενά)
+  const MIN_ROWS = 20;
+  const ingRows: string[] = ingredients.map((ing) => `
+    <tr>
+      <td class="td-name">${ing.productName.toUpperCase()}</td>
+      <td class="td-unit">${ing.unit.toUpperCase()}</td>
+      <td class="td-num">${ing.unitCost.toFixed(2)} €</td>
+      <td class="td-num">${(ing.quantity / portions).toFixed(3)}</td>
+      <td class="td-num">${ing.quantity.toFixed(3)}</td>
+      <td class="td-num">${(ing.totalCost / portions).toFixed(6)} €</td>
+    </tr>`);
+  for (let i = ingRows.length; i < MIN_ROWS; i++) {
+    ingRows.push(`<tr><td class="td-name">&nbsp;</td><td class="td-unit"></td><td class="td-num"></td><td class="td-num"></td><td class="td-num"></td><td class="td-num"></td></tr>`);
+  }
+
+  const today = new Date().toLocaleDateString("el-GR");
+  const isGr  = locale === "gr";
 
   const html = `<!DOCTYPE html>
-<html lang="${locale === "gr" ? "el" : "en"}">
+<html lang="el">
 <head>
 <meta charset="UTF-8">
 <title>${recipe.name}</title>
 <style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: Arial, sans-serif; font-size: 11px; color: #111; padding: 20mm; }
-  h1 { font-size: 20px; margin-bottom: 2px; }
-  .sub { color: #666; font-size: 12px; margin-bottom: 16px; }
-  .section { margin-bottom: 16px; }
-  .section-title { font-size: 12px; font-weight: bold; text-transform: uppercase;
-    letter-spacing: 0.05em; color: #444; border-bottom: 1px solid #ccc;
-    padding-bottom: 3px; margin-bottom: 8px; }
-  table { width: 100%; border-collapse: collapse; }
-  th { background: #f0f0f0; font-size: 10px; text-align: left; padding: 4px 6px; }
-  td { padding: 4px 6px; border-bottom: 1px solid #eee; }
-  .cost-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 8px; }
-  .cost-box { border: 1px solid #ddd; border-radius: 4px; padding: 8px; text-align: center; }
-  .cost-box .label { font-size: 9px; color: #666; text-transform: uppercase; }
-  .cost-box .value { font-size: 15px; font-weight: bold; margin-top: 2px; }
-  .allergen-tag { display:inline-block; background:#fee2e2; color:#991b1b;
-    border-radius:3px; padding:1px 6px; font-size:9px; margin:2px; }
-  .guide { white-space: pre-wrap; font-size: 11px; line-height: 1.6; }
-  .footer { margin-top: 20px; font-size: 9px; color: #aaa; text-align: right; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family: Arial, Helvetica, sans-serif; font-size: 9px; color: #111; background:#fff; }
+  .page { width:210mm; min-height:297mm; margin:0 auto; padding:6mm 8mm; }
+
+  /* HEADER */
+  .hdr { background:#1a5276; color:#fff; display:flex; align-items:center;
+         justify-content:space-between; padding:5px 10px; margin-bottom:4px; }
+  .hdr-left  { font-size:16px; font-weight:900; font-style:italic; letter-spacing:1px; }
+  .hdr-right { font-size:10px; font-weight:bold; }
+
+  /* Όνομα συνταγής */
+  .recipe-name-row { text-align:center; font-size:13px; font-weight:bold;
+    text-transform:uppercase; padding:4px 0; border:1px solid #aaa;
+    border-top:none; background:#f4f6f8; }
+  .recipe-name-label { font-size:7px; color:#555; text-align:center;
+    border:1px solid #aaa; border-top:none; border-bottom:none; padding:1px 0; }
+
+  /* Πίνακας υλικών */
+  .ing-table { width:100%; border-collapse:collapse; margin-top:0; }
+  .ing-table th { background:#1a5276; color:#fff; font-size:8px; font-weight:bold;
+    text-align:center; padding:3px 4px; border:1px solid #1a5276; }
+  .ing-table th.th-portions { background:#1a5276; color:#fff; font-size:9px;
+    font-weight:bold; text-align:center; border:1px solid #1a5276; padding:3px 4px; }
+  .ing-table td { border:1px solid #ccc; padding:2px 4px; font-size:8px; }
+  .td-name { text-align:left; }
+  .td-unit { text-align:center; background:#f8f8f8; }
+  .td-num  { text-align:right; }
+  tr:nth-child(even) td { background:#f4f7fb; }
+
+  /* Totals bar */
+  .totals-bar { display:flex; border:1px solid #aaa; border-top:2px solid #1a5276;
+    margin-top:0; }
+  .totals-bar .tbox { flex:1; padding:4px 6px; text-align:center;
+    border-right:1px solid #ccc; }
+  .totals-bar .tbox:last-child { border-right:none; }
+  .tbox .tlabel { font-size:7px; font-weight:bold; text-transform:uppercase; color:#333; }
+  .tbox .tvalue { font-size:11px; font-weight:bold; margin-top:1px; }
+  .tbox-blue { background:#1a5276; color:#fff; }
+  .tbox-blue .tlabel { color:#cde; }
+
+  /* Φωτογραφίες + Τεχνικά βήματα */
+  .bottom-section { display:flex; gap:4px; margin-top:4px; border:1px solid #aaa; }
+  .photos-col { width:30mm; display:flex; flex-direction:column; gap:2px; padding:4px;
+    border-right:1px solid #ccc; }
+  .photos-col .photo-label { font-size:7px; font-weight:bold; text-transform:uppercase;
+    text-align:center; background:#1a5276; color:#fff; padding:2px; margin-bottom:2px; }
+  .photo-box { border:1px solid #ccc; height:22mm; background:#f8f8f8; }
+  .steps-col { flex:1; padding:4px; }
+  .steps-col .steps-label { font-size:7px; font-weight:bold; text-transform:uppercase;
+    text-align:center; background:#1a5276; color:#fff; padding:2px; margin-bottom:4px; }
+  .steps-content { font-size:8px; line-height:1.6; white-space:pre-wrap;
+    min-height:60mm; }
+
+  /* Footer */
+  .footer-bar { display:flex; border:1px solid #aaa; border-top:2px solid #1a5276;
+    margin-top:4px; align-items:stretch; }
+  .footer-date { width:40mm; padding:4px 6px; font-size:8px; font-weight:bold;
+    border-right:1px solid #ccc; display:flex; flex-direction:column;
+    justify-content:center; }
+  .footer-date .date-label { font-size:7px; color:#555; text-transform:uppercase; }
+  .footer-kpis { flex:1; display:flex; }
+  .kpi { flex:1; padding:3px 6px; text-align:right; border-right:1px solid #ccc; }
+  .kpi:last-child { border-right:none; }
+  .kpi .kpi-label { font-size:7px; color:#333; text-transform:uppercase; font-weight:bold; }
+  .kpi .kpi-value { font-size:9px; font-weight:bold; }
+
+  /* Allergens */
+  .allergen-row { font-size:7px; color:#7b1c1c; background:#fff0f0;
+    padding:2px 6px; border:1px solid #ecc; border-top:none; }
+
   @media print {
-    @page { margin: 15mm; size: A4; }
-    body { padding: 0; }
+    @page { margin:0; size:A4; }
+    .page { padding:6mm 8mm; }
+    body { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
   }
 </style>
 </head>
 <body>
-<h1>${recipe.name}${recipe.nameEn ? ` <span style="font-size:13px;color:#666">/ ${recipe.nameEn}</span>` : ""}</h1>
-<div class="sub">
-  ${locale === "gr" ? "Μερίδες" : "Portions"}: <strong>${recipe.portionYield} ${recipe.portionUnit}</strong>
-  &nbsp;·&nbsp; ${locale === "gr" ? "Περιθώριο" : "Margin"}: <strong>${recipe.profitMarginPercent}%</strong>
-</div>
+<div class="page">
 
-<div class="section">
-  <div class="section-title">🧂 ${locale === "gr" ? "Υλικά" : "Ingredients"}</div>
-  <table>
-    <thead><tr>
-      <th>#</th>
-      <th>${locale === "gr" ? "Υλικό" : "Ingredient"}</th>
-      <th style="text-align:right">${locale === "gr" ? "Ποσότητα" : "Qty"}</th>
-      <th>${locale === "gr" ? "Μον." : "Unit"}</th>
-      <th style="text-align:right">${locale === "gr" ? "Τιμή/μον." : "Unit Cost"}</th>
-      <th style="text-align:right">${locale === "gr" ? "Σύνολο" : "Total"}</th>
-    </tr></thead>
-    <tbody>${rows}</tbody>
-    <tfoot><tr>
-      <td colspan="5" style="text-align:right;font-weight:bold;padding-top:6px">
-        ${locale === "gr" ? "Κόστος Υλικών" : "Raw Material"}:
-      </td>
-      <td style="font-weight:bold;padding-top:6px">€${totalRaw.toFixed(2)}</td>
-    </tr></tfoot>
+  <!-- HEADER -->
+  <div class="hdr">
+    <div class="hdr-left">RECIPE BUILDER</div>
+    <div class="hdr-right">WWW.YANNISSTANITSAS.COM</div>
+  </div>
+
+  <!-- Ετικέτα ονόματος -->
+  <div class="recipe-name-label">${isGr ? "ΟΝΟΜΑ ΣΥΝΤΑΓΗΣ:" : "RECIPE NAME:"}</div>
+  <div class="recipe-name-row">${recipe.name.toUpperCase()}${recipe.nameEn ? ` (${recipe.nameEn.toUpperCase()})` : ""}</div>
+
+  <!-- Πίνακας υλικών -->
+  <table class="ing-table">
+    <thead>
+      <tr>
+        <th class="th-portions" colspan="1" style="width:35%">&nbsp;</th>
+        <th class="th-portions" style="background:#154360;width:9%">${isGr ? "ΜΕΡΙΔΕΣ" : "PORTIONS"}</th>
+        <th style="background:#154360;font-size:12px;font-weight:900;width:5%">${recipe.portionYield}</th>
+        <th style="width:12%">${isGr ? "ΜΟΝΑΔΕΣ" : "UNITS"}</th>
+        <th style="width:13%">${isGr ? "ΤΙΜΗ/ΜΟΝΑΔΑ" : "PRICE/UNIT"}</th>
+        <th style="width:13%">${isGr ? "ΠΟΣΟΤΗΤΑ / ΜΕΡΙΔΑ" : "QTY / PORTION"}</th>
+        <th style="width:13%">${isGr ? "ΣΥΝΟΛΙΚΗ ΠΟΣΟΤΗΤΑ" : "TOTAL QTY"}</th>
+        <th style="width:13%">${isGr ? "ΚΟΣΤΟΣ ΥΛΙΚΩΝ / ΜΕΡΙΔΑ" : "COST / PORTION"}</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${ingredients.map((ing) => `
+      <tr>
+        <td class="td-name" colspan="1">${ing.productName.toUpperCase()}</td>
+        <td></td>
+        <td></td>
+        <td class="td-unit">${ing.unit.toUpperCase()}</td>
+        <td class="td-num">${ing.unitCost.toFixed(2)} €</td>
+        <td class="td-num">${(ing.quantity / portions).toFixed(3)}</td>
+        <td class="td-num">${ing.quantity.toFixed(3)}</td>
+        <td class="td-num">${(ing.totalCost / portions).toFixed(6)} €</td>
+      </tr>`).join("")}
+      ${Array.from({length: Math.max(0, MIN_ROWS - ingredients.length)}).map(() => `
+      <tr>
+        <td colspan="1">&nbsp;</td><td></td><td></td>
+        <td></td><td></td><td></td><td></td><td></td>
+      </tr>`).join("")}
+    </tbody>
   </table>
-</div>
 
-<div class="section">
-  <div class="section-title">🧮 ${locale === "gr" ? "Κοστολόγηση" : "Costing"}</div>
-  <div class="cost-grid">
-    <div class="cost-box">
-      <div class="label">${locale === "gr" ? "Κόστος Υλικών" : "Raw Material"}</div>
-      <div class="value">€${totalRaw.toFixed(2)}</div>
+  ${allergens.length > 0 ? `<div class="allergen-row">⚠️ ${isGr ? "Αλλεργίες" : "Allergens"}: ${allergens.join(", ")}</div>` : ""}
+
+  <!-- Totals -->
+  <div class="totals-bar">
+    <div class="tbox tbox-blue">
+      <div class="tlabel">${isGr ? "ΘΕΡΜΙΔΕΣ / ΜΕΡΙΔΑ:" : "KCAL / PORTION:"}</div>
+      <div class="tvalue">—</div>
     </div>
-    <div class="cost-box">
-      <div class="label">${locale === "gr" ? "Συνολικό Κόστος" : "Total Cost"}</div>
-      <div class="value">€${total.toFixed(2)}</div>
+    <div class="tbox" style="flex:2">
+      <div class="tlabel">&nbsp;</div>
     </div>
-    <div class="cost-box" style="border-color:#10b981">
-      <div class="label">${locale === "gr" ? "Τιμή Πώλησης" : "Selling Price"}</div>
-      <div class="value" style="color:#059669">€${selling.toFixed(2)}</div>
+    <div class="tbox tbox-blue">
+      <div class="tlabel">${isGr ? "ΚΟΣΤΟΣ / ΜΕΡΙΔΑ:" : "COST / PORTION:"}</div>
+      <div class="tvalue">${(totalRaw / portions).toFixed(2)} €</div>
     </div>
-    <div class="cost-box" style="border-color:#3b82f6">
-      <div class="label">${locale === "gr" ? "Τιμή/Μερίδα (ΦΠΑ)" : "Price/Portion (VAT)"}</div>
-      <div class="value" style="color:#2563eb">€${perPortion.toFixed(2)}</div>
+    <div class="tbox">
+      <div class="tlabel">${isGr ? "ΓΡΑΜΜΑΡΙΑ / ΜΕΡΙΔΑ:" : "GRAMS / PORTION:"}</div>
+      <div class="tvalue">${gramsPerPortion.toFixed(3)}</div>
+    </div>
+    <div class="tbox" style="flex:2">
+      <div class="tlabel">&nbsp;</div>
+    </div>
+    <div class="tbox tbox-blue">
+      <div class="tlabel">${isGr ? "ΣΥΝΟΛΙΚΑ ΓΡΑΜΜΑΡΙΑ:" : "TOTAL GRAMS:"}</div>
+      <div class="tvalue">${totalGrams.toFixed(3)}</div>
     </div>
   </div>
-</div>
 
-${allergens.length > 0 ? `
-<div class="section">
-  <div class="section-title">⚠️ ${locale === "gr" ? "Αλλεργίες" : "Allergens"}</div>
-  ${allergens.map((a) => `<span class="allergen-tag">${a}</span>`).join("")}
-</div>` : ""}
+  <!-- Φωτογραφίες + Τεχνικά βήματα -->
+  <div class="bottom-section">
+    <div class="photos-col">
+      <div class="photo-label">${isGr ? "ΦΩΤΟΓΡΑΦΙΕΣ" : "PHOTOS"}</div>
+      <div class="photo-box"></div>
+      <div class="photo-box"></div>
+      <div class="photo-box"></div>
+    </div>
+    <div class="steps-col">
+      <div class="steps-label">${isGr ? "ΤΕΧΝΙΚΑ ΒΗΜΑΤΑ ΣΥΝΤΑΓΗΣ" : "RECIPE TECHNICAL STEPS"}</div>
+      <div class="steps-content">${(recipe.technicalGuide ?? "").replace(/</g,"&lt;")}</div>
+    </div>
+  </div>
 
-${recipe.technicalGuide ? `
-<div class="section">
-  <div class="section-title">📋 ${locale === "gr" ? "Τεχνικός Οδηγός" : "Technical Guide"}</div>
-  <div class="guide">${recipe.technicalGuide.replace(/</g,"&lt;")}</div>
-</div>` : ""}
+  <!-- Thumbnails row (κενό placeholder) -->
+  <div style="display:flex;gap:2px;margin-top:4px;border:1px solid #aaa;padding:4px;">
+    ${Array.from({length:8}).map(() => `<div style="flex:1;height:14mm;border:1px solid #ccc;background:#f8f8f8;"></div>`).join("")}
+  </div>
 
-<div class="footer">
-  ${locale === "gr" ? "Εκτυπώθηκε" : "Printed"}: ${new Date().toLocaleDateString(locale === "gr" ? "el-GR" : "en-GB")}
+  <!-- Footer -->
+  <div class="footer-bar">
+    <div class="footer-date">
+      <div class="date-label">${isGr ? "ΗΜΕΡΟΜΗΝΙΑ ΕΚΤΥΠΩΣΕΙΣ" : "PRINT DATE"}</div>
+      <div style="font-size:10px;font-weight:bold;margin-top:2px;">${today}</div>
+    </div>
+    <div class="footer-kpis">
+      <div class="kpi">
+        <div class="kpi-label">${isGr ? "ΤΙΜΗ ΠΩΛΗΣΗΣ ΜΕΡΙΔΑΣ" : "SELLING PRICE/PORTION"}</div>
+        <div class="kpi-value">${perPortion.toFixed(2)} €</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-label">${isGr ? "ΚΕΡΔΟΣ/ΜΕΡΙΔΑ" : "PROFIT/PORTION"}</div>
+        <div class="kpi-value">${profitPerPortion.toFixed(2)} €</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-label">${isGr ? "ΚΟΣΤΟΣ %" : "COST %"}</div>
+        <div class="kpi-value">${costPct.toFixed(2)}%</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-label">${isGr ? "ΚΕΡΔΟΣ %" : "PROFIT %"}</div>
+        <div class="kpi-value">${profitPct.toFixed(2)}%</div>
+      </div>
+    </div>
+  </div>
+
 </div>
 <script>window.onload = () => window.print();</script>
 </body></html>`;
