@@ -479,53 +479,63 @@ export default function DraftOrderPage() {
             </button>
             <button onClick={() => window.print()} className="erp-btn-secondary">🖨️ {t("btnPrint")}</button>
             <button onClick={handleExportPDF} className="erp-btn-secondary">📄 {t("btnExportPDF")}</button>
-            <button onClick={() => {
-              const s = suppliers.find((sup) => sup.id === selectedSupplier);
-              if (!s?.contactEmail) {
-                window.alert(locale === "gr" ? "⚠️ Δεν βρέθηκε email προμηθευτή" : "⚠️ No supplier email found");
-                return;
+            {items.length > 0 && (() => {
+              // Group items by supplierId to build per-supplier email buttons
+              const supplierGroups = new Map<number, { sup: typeof suppliers[0] | undefined; items: typeof items; net: number; vat: number; gross: number }>();
+              for (const item of items) {
+                const sid = item.supplierId || selectedSupplier || 0;
+                if (!supplierGroups.has(sid)) {
+                  supplierGroups.set(sid, { sup: suppliers.find(x => x.id === sid), items: [], net: 0, vat: 0, gross: 0 });
+                }
+                const g = supplierGroups.get(sid)!;
+                g.items.push(item);
+                g.net += item.netAmount;
+                g.vat += item.vatAmount;
+                g.gross += item.grossAmount;
               }
-              const today = new Date(orderDate).toLocaleDateString("el-GR", { day: "2-digit", month: "2-digit", year: "numeric" });
-              const supplierName = locale === "gr" ? s.name : (s.nameEn || s.name);
-              const subject = `Παραγγελία – NOE BEACH CLUB – ${today}`;
-              const SEP = "--------------------------------------------";
-              const rows = items.map((item, i) => {
-                return `${i + 1}. ${item.productName}  ${item.orderedQuantity} ${item.unit} | ${item.basePrice.toFixed(2)}EUR | ΦΠΑ ${item.vatPercent}% | ${item.grossAmount.toFixed(2)}EUR`;
-              }).join("\n");
-              const body = [
-                `NOE BEACH CLUB`,
-                `ΠΑΡΑΓΓΕΛΙΑ`,
-                SEP,
-                `Ημερομηνία : ${today}`,
-                `Προμηθευτής: ${supplierName}`,
-                SEP,
-                ``,
-                `Αγαπητοί,`,
-                `Σας αποστέλλουμε την παραγγελία μας.`,
-                `Παρακαλούμε επιβεβαιώστε διαθεσιμότητα και ημερομηνία παράδοσης.`,
-                ``,
-                rows,
-                SEP,
-                `ΚΑΘΑΡΗ ΑΞΙΑ: ${totalNet.toFixed(2)} EUR`,
-                `ΦΠΑ:         ${totalVat.toFixed(2)} EUR`,
-                `ΣΥΝΟΛΟ:      ${totalGross.toFixed(2)} EUR`,
-                ``,
-                `Με εκτίμηση,`,
-                `NOE BEACH CLUB`,
-              ].join("\n");
-              const subject_enc = encodeURIComponent(subject);
-              const body_enc = encodeURIComponent(body);
-              const fullUrl = `mailto:${s.contactEmail}?subject=${subject_enc}&body=${body_enc}`;
-              const shortUrl = `mailto:${s.contactEmail}?subject=${subject_enc}&body=${encodeURIComponent(rows + "\n\nΣΥΝΟΛΟ: " + totalGross.toFixed(2) + " EUR")}`;
-              const url = fullUrl.length < 2000 ? fullUrl : shortUrl;
-              const a = document.createElement("a");
-              a.href = url;
-              a.target = "_blank";
-              a.rel = "noopener";
-              document.body.appendChild(a);
-              a.click();
-              document.body.removeChild(a);
-            }} className="erp-btn-secondary" disabled={items.length === 0 || !selectedSupplier}>📧 {t("btnSendEmail")}</button>
+              function sendEmail(sid: number) {
+                const g = supplierGroups.get(sid)!;
+                const s = g.sup;
+                if (!s?.contactEmail) {
+                  window.alert(locale === "gr" ? "⚠️ Δεν βρέθηκε email προμηθευτή" : "⚠️ No supplier email found");
+                  return;
+                }
+                const supplierName = locale === "gr" ? s.name : (s.nameEn || s.name);
+                const today = new Date(orderDate).toLocaleDateString("el-GR", { day: "2-digit", month: "2-digit", year: "numeric" });
+                const subject = `Παραγγελία – NOE BEACH CLUB – ${today}`;
+                const SEP = "--------------------------------------------";
+                const rows = g.items.map((item, i) =>
+                  `${i + 1}. ${item.productName}  ${item.orderedQuantity} ${item.unit} | ${item.basePrice.toFixed(2)}EUR | ΦΠΑ ${item.vatPercent}% | ${item.grossAmount.toFixed(2)}EUR`
+                ).join("\n");
+                const body = [
+                  `NOE BEACH CLUB`, `ΠΑΡΑΓΓΕΛΙΑ`, SEP,
+                  `Ημερομηνία : ${today}`,
+                  `Προμηθευτής: ${supplierName}`,
+                  SEP, ``,
+                  `Αγαπητοί,`,
+                  `Σας αποστέλλουμε την παραγγελία μας.`,
+                  `Παρακαλούμε επιβεβαιώστε διαθεσιμότητα και ημερομηνία παράδοσης.`,
+                  ``, rows, SEP,
+                  `ΚΑΘΑΡΗ ΑΞΙΑ: ${g.net.toFixed(2)} EUR`,
+                  `ΦΠΑ:         ${g.vat.toFixed(2)} EUR`,
+                  `ΣΥΝΟΛΟ:      ${g.gross.toFixed(2)} EUR`,
+                  ``, `Με εκτίμηση,`, `NOE BEACH CLUB`,
+                ].join("\n");
+                const s_enc = encodeURIComponent(subject);
+                const b_enc = encodeURIComponent(body);
+                const fullUrl = `mailto:${s.contactEmail}?subject=${s_enc}&body=${b_enc}`;
+                const shortUrl = `mailto:${s.contactEmail}?subject=${s_enc}&body=${encodeURIComponent(rows + "\n\nΣΥΝΟΛΟ: " + g.gross.toFixed(2) + " EUR")}`;
+                const url = fullUrl.length < 2000 ? fullUrl : shortUrl;
+                const a = document.createElement("a");
+                a.href = url; a.target = "_blank"; a.rel = "noopener";
+                document.body.appendChild(a); a.click(); document.body.removeChild(a);
+              }
+              return Array.from(supplierGroups.entries()).map(([sid, g]) => (
+                <button key={sid} onClick={() => sendEmail(sid)} className="erp-btn-secondary">
+                  📧 {g.sup ? (locale === "gr" ? g.sup.name : (g.sup.nameEn || g.sup.name)) : "—"} ({fmt(g.gross)})
+                </button>
+              ));
+            })()}
           </div>
         </div>
       </div>
