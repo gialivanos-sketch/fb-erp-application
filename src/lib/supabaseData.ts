@@ -1442,3 +1442,43 @@ export async function deleteProductSkuMapEntry(id: number): Promise<void> {
   const { error } = await (supabase as any).from("product_sku_map").delete().eq("id", id);
   if (error) throw error;
 }
+
+// ── Business Profile ─────────────────────────────────────────────────────────
+export async function fetchBusinessProfile(): Promise<{ name: string; address: string; phone: string; email: string; taxId: string; logoDataUrl: string | null } | null> {
+  if (!supabase) throw new Error("Supabase not initialized");
+  const { data } = await (supabase as any).from("business_profile").select("*").eq("id", 1).single();
+  if (!data) return null;
+  return {
+    name: data.name ?? "",
+    address: data.address ?? "",
+    phone: data.phone ?? "",
+    email: data.email ?? "",
+    taxId: data.tax_id ?? "",
+    logoDataUrl: data.logo_data_url ?? null,
+  };
+}
+
+export async function saveBusinessProfile(input: { name: string; address: string; phone: string; email: string; taxId: string; logoDataUrl?: string | null }): Promise<void> {
+  if (!supabase) throw new Error("Supabase not initialized");
+  const { error } = await (supabase as any).from("business_profile").upsert({
+    id: 1,
+    name: input.name,
+    address: input.address,
+    phone: input.phone,
+    email: input.email,
+    tax_id: input.taxId,
+    logo_data_url: input.logoDataUrl ?? null,
+    updated_at: new Date().toISOString(),
+  });
+  if (error) throw error;
+}
+
+// ── SKU Group rename ──────────────────────────────────────────────────────────
+export async function renameSkuGroup(oldSku: string, newSku: string): Promise<void> {
+  if (!supabase) throw new Error("Supabase not initialized");
+  const { error } = await (supabase as any)
+    .from("product_sku_map")
+    .update({ sku: newSku })
+    .eq("sku", oldSku);
+  if (error) throw error;
+}
