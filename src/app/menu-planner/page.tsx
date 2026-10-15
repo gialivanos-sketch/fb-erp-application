@@ -188,32 +188,53 @@ export default function MenuPlannerPage() {
     const toEmail = sup?.contactEmail ?? "";
     const today = new Date().toLocaleDateString("el-GR", { day: "2-digit", month: "2-digit", year: "numeric" });
     const menuName = selectedMenu?.title ?? menuTitle;
-
-    const subject = `Παραγγελία Υλικών – NOE BEACH CLUB – ${today}`;
-    const rows = items.map((item, i) =>
-      `${i + 1}. ${item.name}  |  Ποσ.: ${item.qty % 1 === 0 ? item.qty.toFixed(0) : item.qty.toFixed(3)} ${item.unit}  |  Τιμή/μον.: €${item.unitCost.toFixed(2)}  |  Σύνολο: €${item.cost.toFixed(2)}`
-    ).join("\n");
     const total = items.reduce((s, i) => s + i.cost, 0);
 
+    // Helper: pad string to fixed width (Greek chars count as 1)
+    const pad = (s: string, n: number) => s.length >= n ? s.slice(0, n) : s + " ".repeat(n - s.length);
+    const padL = (s: string, n: number) => s.length >= n ? s.slice(0, n) : " ".repeat(n - s.length) + s;
+
+    const COL = { name: 32, qty: 8, unit: 6, price: 8, total: 9 };
+    const divider  = "─".repeat(COL.name + COL.qty + COL.unit + COL.price + COL.total + 4);
+    const dividerH = "━".repeat(COL.name + COL.qty + COL.unit + COL.price + COL.total + 4);
+
+    const header = pad("ΥΛΙΚΟ", COL.name) + " " + padL("ΠΟΣ.", COL.qty) + " " + pad("ΜΟΝ.", COL.unit) + " " + padL("ΤΙΜΗ", COL.price) + " " + padL("ΣΥΝΟΛΟ", COL.total);
+
+    const rows = items.map(item => {
+      const qtyStr = item.qty % 1 === 0 ? item.qty.toFixed(0) : item.qty.toFixed(3);
+      const unitShort = item.unit.length > 5 ? item.unit.slice(0, 5) : item.unit;
+      return (
+        pad(item.name, COL.name) + " " +
+        padL(qtyStr, COL.qty) + " " +
+        pad(unitShort, COL.unit) + " " +
+        padL(`€${item.unitCost.toFixed(2)}`, COL.price) + " " +
+        padL(`€${item.cost.toFixed(2)}`, COL.total)
+      );
+    }).join("\n");
+
+    const subject = `Παραγγελία Υλικών – NOE BEACH CLUB – ${today}`;
     const body = [
+      `NOE BEACH CLUB`,
+      dividerH,
+      `ΠΑΡΑΓΓΕΛΙΑ ΥΛΙΚΩΝ`,
+      ``,
+      `Ημερομηνία  : ${today}`,
+      `Μενού       : ${menuName}`,
+      `Προμηθευτής : ${supplierName}`,
+      dividerH,
+      ``,
       `Αγαπητοί,`,
       ``,
-      `Σας αποστέλλουμε την παραγγελία υλικών για το μενού "${menuName}" ημερομηνίας ${today}.`,
+      `Σας αποστέλλουμε την παραγγελία υλικών ημερομηνίας ${today}.`,
+      `Παρακαλούμε επιβεβαιώστε διαθεσιμότητα και ημερομηνία παράδοσης.`,
       ``,
-      `─────────────────────────────────────`,
-      `ΠΑΡΑΓΓΕΛΙΑ ΥΛΙΚΩΝ`,
-      `Ημερομηνία: ${today}`,
-      `Μενού: ${menuName}`,
-      `Προμηθευτής: ${supplierName}`,
-      `─────────────────────────────────────`,
-      ``,
+      divider,
+      header,
+      divider,
       rows,
-      ``,
-      `─────────────────────────────────────`,
-      `ΣΥΝΟΛΟ ΠΑΡΑΓΓΕΛΙΑΣ: €${total.toFixed(2)}`,
-      `─────────────────────────────────────`,
-      ``,
-      `Παρακαλούμε επιβεβαιώστε τη λήψη και τη διαθεσιμότητα των ειδών.`,
+      divider,
+      padL(`ΣΥΝΟΛΟ: €${total.toFixed(2)}`, COL.name + COL.qty + COL.unit + COL.price + COL.total + 4),
+      dividerH,
       ``,
       `Με εκτίμηση,`,
       `NOE BEACH CLUB`,

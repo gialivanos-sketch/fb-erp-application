@@ -163,42 +163,52 @@ export default function ConsumptionPage() {
     const supplier = suppliers.find(s => s.name === supplierName || s.nameEn === supplierName);
     const toEmail = supplier?.contactEmail ?? "";
     const today = new Date().toLocaleDateString("el-GR", { day: "2-digit", month: "2-digit", year: "numeric" });
-    const menuTitle = menu?.title ?? "";
-
-    const subject = `Παραγγελία Υλικών – NOE BEACH CLUB – ${today}`;
-
-    const rows = items.map((item, i) =>
-      `${i + 1}. ${item.name}  |  Ποσ.: ${item.totalQty % 1 === 0 ? item.totalQty.toFixed(0) : item.totalQty.toFixed(3)} ${item.unit}  |  Τιμή/μον.: €${item.unitCost.toFixed(2)}  |  Σύνολο: €${item.totalCost.toFixed(2)}`
-    ).join("\n");
-
+    const mTitle = menu?.title ?? "";
     const total = items.reduce((s, i) => s + i.totalCost, 0);
 
+    const pad  = (s: string, n: number) => s.length >= n ? s.slice(0, n) : s + " ".repeat(n - s.length);
+    const padL = (s: string, n: number) => s.length >= n ? s.slice(0, n) : " ".repeat(n - s.length) + s;
+
+    const COL = { name: 32, qty: 8, unit: 6, price: 8, total: 9 };
+    const W = COL.name + COL.qty + COL.unit + COL.price + COL.total + 4;
+    const divider  = "─".repeat(W);
+    const dividerH = "━".repeat(W);
+    const header = pad("ΥΛΙΚΟ", COL.name) + " " + padL("ΠΟΣ.", COL.qty) + " " + pad("ΜΟΝ.", COL.unit) + " " + padL("ΤΙΜΗ", COL.price) + " " + padL("ΣΥΝΟΛΟ", COL.total);
+    const rows = items.map(item => {
+      const qtyStr = item.totalQty % 1 === 0 ? item.totalQty.toFixed(0) : item.totalQty.toFixed(3);
+      const unitShort = item.unit.length > 5 ? item.unit.slice(0, 5) : item.unit;
+      return pad(item.name, COL.name) + " " + padL(qtyStr, COL.qty) + " " + pad(unitShort, COL.unit) + " " + padL(`€${item.unitCost.toFixed(2)}`, COL.price) + " " + padL(`€${item.totalCost.toFixed(2)}`, COL.total);
+    }).join("\n");
+
+    const subject = `Παραγγελία Υλικών – NOE BEACH CLUB – ${today}`;
     const body = [
+      `NOE BEACH CLUB`,
+      dividerH,
+      `ΠΑΡΑΓΓΕΛΙΑ ΥΛΙΚΩΝ`,
+      ``,
+      `Ημερομηνία  : ${today}`,
+      `Μενού       : ${mTitle}`,
+      `Προμηθευτής : ${supplierName}`,
+      dividerH,
+      ``,
       `Αγαπητοί,`,
       ``,
-      `Σας αποστέλλουμε την παραγγελία υλικών για το μενού "${menuTitle}" ημερομηνίας ${today}.`,
+      `Σας αποστέλλουμε την παραγγελία υλικών ημερομηνίας ${today}.`,
+      `Παρακαλούμε επιβεβαιώστε διαθεσιμότητα και ημερομηνία παράδοσης.`,
       ``,
-      `─────────────────────────────────────`,
-      `ΠΑΡΑΓΓΕΛΙΑ ΥΛΙΚΩΝ`,
-      `Ημερομηνία: ${today}`,
-      `Μενού: ${menuTitle}`,
-      `Προμηθευτής: ${supplierName}`,
-      `─────────────────────────────────────`,
-      ``,
+      divider,
+      header,
+      divider,
       rows,
-      ``,
-      `─────────────────────────────────────`,
-      `ΣΥΝΟΛΟ ΠΑΡΑΓΓΕΛΙΑΣ: €${total.toFixed(2)}`,
-      `─────────────────────────────────────`,
-      ``,
-      `Παρακαλούμε επιβεβαιώστε τη λήψη και τη διαθεσιμότητα των ειδών.`,
+      divider,
+      padL(`ΣΥΝΟΛΟ: €${total.toFixed(2)}`, W),
+      dividerH,
       ``,
       `Με εκτίμηση,`,
       `NOE BEACH CLUB`,
     ].join("\n");
 
     const mailto = `mailto:${toEmail}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-    // Use <a> click trick for better mobile compatibility
     const a = document.createElement("a");
     a.href = mailto;
     a.target = "_blank";

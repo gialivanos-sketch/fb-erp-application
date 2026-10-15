@@ -451,29 +451,40 @@ export default function DraftOrderPage() {
               const today = new Date(orderDate).toLocaleDateString("el-GR", { day: "2-digit", month: "2-digit", year: "numeric" });
               const supplierName = locale === "gr" ? s.name : (s.nameEn || s.name);
               const subject = `Παραγγελία – NOE BEACH CLUB – ${today}`;
-              const rows = items.map((item, i) =>
-                `${i + 1}. ${item.productName}  |  Ποσ.: ${item.orderedQuantity} ${item.unit}  |  Τιμή/μον.: €${item.basePrice.toFixed(2)}  |  ΦΠΑ: ${item.vatPercent}%  |  Σύνολο: €${item.grossAmount.toFixed(2)}`
-              ).join("\n");
+              const pad  = (str: string, n: number) => str.length >= n ? str.slice(0, n) : str + " ".repeat(n - str.length);
+              const padL = (str: string, n: number) => str.length >= n ? str.slice(0, n) : " ".repeat(n - str.length) + str;
+              const COL = { name: 28, qty: 7, unit: 6, price: 8, vat: 5, total: 9 };
+              const W = COL.name + COL.qty + COL.unit + COL.price + COL.vat + COL.total + 5;
+              const div  = "─".repeat(W);
+              const divH = "━".repeat(W);
+              const hdr = pad("ΠΡΟΪΟΝ", COL.name) + " " + padL("ΠΟΣ.", COL.qty) + " " + pad("ΜΟΝ.", COL.unit) + " " + padL("ΤΙΜΗ", COL.price) + " " + padL("ΦΠΑ%", COL.vat) + " " + padL("ΣΥΝΟΛΟ", COL.total);
+              const rows = items.map(item => {
+                const unitS = item.unit.length > 5 ? item.unit.slice(0,5) : item.unit;
+                return pad(item.productName, COL.name) + " " + padL(String(item.orderedQuantity), COL.qty) + " " + pad(unitS, COL.unit) + " " + padL(`€${item.basePrice.toFixed(2)}`, COL.price) + " " + padL(`${item.vatPercent}%`, COL.vat) + " " + padL(`€${item.grossAmount.toFixed(2)}`, COL.total);
+              }).join("\n");
               const body = [
+                `NOE BEACH CLUB`,
+                divH,
+                `ΠΑΡΑΓΓΕΛΙΑ`,
+                ``,
+                `Ημερομηνία  : ${today}`,
+                `Προμηθευτής : ${supplierName}`,
+                divH,
+                ``,
                 `Αγαπητοί,`,
                 ``,
                 `Σας αποστέλλουμε την παραγγελία μας ημερομηνίας ${today}.`,
+                `Παρακαλούμε επιβεβαιώστε διαθεσιμότητα και ημερομηνία παράδοσης.`,
                 ``,
-                `─────────────────────────────────────`,
-                `ΠΑΡΑΓΓΕΛΙΑ`,
-                `Ημερομηνία: ${today}`,
-                `Προμηθευτής: ${supplierName}`,
-                `─────────────────────────────────────`,
-                ``,
+                div,
+                hdr,
+                div,
                 rows,
-                ``,
-                `─────────────────────────────────────`,
-                `ΚΑΘΑΡΗ ΑΞΙΑ:  €${totalNet.toFixed(2)}`,
-                `ΦΠΑ:          €${totalVat.toFixed(2)}`,
-                `ΣΥΝΟΛΟ:       €${totalGross.toFixed(2)}`,
-                `─────────────────────────────────────`,
-                ``,
-                `Παρακαλούμε επιβεβαιώστε τη λήψη και τη διαθεσιμότητα των ειδών.`,
+                div,
+                padL(`ΚΑΘΑΡΗ ΑΞΙΑ : €${totalNet.toFixed(2)}`, W),
+                padL(`ΦΠΑ         : €${totalVat.toFixed(2)}`, W),
+                padL(`ΣΥΝΟΛΟ      : €${totalGross.toFixed(2)}`, W),
+                divH,
                 ``,
                 `Με εκτίμηση,`,
                 `NOE BEACH CLUB`,
