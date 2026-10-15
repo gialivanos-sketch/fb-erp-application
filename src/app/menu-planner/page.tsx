@@ -176,7 +176,7 @@ export default function MenuPlannerPage() {
   const bySupplier = useMemo(() => {
     const map = new Map<string, typeof consumptionItems>();
     for (const c of consumptionItems) {
-      if (!c.hasPrice || !c.supplierName) continue;
+      if (!c.supplierName) continue;
       if (!map.has(c.supplierName)) map.set(c.supplierName, []);
       map.get(c.supplierName)!.push(c);
     }
@@ -190,59 +190,45 @@ export default function MenuPlannerPage() {
     const menuName = selectedMenu?.title ?? menuTitle;
     const total = items.reduce((s, i) => s + i.cost, 0);
 
-    // Helper: pad string to fixed width (Greek chars count as 1)
-    const pad = (s: string, n: number) => s.length >= n ? s.slice(0, n) : s + " ".repeat(n - s.length);
-    const padL = (s: string, n: number) => s.length >= n ? s.slice(0, n) : " ".repeat(n - s.length) + s;
-
-    const COL = { name: 32, qty: 8, unit: 6, price: 8, total: 9 };
-    const divider  = "─".repeat(COL.name + COL.qty + COL.unit + COL.price + COL.total + 4);
-    const dividerH = "━".repeat(COL.name + COL.qty + COL.unit + COL.price + COL.total + 4);
-
-    const header = pad("ΥΛΙΚΟ", COL.name) + " " + padL("ΠΟΣ.", COL.qty) + " " + pad("ΜΟΝ.", COL.unit) + " " + padL("ΤΙΜΗ", COL.price) + " " + padL("ΣΥΝΟΛΟ", COL.total);
-
-    const rows = items.map(item => {
+    // Simple line format — avoids Unicode box chars that bloat encodeURIComponent
+    const SEP = "--------------------------------------------";
+    const rows = items.map((item, i) => {
       const qtyStr = item.qty % 1 === 0 ? item.qty.toFixed(0) : item.qty.toFixed(3);
-      const unitShort = item.unit.length > 5 ? item.unit.slice(0, 5) : item.unit;
-      return (
-        pad(item.name, COL.name) + " " +
-        padL(qtyStr, COL.qty) + " " +
-        pad(unitShort, COL.unit) + " " +
-        padL(`€${item.unitCost.toFixed(2)}`, COL.price) + " " +
-        padL(`€${item.cost.toFixed(2)}`, COL.total)
-      );
+      const priceStr = item.unitCost > 0 ? ` | ${item.unitCost.toFixed(2)}/${item.unit} | ${item.cost.toFixed(2)}EUR` : "";
+      return `${i + 1}. ${item.name}  ${qtyStr} ${item.unit}${priceStr}`;
     }).join("\n");
 
     const subject = `Παραγγελία Υλικών – NOE BEACH CLUB – ${today}`;
     const body = [
       `NOE BEACH CLUB`,
-      dividerH,
       `ΠΑΡΑΓΓΕΛΙΑ ΥΛΙΚΩΝ`,
-      ``,
-      `Ημερομηνία  : ${today}`,
-      `Μενού       : ${menuName}`,
-      `Προμηθευτής : ${supplierName}`,
-      dividerH,
+      SEP,
+      `Ημερομηνία : ${today}`,
+      `Μενού      : ${menuName}`,
+      `Προμηθευτής: ${supplierName}`,
+      SEP,
       ``,
       `Αγαπητοί,`,
-      ``,
-      `Σας αποστέλλουμε την παραγγελία υλικών ημερομηνίας ${today}.`,
+      `Σας αποστέλλουμε την παραγγελία υλικών.`,
       `Παρακαλούμε επιβεβαιώστε διαθεσιμότητα και ημερομηνία παράδοσης.`,
       ``,
-      divider,
-      header,
-      divider,
       rows,
-      divider,
-      padL(`ΣΥΝΟΛΟ: €${total.toFixed(2)}`, COL.name + COL.qty + COL.unit + COL.price + COL.total + 4),
-      dividerH,
+      SEP,
+      `ΣΥΝΟΛΟ: ${total > 0 ? total.toFixed(2) + " EUR" : "-"}`,
       ``,
       `Με εκτίμηση,`,
       `NOE BEACH CLUB`,
     ].join("\n");
 
-    const mailto = `mailto:${toEmail}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    const subject_enc = encodeURIComponent(subject);
+    const body_enc = encodeURIComponent(body);
+    // Android Chrome limits mailto: URLs. If body is too long, open with subject only
+    // and user can paste — but try full first.
+    const fullUrl = `mailto:${toEmail}?subject=${subject_enc}&body=${body_enc}`;
+    const shortUrl = `mailto:${toEmail}?subject=${subject_enc}&body=${encodeURIComponent(rows + "\n\nΣΥΝΟΛΟ: " + (total > 0 ? total.toFixed(2) + " EUR" : "-"))}`;
+    const url = fullUrl.length < 2000 ? fullUrl : shortUrl;
     const a = document.createElement("a");
-    a.href = mailto;
+    a.href = url;
     a.target = "_blank";
     a.rel = "noopener";
     document.body.appendChild(a);
