@@ -34,7 +34,7 @@ type BatchResult = {
   isDone: boolean;
 };
 
-const BATCH_SIZE = 30;
+const BATCH_SIZE = 15;
 
 export default function ImportRecipesPage() {
   const fileRef = useRef<HTMLInputElement>(null);
@@ -89,16 +89,34 @@ export default function ImportRecipesPage() {
     while (batchStart < recipes.length) {
       setStatusMsg(`Εισαγωγή ${batchStart + 1}–${Math.min(batchStart + BATCH_SIZE, recipes.length)} από ${recipes.length}…`);
 
-      const res = await fetch("/api/import-recipes", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ recipes, batchStart, batchSize: BATCH_SIZE, skipExisting }),
-      });
+      // Timeout after 25s to avoid hanging on a stuck batch
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 25000);
+
+      let res: Response;
+      try {
+        res = await fetch("/api/import-recipes", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ recipes, batchStart, batchSize: BATCH_SIZE, skipExisting }),
+          signal: controller.signal,
+        });
+      } catch (fetchErr) {
+        clearTimeout(timeoutId);
+        // Timeout or network error — skip this batch and continue
+        accErrors.push(`Batch ${batchStart}: timeout ή σφάλμα δικτύου — παράλειψη`);
+        batchStart += BATCH_SIZE;
+        setProgress(Math.round((batchStart / recipes.length) * 100));
+        setAllErrors([...accErrors]);
+        continue;
+      }
+      clearTimeout(timeoutId);
 
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
         accErrors.push(`Batch ${batchStart}: ${j.error || res.statusText}`);
-        break;
+        batchStart += BATCH_SIZE;
+        continue;
       }
 
       const result: BatchResult = await res.json();
