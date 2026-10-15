@@ -61,7 +61,7 @@ async function exportRecipeIngredients(
     };
   }
   const bold   = (sz=11): CellStyle => ({ font: { bold: true, sz, color: { rgb: "000000" } } });
-  const hdrBlu = (sz=9): CellStyle => ({ font: { bold: true, sz, color: { rgb: "FFFFFF" } }, fill: { fgColor: { rgb: BLU }, patternType: "solid" } });
+  const hdrBlu = (sz=9): CellStyle => ({ font: { bold: true, sz, color: { rgb: "FFFFFF" } }, fill: { fgColor: { rgb: BLU }, patternType: "solid" }, alignment: { horizontal: "center", vertical: "center" } });
   const hdrLbl = (sz=9): CellStyle => ({ font: { bold: true, sz }, fill: { fgColor: { rgb: LBL }, patternType: "solid" } });
   const grn    = (sz=9): CellStyle => ({ font: { bold: true, sz }, fill: { fgColor: { rgb: GRN }, patternType: "solid" } });
   const ylw    = (sz=9): CellStyle => ({ font: { bold: true, sz }, fill: { fgColor: { rgb: YLW }, patternType: "solid" } });
@@ -258,8 +258,8 @@ function printRecipePDF(recipe: Recipe, ingredients: DraftIngredient[], locale: 
 
   /* HEADER */
   .hdr { background:#1a5276; color:#fff; display:flex; align-items:center;
-         justify-content:space-between; padding:5px 10px; margin-bottom:4px; }
-  .hdr-left  { font-size:16px; font-weight:900; font-style:italic; letter-spacing:1px; }
+         justify-content:center; padding:5px 10px; margin-bottom:4px; }
+  .hdr-left  { font-size:16px; font-weight:900; font-style:italic; letter-spacing:1px; text-align:center; }
   .hdr-right { font-size:10px; font-weight:bold; }
 
   /* Όνομα συνταγής */
