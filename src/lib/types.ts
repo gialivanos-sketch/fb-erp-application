@@ -36,6 +36,8 @@ export interface SupplierProduct {
   category: string;
   unit: string;
   basePrice: string;
+  listPrice: string | null;
+  discountPercent: string;
   qualityGrade: string | null;
   regionOfOrigin: string | null;
   isContractPrice: boolean | null;
