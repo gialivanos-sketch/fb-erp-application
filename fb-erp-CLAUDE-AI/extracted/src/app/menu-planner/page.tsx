@@ -19,6 +19,8 @@ export default function MenuPlannerPage() {
   const [menuRecipes, setMenuRecipes] = useState<MenuRecipe[]>([]);
   const [showAddRecipe, setShowAddRecipe] = useState(false);
   const [recipeSearch, setRecipeSearch] = useState("");
+  const [showConsumption, setShowConsumption] = useState(false);
+  const [coverCount, setCoverCount] = useState(1); // αριθμός ατόμων για αναφορά
 
   // Φιλτράρισμα συνταγών βάσει αναζήτησης
   const filteredRecipes = useMemo(() => {
@@ -29,6 +31,34 @@ export default function MenuPlannerPage() {
       (r.nameEn && r.nameEn.toLowerCase().includes(q))
     );
   }, [allRecipes, recipeSearch]);
+
+  // Υπολογισμός ανάλωσης υλικών για δεδομένο αριθμό ατόμων
+  const consumptionItems = useMemo(() => {
+    if (!showConsumption) return [];
+    const map = new Map<string, { name: string; unit: string; qty: number; cost: number }>();
+    for (const mr of menuRecipes) {
+      // Βρίσκουμε τη συνταγή στο context
+      const recipe = allRecipes.find(r => r.id === mr.recipeId);
+      if (!recipe) continue;
+      // Πολλαπλασιαστής: για μερίδα × covers, για kg × 1 (ως έχει)
+      const multiplier = mr.portionType === "portion"
+        ? coverCount / (Number(recipe.portionYield) || 1)
+        : 1;
+      for (const ing of recipe.ingredients || []) {
+        const key = `${ing.ingredientName}__${ing.unit}`;
+        const existing = map.get(key);
+        const qty = Number(ing.quantity) * multiplier;
+        const cost = Number(ing.totalCost) * multiplier;
+        if (existing) {
+          existing.qty += qty;
+          existing.cost += cost;
+        } else {
+          map.set(key, { name: ing.ingredientName, unit: ing.unit, qty, cost });
+        }
+      }
+    }
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name, "el"));
+  }, [showConsumption, menuRecipes, allRecipes, coverCount]);
 
   function loadMenu(menu: Menu) {
     if (!menu) return;
@@ -127,6 +157,11 @@ export default function MenuPlannerPage() {
       <PageHeader title={t("headerMenuPlanner")} subtitle="Κοστολόγηση Μενού & Εξαγωγή">
         <button onClick={newMenu} className="erp-btn-primary">➕ {t("btnNewMenu")}</button>
         {editing && <button onClick={saveMenu} disabled={saving} className="erp-btn-success">{saving ? "…" : "💾"} {t("btnSaveMenu")}</button>}
+        {editing && menuRecipes.length > 0 && (
+          <button onClick={() => setShowConsumption(true)} className="erp-btn-secondary">
+            📋 {locale === "gr" ? "Αναφορά Ανάλωσης" : "Consumption Report"}
+          </button>
+        )}
         {editing && <button onClick={() => setEditing(false)} className="erp-btn-secondary">✕ {locale === "gr" ? "Ακύρωση" : "Cancel"}</button>}
         {editing && <button onClick={() => window.print()} className="erp-btn-secondary">🖨️ {t("btnPrint")}</button>}
       </PageHeader>
@@ -288,7 +323,6 @@ export default function MenuPlannerPage() {
         size="lg"
       >
         <div className="space-y-3">
-          {/* Αναζήτηση */}
           <input
             type="text"
             autoFocus
@@ -301,8 +335,6 @@ export default function MenuPlannerPage() {
             {filteredRecipes.length} {locale === "gr" ? "συνταγές" : "recipes"}
             {recipeSearch && ` (από ${allRecipes.length})`}
           </div>
-
-          {/* Λίστα αποτελεσμάτων */}
           <div className="space-y-1 max-h-[380px] overflow-y-auto">
             {filteredRecipes.length === 0
               ? <div className="text-center py-8 text-slate-400">{locale === "gr" ? "Δεν βρέθηκαν συνταγές" : "No recipes found"}</div>
@@ -315,7 +347,6 @@ export default function MenuPlannerPage() {
                   <div className="flex items-center gap-2 flex-shrink-0">
                     <Badge color="blue">{r?.portionYield} {locale === "gr" ? "μερ." : "pcs"}</Badge>
                     <Badge color="green">€{Number(r?.totalCost ?? 0).toFixed(2)}</Badge>
-                    {/* Κουμπιά επιλογής τύπου */}
                     <button
                       onClick={() => addRecipe(r, "portion")}
                       className="erp-btn-primary text-xs px-2 py-1"
@@ -333,6 +364,104 @@ export default function MenuPlannerPage() {
                   </div>
                 </div>
               ))}
+          </div>
+        </div>
+      </Modal>
+
+      {/* Modal Αναφοράς Ανάλωσης */}
+      <Modal
+        isOpen={showConsumption}
+        onClose={() => setShowConsumption(false)}
+        title={locale === "gr" ? `📋 Αναφορά Ανάλωσης — ${menuTitle}` : `📋 Consumption Report — ${menuTitle}`}
+        size="lg"
+      >
+        <div className="space-y-4">
+          {/* Επιλογή αριθμού ατόμων */}
+          <div className="flex items-center gap-4 p-4 bg-blue-50 rounded-lg">
+            <label className="font-medium text-sm whitespace-nowrap">
+              {locale === "gr" ? "👥 Αριθμός Ατόμων:" : "👥 Number of Covers:"}
+            </label>
+            <input
+              type="number"
+              value={coverCount}
+              onChange={e => setCoverCount(Math.max(1, Number(e.target.value)))}
+              className="erp-input w-24 text-center font-bold text-lg"
+              min="1"
+              step="1"
+            />
+            <span className="text-xs text-slate-500">
+              {locale === "gr"
+                ? "Οι ποσότητες υλικών υπολογίζονται για τις συνταγές Μερίδας. Οι συνταγές Κιλό δεν αλλάζουν."
+                : "Ingredient quantities are calculated for Portion-type recipes. Kg-type recipes stay fixed."}
+            </span>
+          </div>
+
+          {/* Σύνοψη */}
+          <div className="grid grid-cols-3 gap-3 text-center">
+            <div className="bg-blue-50 rounded-lg p-3">
+              <div className="text-2xl font-bold text-blue-700">{menuRecipes.length}</div>
+              <div className="text-xs text-slate-500">{locale === "gr" ? "Συνταγές" : "Recipes"}</div>
+            </div>
+            <div className="bg-green-50 rounded-lg p-3">
+              <div className="text-2xl font-bold text-green-700">{coverCount}</div>
+              <div className="text-xs text-slate-500">{locale === "gr" ? "Άτομα" : "Covers"}</div>
+            </div>
+            <div className="bg-amber-50 rounded-lg p-3">
+              <div className="text-2xl font-bold text-amber-700">{consumptionItems.length}</div>
+              <div className="text-xs text-slate-500">{locale === "gr" ? "Υλικά" : "Ingredients"}</div>
+            </div>
+          </div>
+
+          {/* Πίνακας υλικών */}
+          {consumptionItems.length === 0 ? (
+            <div className="text-center py-8 text-slate-400">
+              {locale === "gr"
+                ? "Δεν βρέθηκαν υλικά. Οι συνταγές πρέπει να έχουν καταχωρημένα υλικά."
+                : "No ingredients found. Recipes must have ingredients recorded."}
+            </div>
+          ) : (
+            <div className="overflow-y-auto max-h-[400px]">
+              <table className="erp-table">
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>{locale === "gr" ? "Υλικό" : "Ingredient"}</th>
+                    <th>{locale === "gr" ? "Ποσότητα" : "Quantity"}</th>
+                    <th>{locale === "gr" ? "Μονάδα" : "Unit"}</th>
+                    <th>{locale === "gr" ? "Κόστος" : "Cost"}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {consumptionItems.map((item, i) => (
+                    <tr key={i}>
+                      <td className="text-xs text-slate-400">{i + 1}</td>
+                      <td className="font-medium">{item.name}</td>
+                      <td className="font-bold text-blue-700">
+                        {item.qty % 1 === 0 ? item.qty.toFixed(0) : item.qty.toFixed(3)}
+                      </td>
+                      <td className="text-slate-500">{item.unit}</td>
+                      <td className="text-emerald-700">{fmt(item.cost)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="bg-slate-50 font-bold">
+                    <td colSpan={4} className="text-right">{t("total")}:</td>
+                    <td className="text-emerald-700">{fmt(consumptionItems.reduce((s, i) => s + i.cost, 0))}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
+
+          {/* Print button */}
+          <div className="flex justify-end gap-2 pt-2">
+            <button onClick={() => window.print()} className="erp-btn-secondary">
+              🖨️ {locale === "gr" ? "Εκτύπωση" : "Print"}
+            </button>
+            <button onClick={() => setShowConsumption(false)} className="erp-btn-primary">
+              ✓ {locale === "gr" ? "Κλείσιμο" : "Close"}
+            </button>
           </div>
         </div>
       </Modal>
