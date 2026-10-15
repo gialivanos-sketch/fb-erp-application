@@ -198,7 +198,14 @@ export default function ConsumptionPage() {
     ].join("\n");
 
     const mailto = `mailto:${toEmail}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-    window.location.href = mailto;
+    // Use <a> click trick for better mobile compatibility
+    const a = document.createElement("a");
+    a.href = mailto;
+    a.target = "_blank";
+    a.rel = "noopener";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
   }, [suppliers, menu]);
 
   // Group by supplier for purchase order summary

@@ -443,11 +443,50 @@ export default function DraftOrderPage() {
             <button onClick={() => window.print()} className="erp-btn-secondary">🖨️ {t("btnPrint")}</button>
             <button onClick={handleExportPDF} className="erp-btn-secondary">📄 {t("btnExportPDF")}</button>
             <button onClick={() => {
-              const s = suppliers.find((s) => s.id === selectedSupplier);
-              alert(s?.contactEmail
-                ? (locale === "gr" ? "📧 Email στάλθηκε στο " : "📧 Email sent to ") + s.contactEmail
-                : (locale === "gr" ? "⚠️ Δεν βρέθηκε email προμηθευτή" : "⚠️ No supplier email found"));
-            }} className="erp-btn-secondary">📧 {t("btnSendEmail")}</button>
+              const s = suppliers.find((sup) => sup.id === selectedSupplier);
+              if (!s?.contactEmail) {
+                window.alert(locale === "gr" ? "⚠️ Δεν βρέθηκε email προμηθευτή" : "⚠️ No supplier email found");
+                return;
+              }
+              const today = new Date(orderDate).toLocaleDateString("el-GR", { day: "2-digit", month: "2-digit", year: "numeric" });
+              const supplierName = locale === "gr" ? s.name : (s.nameEn || s.name);
+              const subject = `Παραγγελία – NOE BEACH CLUB – ${today}`;
+              const rows = items.map((item, i) =>
+                `${i + 1}. ${item.productName}  |  Ποσ.: ${item.orderedQuantity} ${item.unit}  |  Τιμή/μον.: €${item.basePrice.toFixed(2)}  |  ΦΠΑ: ${item.vatPercent}%  |  Σύνολο: €${item.grossAmount.toFixed(2)}`
+              ).join("\n");
+              const body = [
+                `Αγαπητοί,`,
+                ``,
+                `Σας αποστέλλουμε την παραγγελία μας ημερομηνίας ${today}.`,
+                ``,
+                `─────────────────────────────────────`,
+                `ΠΑΡΑΓΓΕΛΙΑ`,
+                `Ημερομηνία: ${today}`,
+                `Προμηθευτής: ${supplierName}`,
+                `─────────────────────────────────────`,
+                ``,
+                rows,
+                ``,
+                `─────────────────────────────────────`,
+                `ΚΑΘΑΡΗ ΑΞΙΑ:  €${totalNet.toFixed(2)}`,
+                `ΦΠΑ:          €${totalVat.toFixed(2)}`,
+                `ΣΥΝΟΛΟ:       €${totalGross.toFixed(2)}`,
+                `─────────────────────────────────────`,
+                ``,
+                `Παρακαλούμε επιβεβαιώστε τη λήψη και τη διαθεσιμότητα των ειδών.`,
+                ``,
+                `Με εκτίμηση,`,
+                `NOE BEACH CLUB`,
+              ].join("\n");
+              const mailto = `mailto:${s.contactEmail}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+              const a = document.createElement("a");
+              a.href = mailto;
+              a.target = "_blank";
+              a.rel = "noopener";
+              document.body.appendChild(a);
+              a.click();
+              document.body.removeChild(a);
+            }} className="erp-btn-secondary" disabled={items.length === 0 || !selectedSupplier}>📧 {t("btnSendEmail")}</button>
           </div>
         </div>
       </div>
