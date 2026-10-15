@@ -34,16 +34,16 @@ export async function POST(req: NextRequest) {
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet(isGr ? "Συνταγή" : "Recipe");
 
-    // ── Πλάτη στηλών A–H (8 στήλες) ──
+    // ── Πλάτη στηλών A–H (8 στήλες, συνολικά ~110 chars = ~A4 portrait) ──
     ws.columns = [
-      { width: 36 }, // A — Υλικό / Labels
-      { width: 10 }, // B — Μονάδες
-      { width: 13 }, // C — Τιμή/μον
-      { width: 14 }, // D — Ποσ/μερίδα
-      { width: 15 }, // E — Συνολική ποσ
-      { width: 20 }, // F — Κόστος/μερίδα
-      { width: 15 }, // G — Κόστος σύνολο
-      { width: 14 }, // H — Τιμές κοστολόγησης
+      { width: 28 }, // A — Υλικό / Labels
+      { width:  9 }, // B — Μονάδες
+      { width: 11 }, // C — Τιμή/μον
+      { width: 12 }, // D — Ποσ/μερίδα
+      { width: 12 }, // E — Συνολική ποσ
+      { width: 14 }, // F — Κόστος/μερίδα
+      { width: 13 }, // G — Κόστος σύνολο
+      { width: 12 }, // H — Τιμές κοστολόγησης
     ];
 
     // ── Βοηθητικές συναρτήσεις ──
@@ -70,7 +70,7 @@ export async function POST(req: NextRequest) {
     hdr.font      = { bold: true, size: 18, italic: true, color: { argb: `FF${WHT}` } };
     hdr.fill      = fill(BLU);
     hdr.alignment = { horizontal: "center", vertical: "middle" };
-    ws.getRow(r).height = 32;
+    ws.getRow(r).height = 26;
     r++;
 
     // ════════════════════════════════════════════════════
@@ -99,7 +99,7 @@ export async function POST(req: NextRequest) {
     ws.getCell(`H${r}`).fill      = fill(LBL);
     ws.getCell(`H${r}`).alignment = { horizontal: "center", vertical: "middle" };
     ws.getCell(`H${r}`).border    = thin();
-    ws.getRow(r).height = 24;
+    ws.getRow(r).height = 20;
     r++;
 
     // ════════════════════════════════════════════════════
@@ -123,11 +123,11 @@ export async function POST(req: NextRequest) {
     ws.getCell(`E${r}`).value     = allergens.join(", ") || "—";
     ws.getCell(`E${r}`).font      = { size: 9, italic: true };
     ws.getCell(`E${r}`).border    = thin();
-    ws.getRow(r).height = 18;
+    ws.getRow(r).height = 16;
     r++;
 
     // κενό διαχωριστικό
-    ws.getRow(r).height = 6;
+    ws.getRow(r).height = 4;
     r++;
 
     // ════════════════════════════════════════════════════
@@ -152,7 +152,7 @@ export async function POST(req: NextRequest) {
       cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
       cell.border    = med();
     });
-    ws.getRow(r).height = 32;
+    ws.getRow(r).height = 26;
     r++;
 
     // ════════════════════════════════════════════════════
@@ -183,7 +183,7 @@ export async function POST(req: NextRequest) {
         if (i >= 2) cell.numFmt = "#,##0.0000";
       });
       ws.getCell(`H${r}`).border = thin();
-      ws.getRow(r).height = 17;
+      ws.getRow(r).height = 14;
       r++;
     });
 
@@ -193,7 +193,7 @@ export async function POST(req: NextRequest) {
         ws.getCell(`${c}${r}`).border = thin();
         ws.getCell(`${c}${r}`).fill   = i % 2 === 1 ? fill(LGRY) : fill(WHT);
       });
-      ws.getRow(r).height = 17;
+      ws.getRow(r).height = 14;
       r++;
     }
 
@@ -240,7 +240,7 @@ export async function POST(req: NextRequest) {
     ws.getCell(`H${r}`).alignment = { horizontal: "center", vertical: "middle" };
     ws.getCell(`H${r}`).border    = med();
     ws.getCell(`H${r}`).numFmt    = "#,##0.000";
-    ws.getRow(r).height = 22;
+    ws.getRow(r).height = 18;
     r++;
     r++; // κενό
 
@@ -253,7 +253,7 @@ export async function POST(req: NextRequest) {
     ws.getCell(`A${r}`).fill      = fill(BLU);
     ws.getCell(`A${r}`).alignment = { horizontal: "center", vertical: "middle" };
     ws.getCell(`A${r}`).border    = med();
-    ws.getRow(r).height = 26;
+    ws.getRow(r).height = 20;
     r++;
 
     // ════════════════════════════════════════════════════
@@ -293,7 +293,7 @@ export async function POST(req: NextRequest) {
       vCell.border  = thin();
       vCell.alignment = { horizontal: "right", vertical: "middle" };
       if (typeof value === "number") vCell.numFmt = "€#,##0.0000";
-      ws.getRow(r).height = highlight ? 20 : 17;
+      ws.getRow(r).height = highlight ? 17 : 14;
       r++;
     });
 
@@ -329,6 +329,26 @@ export async function POST(req: NextRequest) {
     ws.getCell(`A${r}`).value     = `${isGr ? "ΗΜΕΡΟΜΗΝΙΑ ΕΚΤΥΠΩΣΕΙΣ:" : "PRINT DATE:"}  ${today}`;
     ws.getCell(`A${r}`).font      = { size: 8, color: { argb: "FF888888" } };
     ws.getCell(`A${r}`).alignment = { horizontal: "right" };
+
+    // ════════════════════════════════════════════════════
+    // Print / Page setup — fit to 1 A4 page
+    // ════════════════════════════════════════════════════
+    ws.pageSetup = {
+      paperSize:       9,          // A4
+      orientation:     "portrait",
+      fitToPage:       true,
+      fitToWidth:      1,          // χώρεσε σε 1 στήλη
+      fitToHeight:     0,          // 0 = όσες σελίδες χρειαστεί κατακόρυφα
+      horizontalCentered: true,
+      margins: {
+        left: 0.4, right: 0.4,
+        top:  0.5, bottom: 0.5,
+        header: 0.2, footer: 0.2,
+      },
+    };
+
+    // Τύπωσε επικεφαλίδες στηλών σε κάθε σελίδα
+    ws.pageSetup.printTitlesRow = `1:5`;
 
     // ════════════════════════════════════════════════════
     // Buffer + Response
