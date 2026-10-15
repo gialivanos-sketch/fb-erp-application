@@ -73,9 +73,8 @@ async function exportRecipeIngredients(
   // ── ROW 0: Τίτλος "RECIPE BUILDER" ──
   wc(0, "RECIPE BUILDER", hdrBlu(14));
   wc(1, ""); wc(2, ""); wc(3, ""); wc(4, ""); wc(5, ""); wc(6, "");
-  wc(7, isGr ? "ΚΑΡΤΑ ΣΥΝΤΑΓΗΣ" : "RECIPE CARD", hdrBlu(10));
-  merges.push(merge({r,c:0},{r,c:6}));
-  merges.push(merge({r,c:7},{r,c:9}));
+  wc(7, ""); wc(8, ""); wc(9, "");
+  merges.push(merge({r,c:0},{r,c:9}));
   r++;
 
   // ── ROW 1: Ετικέτα ονόματος ──
@@ -336,7 +335,6 @@ function printRecipePDF(recipe: Recipe, ingredients: DraftIngredient[], locale: 
   <!-- HEADER -->
   <div class="hdr">
     <div class="hdr-left">RECIPE BUILDER</div>
-    <div class="hdr-right">WWW.YANNISSTANITSAS.COM</div>
   </div>
 
   <!-- Ετικέτα ονόματος -->
