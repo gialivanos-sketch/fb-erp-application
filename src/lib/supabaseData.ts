@@ -1023,6 +1023,86 @@ export async function deleteRecipeIngredient(id: number): Promise<void> {
   if (error) throw error;
 }
 
+// ============================================================
+// ingredient_supplier_map — τιμές υλικών από προσφορές
+// ============================================================
+
+// Φέρε mapping για λίστα ingredient names (batch)
+export async function fetchIngredientSupplierMap(
+  ingredientNames: string[]
+): Promise<Record<string, { supplierProductId: number; productName: string; basePrice: string; supplierId: number; supplierName: string; unit: string } | null>> {
+  if (ingredientNames.length === 0) return {};
+  const client = requireClient();
+  const { data, error } = await (client.from("ingredient_supplier_map") as any)
+    .select("ingredient_name, supplier_product_id, is_manual, match_score, supplier_products(id, product_name, base_price, unit, supplier_id, suppliers(id, name))")
+    .in("ingredient_name", ingredientNames);
+  if (error) throw error;
+  const result: Record<string, { supplierProductId: number; productName: string; basePrice: string; supplierId: number; supplierName: string; unit: string } | null> = {};
+  for (const row of (data ?? []) as any[]) {
+    const sp = row.supplier_products;
+    if (sp) {
+      result[row.ingredient_name] = {
+        supplierProductId: sp.id,
+        productName: sp.product_name,
+        basePrice: sp.base_price,
+        supplierId: sp.supplier_id,
+        supplierName: sp.suppliers?.name ?? "",
+        unit: sp.unit,
+      };
+    } else {
+      result[row.ingredient_name] = null;
+    }
+  }
+  return result;
+}
+
+// Φέρε όλους τους διαθέσιμους προμηθευτές για ένα ingredient name (για dropdown)
+export async function fetchIngredientSupplierOptions(
+  ingredientName: string
+): Promise<{ supplierProductId: number; productName: string; basePrice: string; supplierId: number; supplierName: string; unit: string }[]> {
+  const client = requireClient();
+  // fuzzy: ψάχνουμε supplier_products με παρόμοιο όνομα μέσω SQL function
+  const { data, error } = await client.rpc("get_supplier_options_for_ingredient", { p_ingredient_name: ingredientName } as any) as any;
+  if (error) {
+    // fallback: απλό ilike search
+    const { data: fb } = await (client.from("supplier_products") as any)
+      .select("id, product_name, base_price, unit, supplier_id, suppliers(id, name)")
+      .ilike("product_name", `%${ingredientName.slice(0, 6)}%`)
+      .limit(10);
+    return (fb ?? []).map((sp: any) => ({
+      supplierProductId: sp.id,
+      productName: sp.product_name,
+      basePrice: sp.base_price,
+      supplierId: sp.supplier_id,
+      supplierName: sp.suppliers?.name ?? "",
+      unit: sp.unit,
+    }));
+  }
+  return (data ?? []).map((sp: any) => ({
+    supplierProductId: sp.id,
+    productName: sp.product_name,
+    basePrice: sp.base_price,
+    supplierId: sp.supplier_id,
+    supplierName: sp.supplier_name ?? "",
+    unit: sp.unit,
+  }));
+}
+
+// Αποθήκευσε manual override προμηθευτή για υλικό
+export async function setIngredientSupplierOverride(
+  ingredientName: string,
+  supplierProductId: number
+): Promise<void> {
+  const client = requireClient();
+  const { error } = await (client.from("ingredient_supplier_map") as any).upsert({
+    ingredient_name: ingredientName,
+    supplier_product_id: supplierProductId,
+    is_manual: true,
+    updated_at: new Date().toISOString(),
+  }, { onConflict: "ingredient_name" });
+  if (error) throw error;
+}
+
 export async function createRecipesBulk(
   rows: { name: string; nameEn?: string | null; portionYield: string; totalCost: string; sellingPrice: string; profitMarginPercent: string }[]
 ): Promise<number> {

@@ -241,6 +241,31 @@ export interface Unit {
   description: string | null;
 }
 
+// Αντιστοίχιση υλικού συνταγής → supplier product (με τιμή)
+export interface IngredientSupplierMap {
+  id: number;
+  ingredientName: string;
+  supplierProductId: number | null;
+  isManual: boolean;
+  matchScore: number | null;
+  // joined fields
+  productName?: string;
+  basePrice?: string;
+  supplierId?: number;
+  supplierName?: string;
+  unit?: string;
+}
+
+// Για dropdown επιλογής προμηθευτή ανά υλικό στην αναφορά ανάλωσης
+export interface IngredientSupplierOption {
+  supplierProductId: number;
+  productName: string;
+  basePrice: string;
+  supplierId: number;
+  supplierName: string;
+  unit: string;
+}
+
 export interface IngestionLog {
   id: number;
   fileName: string;

@@ -24,6 +24,11 @@ export default function MenuPlannerPage() {
   const [loadingIngredients, setLoadingIngredients] = useState(false);
   // recipeIngredients: recipeId -> ingredients φορτωμένα από DB
   const [recipeIngredients, setRecipeIngredients] = useState<Record<number, { name: string; unit: string; qty: number; unitCost: number }[]>>({});
+  // supplierPrices: ingredientName -> τρέχουσα τιμή από ingredient_supplier_map
+  const [supplierPrices, setSupplierPrices] = useState<Record<string, { supplierProductId: number; productName: string; basePrice: string; supplierId: number; supplierName: string; unit: string } | null>>({});
+  // supplierOptions: ingredientName -> διαθέσιμοι προμηθευτές (για dropdown)
+  const [supplierOptions, setSupplierOptions] = useState<Record<string, { supplierProductId: number; productName: string; basePrice: string; supplierId: number; supplierName: string; unit: string }[]>>({});
+  const [loadingOptions, setLoadingOptions] = useState<string | null>(null); // ingredient name που φορτώνει options
 
   // Φιλτράρισμα συνταγών βάσει αναζήτησης
   const filteredRecipes = useMemo(() => {
@@ -35,11 +40,14 @@ export default function MenuPlannerPage() {
     );
   }, [allRecipes, recipeSearch]);
 
-  // Άνοιγμα αναφοράς: φόρτωση υλικών από DB για όλες τις συνταγές του μενού
+  // Άνοιγμα αναφοράς: φόρτωση υλικών + τιμών προμηθευτών από DB
   async function openConsumption() {
     setLoadingIngredients(true);
     setShowConsumption(true);
+    setSupplierPrices({});
+    setSupplierOptions({});
     try {
+      // 1. Φόρτωσε υλικά για κάθε συνταγή
       const fetched: Record<number, { name: string; unit: string; qty: number; unitCost: number }[]> = {};
       for (const mr of menuRecipes) {
         if (!fetched[mr.recipeId]) {
@@ -53,22 +61,57 @@ export default function MenuPlannerPage() {
         }
       }
       setRecipeIngredients(fetched);
+
+      // 2. Συλλογή μοναδικών ονομάτων υλικών
+      const allIngNames = [...new Set(Object.values(fetched).flat().map(i => i.name))];
+
+      // 3. Φόρτωσε τιμές από ingredient_supplier_map
+      if (allIngNames.length > 0) {
+        const prices = await db.fetchIngredientSupplierMap(allIngNames);
+        setSupplierPrices(prices);
+      }
     } catch {
-      // αν αποτύχει, τα υλικά μένουν κενά
+      // αν αποτύχει, τα υλικά μένουν χωρίς τιμές
     } finally {
       setLoadingIngredients(false);
+    }
+  }
+
+  // Φόρτωσε τις επιλογές προμηθευτών για ένα υλικό (για dropdown)
+  async function loadSupplierOptions(ingredientName: string) {
+    if (supplierOptions[ingredientName]) return; // ήδη φορτωμένα
+    setLoadingOptions(ingredientName);
+    try {
+      const opts = await db.fetchIngredientSupplierOptions(ingredientName);
+      setSupplierOptions(prev => ({ ...prev, [ingredientName]: opts }));
+    } catch {
+      setSupplierOptions(prev => ({ ...prev, [ingredientName]: [] }));
+    } finally {
+      setLoadingOptions(null);
+    }
+  }
+
+  // Αλλαγή προμηθευτή για υλικό (manual override)
+  async function changeIngredientSupplier(ingredientName: string, supplierProductId: number, newPrice: string, newSupplierName: string, newProductName: string, newUnit: string, supplierId: number) {
+    try {
+      await db.setIngredientSupplierOverride(ingredientName, supplierProductId);
+      setSupplierPrices(prev => ({
+        ...prev,
+        [ingredientName]: { supplierProductId, productName: newProductName, basePrice: newPrice, supplierId, supplierName: newSupplierName, unit: newUnit },
+      }));
+    } catch {
+      // silent fail
     }
   }
 
   // Υπολογισμός ανάλωσης υλικών για δεδομένο αριθμό ατόμων
   const consumptionItems = useMemo(() => {
     if (!showConsumption) return [];
-    const map = new Map<string, { name: string; unit: string; qty: number; cost: number }>();
+    const map = new Map<string, { name: string; unit: string; qty: number; cost: number; unitCost: number; supplierName: string; hasPrice: boolean }>();
     for (const mr of menuRecipes) {
       const recipe = allRecipes.find(r => r.id === mr.recipeId);
       const ings = recipeIngredients[mr.recipeId] || [];
       if (ings.length === 0) continue;
-      // Πολλαπλασιαστής: για μερίδα × covers, για kg × 1 (ως έχει)
       const portionYield = Number(recipe?.portionYield) || 1;
       const multiplier = mr.portionType === "portion"
         ? coverCount / portionYield
@@ -76,18 +119,22 @@ export default function MenuPlannerPage() {
       for (const ing of ings) {
         const key = `${ing.name}__${ing.unit}`;
         const existing = map.get(key);
+        // Τιμή από supplier map (αν υπάρχει), αλλιώς 0
+        const spPrice = supplierPrices[ing.name];
+        const unitCost = spPrice ? Number(spPrice.basePrice) : 0;
+        const supplierName = spPrice ? spPrice.supplierName : "";
         const qty = ing.qty * multiplier;
-        const cost = ing.qty * ing.unitCost * multiplier;
+        const cost = unitCost * qty;
         if (existing) {
           existing.qty += qty;
           existing.cost += cost;
         } else {
-          map.set(key, { name: ing.name, unit: ing.unit, qty, cost });
+          map.set(key, { name: ing.name, unit: ing.unit, qty, cost, unitCost, supplierName, hasPrice: !!spPrice });
         }
       }
     }
     return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name, "el"));
-  }, [showConsumption, menuRecipes, allRecipes, recipeIngredients, coverCount]);
+  }, [showConsumption, menuRecipes, allRecipes, recipeIngredients, coverCount, supplierPrices]);
 
   function loadMenu(menu: Menu) {
     if (!menu) return;
@@ -455,40 +502,87 @@ export default function MenuPlannerPage() {
             </div>
           ) : (
             <div className="overflow-y-auto max-h-[400px]">
-              <table className="erp-table">
+              <table className="erp-table text-sm">
                 <thead>
                   <tr>
                     <th>#</th>
                     <th>{locale === "gr" ? "Υλικό" : "Ingredient"}</th>
-                    <th>{locale === "gr" ? "Ποσότητα" : "Quantity"}</th>
-                    <th>{locale === "gr" ? "Μονάδα" : "Unit"}</th>
-                    <th>{locale === "gr" ? "Κόστος" : "Cost"}</th>
+                    <th>{locale === "gr" ? "Ποσ." : "Qty"}</th>
+                    <th>{locale === "gr" ? "Μον." : "Unit"}</th>
+                    <th>{locale === "gr" ? "Τιμή/μον." : "Unit Price"}</th>
+                    <th>{locale === "gr" ? "Προμηθευτής" : "Supplier"}</th>
+                    <th>{locale === "gr" ? "Σύνολο" : "Total"}</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {consumptionItems.map((item, i) => (
-                    <tr key={i}>
-                      <td className="text-xs text-slate-400">{i + 1}</td>
-                      <td className="font-medium">{item.name}</td>
-                      <td className="font-bold text-blue-700">
-                        {item.qty % 1 === 0 ? item.qty.toFixed(0) : item.qty.toFixed(3)}
-                      </td>
-                      <td className="text-slate-500">{item.unit}</td>
-                      <td className="text-emerald-700">{fmt(item.cost)}</td>
-                    </tr>
-                  ))}
+                  {consumptionItems.map((item, i) => {
+                    const opts = supplierOptions[item.name] || [];
+                    const isLoadingOpts = loadingOptions === item.name;
+                    return (
+                      <tr key={i} className={!item.hasPrice ? "bg-amber-50" : ""}>
+                        <td className="text-xs text-slate-400">{i + 1}</td>
+                        <td className="font-medium">{item.name}</td>
+                        <td className="font-bold text-blue-700">
+                          {item.qty % 1 === 0 ? item.qty.toFixed(0) : item.qty.toFixed(3)}
+                        </td>
+                        <td className="text-slate-500">{item.unit}</td>
+                        <td className="text-slate-600">
+                          {item.hasPrice ? `€${item.unitCost.toFixed(2)}` : <span className="text-amber-500 text-xs">—</span>}
+                        </td>
+                        <td>
+                          {/* Dropdown αλλαγής προμηθευτή */}
+                          <div className="flex items-center gap-1">
+                            <span className="text-xs text-slate-500 truncate max-w-[80px]">{item.supplierName || "—"}</span>
+                            <button
+                              className="text-xs text-blue-500 hover:text-blue-700 underline whitespace-nowrap"
+                              onClick={async () => { await loadSupplierOptions(item.name); }}
+                              title={locale === "gr" ? "Αλλαγή προμηθευτή" : "Change supplier"}
+                            >
+                              {isLoadingOpts ? "⏳" : "✎"}
+                            </button>
+                          </div>
+                          {opts.length > 0 && (
+                            <select
+                              className="erp-select text-xs mt-1 w-full"
+                              value={supplierPrices[item.name]?.supplierProductId ?? ""}
+                              onChange={e => {
+                                const sel = opts.find(o => o.supplierProductId === Number(e.target.value));
+                                if (sel) changeIngredientSupplier(item.name, sel.supplierProductId, sel.basePrice, sel.supplierName, sel.productName, sel.unit, sel.supplierId);
+                              }}
+                            >
+                              {opts.map(o => (
+                                <option key={o.supplierProductId} value={o.supplierProductId}>
+                                  {o.supplierName} — {o.productName} €{Number(o.basePrice).toFixed(2)}/{o.unit}
+                                </option>
+                              ))}
+                            </select>
+                          )}
+                        </td>
+                        <td className={item.hasPrice ? "text-emerald-700 font-medium" : "text-slate-300"}>
+                          {item.hasPrice ? fmt(item.cost) : "—"}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
                 <tfoot>
                   <tr className="bg-slate-50 font-bold">
-                    <td colSpan={4} className="text-right">{t("total")}:</td>
+                    <td colSpan={6} className="text-right">{t("total")}:</td>
                     <td className="text-emerald-700">{fmt(consumptionItems.reduce((s, i) => s + i.cost, 0))}</td>
                   </tr>
                 </tfoot>
               </table>
+              {consumptionItems.some(i => !i.hasPrice) && (
+                <p className="text-xs text-amber-600 mt-2">
+                  ⚠️ {locale === "gr"
+                    ? "Τα τονισμένα υλικά δεν βρέθηκαν στις προσφορές — τιμή 0."
+                    : "Highlighted items have no supplier price — cost shown as 0."}
+                </p>
+              )}
             </div>
           )}
 
-          {/* Print button */}
+          {/* Κουμπιά */}
           <div className="flex justify-end gap-2 pt-2">
             <button onClick={() => window.print()} className="erp-btn-secondary">
               🖨️ {locale === "gr" ? "Εκτύπωση" : "Print"}
