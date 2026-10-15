@@ -1394,3 +1394,51 @@ export async function updateCompanySettings(input: Partial<Omit<CompanySettings,
   });
   if (error) throw error;
 }
+
+// ── SKU Mapping ──────────────────────────────────────────────────────────────
+export interface ProductSkuMapEntry {
+  id: number;
+  productName: string;
+  sku: string;
+  finalGroup: string;
+}
+
+export async function fetchProductSkuMap(): Promise<ProductSkuMapEntry[]> {
+  if (!supabase) throw new Error("Supabase not initialized");
+  const { data, error } = await (supabase as any)
+    .from("product_sku_map")
+    .select("id, product_name, sku, final_group")
+    .order("sku");
+  if (error) throw error;
+  return (data ?? []).map((r: any) => ({
+    id: r.id,
+    productName: r.product_name,
+    sku: r.sku,
+    finalGroup: r.final_group,
+  }));
+}
+
+export async function createProductSkuMapEntry(input: { productName: string; sku: string; finalGroup: string }): Promise<void> {
+  if (!supabase) throw new Error("Supabase not initialized");
+  const { error } = await (supabase as any).from("product_sku_map").insert({
+    product_name: input.productName,
+    sku: input.sku,
+    final_group: input.finalGroup,
+  });
+  if (error) throw error;
+}
+
+export async function updateProductSkuMapEntry(id: number, input: { sku?: string; finalGroup?: string }): Promise<void> {
+  if (!supabase) throw new Error("Supabase not initialized");
+  const update: Record<string, unknown> = {};
+  if (input.sku !== undefined) update.sku = input.sku;
+  if (input.finalGroup !== undefined) update.final_group = input.finalGroup;
+  const { error } = await (supabase as any).from("product_sku_map").update(update).eq("id", id);
+  if (error) throw error;
+}
+
+export async function deleteProductSkuMapEntry(id: number): Promise<void> {
+  if (!supabase) throw new Error("Supabase not initialized");
+  const { error } = await (supabase as any).from("product_sku_map").delete().eq("id", id);
+  if (error) throw error;
+}
