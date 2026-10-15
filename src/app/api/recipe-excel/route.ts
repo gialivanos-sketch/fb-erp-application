@@ -254,16 +254,23 @@ export async function POST(req: NextRequest) {
   // ── Παράγω buffer και επιστρέφω ──
   const buffer = await wb.xlsx.writeBuffer();
 
+  // ASCII-only fallback name (για Content-Disposition header compatibility)
   const safeName = (recipe.name as string)
-    .replace(/[^a-zA-Z0-9Ͱ-Ͽ_-]/g, "_")
-    .slice(0, 40);
-  const filename = `${safeName}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    .replace(/[^a-zA-Z0-9_-]/g, "_")   // strip ALL non-ASCII — no Unicode in headers
+    .replace(/_+/g, "_")
+    .slice(0, 40)
+    || "recipe";
+  const dateStr  = new Date().toISOString().slice(0, 10);
+  const filename = `${safeName}_${dateStr}.xlsx`;
+
+  // RFC 5987 encoded version for browsers that support it (preserves Greek name)
+  const utf8Name = encodeURIComponent(`${recipe.name as string}_${dateStr}.xlsx`);
 
   return new NextResponse(buffer, {
     status: 200,
     headers: {
       "Content-Type":        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      "Content-Disposition": `attachment; filename="${filename}"`,
+      "Content-Disposition": `attachment; filename="${filename}"; filename*=UTF-8''${utf8Name}`,
     },
   });
   } catch (err) {
