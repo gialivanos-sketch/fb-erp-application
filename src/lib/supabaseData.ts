@@ -1062,7 +1062,7 @@ export async function fetchIngredientSupplierOptions(
 ): Promise<{ supplierProductId: number; productName: string; basePrice: string; supplierId: number; supplierName: string; unit: string }[]> {
   const client = requireClient();
   // fuzzy: ψάχνουμε supplier_products με παρόμοιο όνομα μέσω SQL function
-  const { data, error } = await client.rpc("get_supplier_options_for_ingredient", { p_ingredient_name: ingredientName } as any) as any;
+  const { data, error } = await (client as any).rpc("get_supplier_options_for_ingredient", { p_ingredient_name: ingredientName });
   if (error) {
     // fallback: απλό ilike search
     const { data: fb } = await (client.from("supplier_products") as any)
