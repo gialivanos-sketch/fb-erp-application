@@ -1,10 +1,10 @@
 "use client";
 import { useState, useRef, useMemo, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { useLanguage } from "@/lib/context";
 import { PageHeader, Badge, Modal } from "@/components/shared";
-import type { Recipe } from "@/lib/types";
+import type { Recipe, OrderItem } from "@/lib/types";
 import * as db from "@/lib/supabaseData";
-import type { OrderItem } from "@/lib/types";
 
 const ALLERGEN_LIST = [
   "gluten","dairy","eggs","fish","shellfish","nuts",
@@ -74,7 +74,9 @@ export default function RecipePage() {
   const [ingResults, setIngResults] = useState<OrderItem[]>([]);
   const [ingLoading, setIngLoading] = useState(false);
   const [showIngDropdown, setShowIngDropdown] = useState(false);
+  const [dropdownRect, setDropdownRect] = useState<DOMRect | null>(null);
   const ingSearchRef = useRef<HTMLDivElement>(null);
+  const ingInputRef = useRef<HTMLInputElement>(null);
   const ingDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Saving
@@ -93,15 +95,33 @@ export default function RecipePage() {
         setShowIngDropdown(false);
       }
     }
+    // Ανανέωση θέσης dropdown κατά scroll/resize
+    function updateRect() {
+      if (ingInputRef.current && showIngDropdown) {
+        setDropdownRect(ingInputRef.current.getBoundingClientRect());
+      }
+    }
     document.addEventListener("mousedown", handle);
-    return () => document.removeEventListener("mousedown", handle);
-  }, []);
+    window.addEventListener("scroll", updateRect, true);
+    window.addEventListener("resize", updateRect);
+    return () => {
+      document.removeEventListener("mousedown", handle);
+      window.removeEventListener("scroll", updateRect, true);
+      window.removeEventListener("resize", updateRect);
+    };
+  }, [showIngDropdown]);
 
   // ─── Αναζήτηση υλικών από order_items (με debounce) ─────────────────────────
 
+  function openDropdown() {
+    if (ingInputRef.current) setDropdownRect(ingInputRef.current.getBoundingClientRect());
+    setShowIngDropdown(true);
+  }
+
   function handleIngSearchChange(val: string) {
     setIngSearch(val);
-    setShowIngDropdown(!!val.trim());
+    if (val.trim()) openDropdown();
+    else setShowIngDropdown(false);
     if (ingDebounce.current) clearTimeout(ingDebounce.current);
     if (!val.trim()) { setIngResults([]); return; }
     // Server-side ILIKE — δεν φορτώνουμε ολόκληρο τον πίνακα
@@ -535,18 +555,29 @@ export default function RecipePage() {
                 🧂 {locale === "gr" ? "Υλικά Συνταγής" : "Recipe Ingredients"}
               </h3>
               {/* Search box — αναζήτηση μόνο από Ιστορικό Παραγγελιών */}
-              <div className="relative" ref={ingSearchRef}>
+              <div ref={ingSearchRef}>
                 <input
+                  ref={ingInputRef}
                   type="text"
                   value={ingSearch}
                   onChange={(e) => handleIngSearchChange(e.target.value)}
-                  onFocus={() => { if (ingSearch.trim()) setShowIngDropdown(true); }}
+                  onFocus={() => { if (ingSearch.trim()) openDropdown(); }}
                   placeholder={locale === "gr" ? "🔍 Αναζήτηση από παραγγελίες…" : "🔍 Search from orders…"}
-                  className="erp-input text-xs py-1.5 w-64"
+                  className="erp-input text-xs py-1.5 w-72"
                   autoComplete="off"
                 />
-                {showIngDropdown && (
-                  <div className="absolute right-0 z-30 mt-1 w-96 max-h-72 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-2xl">
+                {/* Portal — βγαίνει έξω από κάθε overflow:hidden container */}
+                {showIngDropdown && dropdownRect && typeof document !== "undefined" && createPortal(
+                  <div
+                    style={{
+                      position: "fixed",
+                      top: dropdownRect.bottom + 4,
+                      left: dropdownRect.left,
+                      width: Math.max(dropdownRect.width, 420),
+                      zIndex: 9999,
+                    }}
+                    className="max-h-80 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-2xl"
+                  >
                     {ingLoading ? (
                       <div className="px-4 py-3 text-xs text-slate-400 text-center">
                         {locale === "gr" ? "Αναζήτηση…" : "Searching…"}
@@ -559,7 +590,7 @@ export default function RecipePage() {
                       ingResults.map((item) => (
                         <div
                           key={item.id}
-                          onClick={() => addIngredientFromOrderItem(item)}
+                          onMouseDown={(e) => { e.preventDefault(); addIngredientFromOrderItem(item); }}
                           className="px-4 py-2.5 cursor-pointer hover:bg-blue-50 border-b border-slate-50 last:border-0"
                         >
                           <div className="font-medium text-sm text-slate-800">{item.productName}</div>
@@ -575,7 +606,8 @@ export default function RecipePage() {
                         </div>
                       ))
                     )}
-                  </div>
+                  </div>,
+                  document.body
                 )}
               </div>
             </div>
