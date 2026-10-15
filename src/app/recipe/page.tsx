@@ -39,41 +39,100 @@ async function exportRecipeIngredients(
   const wsIng = XLSX.utils.json_to_sheet(ingRows);
   wsIng["!cols"] = [{ wch: 4 }, { wch: 35 }, { wch: 20 }, { wch: 10 }, { wch: 8 }, { wch: 14 }, { wch: 12 }];
 
-  // Φύλλο 2: Κοστολόγηση
-  const costRows = [
-    { "": locale === "gr" ? "Συνταγή" : "Recipe", " ": recipe.name },
-    { "": locale === "gr" ? "Μερίδες" : "Portions", " ": `${recipe.portionYield} ${recipe.portionUnit}` },
-    { "": "", " ": "" },
-    { "": locale === "gr" ? "Κόστος Υλικών €" : "Raw Material €", " ": costing.rawMaterial },
-    { "": locale === "gr" ? "Εργασία €" : "Labor €", " ": Number(recipe.laborCost) },
-    { "": locale === "gr" ? "Γεν.Έξοδα €" : "Overhead €", " ": Number(recipe.overheadCost) },
-    { "": locale === "gr" ? "Συνολικό Κόστος €" : "Total Cost €", " ": costing.total },
-    { "": locale === "gr" ? "Περιθώριο %" : "Margin %", " ": Number(recipe.profitMarginPercent) },
-    { "": locale === "gr" ? "Τιμή Πώλησης €" : "Selling Price €", " ": costing.selling },
-    { "": locale === "gr" ? "Τιμή Μενού (ΦΠΑ 24%) €" : "Menu Price (VAT 24%) €", " ": costing.menuVat },
-    { "": locale === "gr" ? "Τιμή/Μερίδα €" : "Price/Portion €", " ": costing.menuFinal },
-  ];
-  const wsCost = XLSX.utils.json_to_sheet(costRows);
-  wsCost["!cols"] = [{ wch: 28 }, { wch: 20 }];
-
-  // Φύλλο 3: Γενικά στοιχεία + Αλλεργίες + Τεχνικός Οδηγός
   const allergens: string[] = Array.isArray(recipe.allergens) ? recipe.allergens as string[] :
     typeof recipe.allergens === "string" ? JSON.parse(recipe.allergens || "[]") : [];
-  const infoRows = [
-    { "": locale === "gr" ? "Ονομασία (ΕΛ)" : "Name (GR)", " ": recipe.name },
-    { "": locale === "gr" ? "Ονομασία (EN)" : "Name (EN)", " ": recipe.nameEn ?? "" },
-    { "": locale === "gr" ? "Μερίδες" : "Portions", " ": `${recipe.portionYield} ${recipe.portionUnit}` },
-    { "": locale === "gr" ? "Αλλεργίες" : "Allergens", " ": allergens.join(", ") || "—" },
-    { "": "", " ": "" },
-    { "": locale === "gr" ? "Τεχνικός Οδηγός" : "Technical Guide", " ": recipe.technicalGuide ?? "" },
-  ];
-  const wsInfo = XLSX.utils.json_to_sheet(infoRows);
-  wsInfo["!cols"] = [{ wch: 22 }, { wch: 80 }];
 
+  // ── Ένα ενιαίο φύλλο, δομημένο σε ενότητες ──
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, wsInfo,  locale === "gr" ? "Στοιχεία" : "Details");
-  XLSX.utils.book_append_sheet(wb, wsIng,   locale === "gr" ? "Υλικά" : "Ingredients");
-  XLSX.utils.book_append_sheet(wb, wsCost,  locale === "gr" ? "Κοστολόγηση" : "Costing");
+  const ws: Record<string, unknown> = {};
+  let r = 0; // τρέχουσα γραμμή (0-based)
+
+  function cell(col: number, row: number) {
+    return XLSX.utils.encode_cell({ c: col, r: row });
+  }
+  function write(col: number, val: unknown, bold = false, bg?: string) {
+    const c = cell(col, r);
+    ws[c] = { v: val, t: typeof val === "number" ? "n" : "s" };
+    if (bold || bg) {
+      ws[c].s = {
+        font: bold ? { bold: true, sz: 11 } : { sz: 11 },
+        fill: bg ? { fgColor: { rgb: bg }, patternType: "solid" } : undefined,
+      };
+    }
+  }
+
+  // ── ΤΙΤΛΟΣ ────────────────────────────────────
+  write(0, recipe.name, true); write(1, recipe.nameEn ?? ""); r++;
+  write(0, locale === "gr" ? "Μερίδες:" : "Portions:"); write(1, `${recipe.portionYield} ${recipe.portionUnit}`); r++;
+  write(0, locale === "gr" ? "Αλλεργίες:" : "Allergens:"); write(1, allergens.join(", ") || "—"); r++;
+  r++; // κενή γραμμή
+
+  // ── ΥΛΙΚΑ — επικεφαλίδα ───────────────────────
+  const hdr = [
+    "#",
+    locale === "gr" ? "Υλικό" : "Ingredient",
+    locale === "gr" ? "Προμηθευτής" : "Supplier",
+    locale === "gr" ? "Ποσότητα" : "Qty",
+    locale === "gr" ? "Μονάδα" : "Unit",
+    locale === "gr" ? "Τιμή/μον. €" : "Unit Cost €",
+    locale === "gr" ? "Σύνολο €" : "Total €",
+  ];
+  hdr.forEach((h, c) => write(c, h, true, "D9E1F2"));
+  r++;
+
+  // ── ΥΛΙΚΑ — γραμμές ───────────────────────────
+  ingredients.forEach((ing, i) => {
+    write(0, i + 1);
+    write(1, ing.productName);
+    write(2, ing.supplierName ?? "");
+    write(3, ing.quantity);
+    write(4, ing.unit);
+    write(5, Number(ing.unitCost));
+    write(6, Number(ing.totalCost));
+    r++;
+  });
+
+  // Σύνολο υλικών
+  write(5, locale === "gr" ? "Κόστος Υλικών:" : "Raw Material:", true);
+  write(6, costing.rawMaterial, true);
+  r++;
+  r++; // κενή γραμμή
+
+  // ── ΚΟΣΤΟΛΟΓΗΣΗ — επικεφαλίδα ─────────────────
+  write(0, locale === "gr" ? "ΚΟΣΤΟΛΟΓΗΣΗ" : "COSTING", true, "E2EFDA");
+  write(1, "€", true, "E2EFDA");
+  r++;
+
+  const costLines: [string, number][] = [
+    [locale === "gr" ? "Κόστος Υλικών" : "Raw Material",           costing.rawMaterial],
+    [locale === "gr" ? "Κόστος Εργασίας" : "Labor Cost",           Number(recipe.laborCost)],
+    [locale === "gr" ? "Γενικά Έξοδα" : "Overhead",                Number(recipe.overheadCost)],
+    [locale === "gr" ? "Συνολικό Κόστος" : "Total Cost",           costing.total],
+    [locale === "gr" ? "Περιθώριο Κέρδους %" : "Profit Margin %",  Number(recipe.profitMarginPercent)],
+    [locale === "gr" ? "Τιμή Πώλησης" : "Selling Price",           costing.selling],
+    [locale === "gr" ? "Τιμή Μενού (ΦΠΑ 24%)" : "Menu Price (VAT 24%)", costing.menuVat],
+    [locale === "gr" ? "Τιμή ανά Μερίδα" : "Price per Portion",    costing.menuFinal],
+  ];
+  costLines.forEach(([label, val]) => {
+    write(0, label);
+    write(1, val);
+    r++;
+  });
+  r++; // κενή
+
+  // ── ΤΕΧΝΙΚΟΣ ΟΔΗΓΟΣ ───────────────────────────
+  if (recipe.technicalGuide) {
+    write(0, locale === "gr" ? "ΤΕΧΝΙΚΟΣ ΟΔΗΓΟΣ" : "TECHNICAL GUIDE", true, "FFF2CC");
+    r++;
+    write(0, recipe.technicalGuide);
+    r++;
+  }
+
+  // Εύρος φύλλου
+  ws["!ref"] = XLSX.utils.encode_range({ s: { c: 0, r: 0 }, e: { c: 6, r: r } });
+  ws["!cols"] = [{ wch: 4 }, { wch: 34 }, { wch: 20 }, { wch: 10 }, { wch: 8 }, { wch: 16 }, { wch: 14 }];
+
+  XLSX.utils.book_append_sheet(wb, ws, locale === "gr" ? "Συνταγή" : "Recipe");
 
   const safeName = recipe.name.replace(/[^a-zA-Z0-9Ͱ-Ͽ_-]/g, "_").slice(0, 40);
   XLSX.writeFile(wb, `${safeName}_${new Date().toISOString().slice(0, 10)}.xlsx`);
