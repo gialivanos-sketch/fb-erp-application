@@ -366,6 +366,28 @@ export async function fetchOrderItems(): Promise<OrderItem[]> {
   return (data ?? []).map((r) => mapOrderItem(r as unknown as OrderItemRow));
 }
 
+/**
+ * Αναζήτηση order_items βάσει product_name (ILIKE) — server-side.
+ * Επιστρέφει μοναδικά product_names (το πιο πρόσφατο ανά όνομα).
+ */
+export async function searchOrderItemsByName(query: string): Promise<OrderItem[]> {
+  if (!query.trim()) return [];
+  const { data, error } = await requireClient()
+    .from("order_items")
+    .select("id, order_id, supplier_product_id, product_name, ordered_quantity, delivered_quantity, unit, base_price, vat_percent, discount_percent, net_amount, vat_amount, gross_amount, created_at, orders(order_number, order_date, invoice_number, suppliers(name, name_en))")
+    .ilike("product_name", `%${query.trim()}%`)
+    .order("id", { ascending: false })
+    .limit(100);
+  if (error) throw error;
+  // Κρατάμε μόνο το τελευταίο (πιο πρόσφατο) ανά product_name
+  const seen = new Map<string, OrderItem>();
+  for (const r of (data ?? []).map((row) => mapOrderItem(row as unknown as OrderItemRow))) {
+    const key = r.productName.trim().toLowerCase();
+    if (!seen.has(key)) seen.set(key, r);
+  }
+  return Array.from(seen.values()).slice(0, 25);
+}
+
 export async function fetchOrderItemsForOrder(orderId: number): Promise<OrderItem[]> {
   const { data, error } = await requireClient()
     .from("order_items")
