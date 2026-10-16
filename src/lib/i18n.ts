@@ -25,8 +25,11 @@ export const translations: Record<string, { gr: string; en: string }> = {
   navMenuArchive: { gr: "Αρχείο Μενού", en: "Menu Archive" },
   navUnits: { gr: "Πίνακες Μονάδων", en: "Units & Conversions" },
   navPrepList: { gr: "Εσωτερική Διακίνηση", en: "Internal Transfers" },
+  navBuffetCycle: { gr: "Κύκλος Μενού", en: "Menu Cycle" },
+  navReservations: { gr: "Κρατήσεις", en: "Reservations" },
 
   // Sidebar sections
+  sectionBuffet: { gr: "ΜΠΟΥΦΕΣ & ΚΡΑΤΗΣΕΙΣ", en: "BUFFET & RESERVATIONS" },
   sectionProcurement: { gr: "ΑΓΟΡΕΣ & ΕΙΣΠΡΑΞΕΙΣ", en: "PROCUREMENT & LEDGERS" },
   sectionKitchen: { gr: "ΚΟΥΖΙΝΑ & ΜΕΝΟΥ", en: "KITCHEN & MENUS" },
   sectionSystem: { gr: "ΣΥΣΤΗΜΑ", en: "SYSTEM" },

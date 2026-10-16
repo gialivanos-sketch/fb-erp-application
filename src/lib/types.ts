@@ -300,6 +300,52 @@ export interface IngestionLog {
 }
 
 // ============================================================
+// Buffet Menu Cycle — 4-week rotating menu
+// ============================================================
+
+export type MealType = "breakfast" | "lunch" | "dinner";
+export type DayOfWeek = 1 | 2 | 3 | 4 | 5 | 6 | 7; // 1=Δευ, 7=Κυρ
+
+export interface BuffetDish {
+  id: number;
+  cycleEntryId: number;
+  dishName: string;       // e.g. "Μουσακάς"
+  dishCategory: string;   // e.g. "Ζεστά", "Σαλάτες", "Γλυκά"
+  kgPerPerson: number;    // συντελεστής kg/άτομο
+  unit: string;           // "kg" ή "τεμ" για γλυκά
+  recipeId: number | null; // σύνδεση με συνταγή (προαιρετικό)
+  sortOrder: number;
+}
+
+export interface BuffetCycleEntry {
+  id: number;
+  weekNumber: 1 | 2 | 3 | 4;
+  dayOfWeek: DayOfWeek;   // 1=Δευτέρα .. 7=Κυριακή
+  mealType: MealType;
+  notes: string | null;
+  createdAt?: string;
+  dishes: BuffetDish[];
+}
+
+// ============================================================
+// Reservations — hotel buffet pax per day/meal/board
+// ============================================================
+
+export type BoardType = "BB" | "HB" | "FB" | "AI"; // BB=Ημιδιατροφή, HB=Ημιδιατροφή, FB=Πλήρης, AI=All-Inclusive
+
+export interface Reservation {
+  id: number;
+  reservationDate: string;   // ISO date
+  mealType: MealType;
+  boardType: BoardType;
+  pax: number;
+  source: "manual" | "excel_import";
+  weekNumber: number | null;  // εβδομάδα κύκλου (1-4), αυτόματα
+  notes: string | null;
+  createdAt?: string;
+}
+
+// ============================================================
 // The full app database shape persisted to LocalStorage
 // ============================================================
 export interface AppDatabase {
@@ -319,6 +365,8 @@ export interface AppDatabase {
   internalTransfers: InternalTransfer[];
   units: Unit[];
   ingestionLogs: IngestionLog[];
+  buffetCycleEntries: BuffetCycleEntry[];
+  reservations: Reservation[];
   // Auto-incrementing id counters, one per entity, so ids never collide
   // even after deletions.
   nextIds: Record<string, number>;

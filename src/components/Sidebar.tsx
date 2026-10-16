@@ -29,6 +29,11 @@ const kitchenLinks = [
   { key: "navPrepList", href: "/prep-list", icon: "🔄" },
 ];
 
+const buffetLinks = [
+  { key: "navBuffetCycle", href: "/buffet-cycle", icon: "🗓️" },
+  { key: "navReservations", href: "/reservations", icon: "🏨" },
+];
+
 const adminLinks = [
   { key: "navUserManagement", href: "/user-management", icon: "👥" },
 ];
@@ -169,6 +174,23 @@ export default function Sidebar() {
               </div>
             );
           })}
+        </RoleGuard>
+
+        {/* Buffet Section — Admin + Chef */}
+        <RoleGuard roles={["admin", "chef"]}>
+          <div className="sidebar-section-title">{t("sectionBuffet")}</div>
+          {buffetLinks.map((item) => (
+            <div key={item.href} className="px-2 mb-0.5">
+              <Link
+                href={item.href}
+                className={`sidebar-item ${isActive(item.href) ? "sidebar-item-active" : ""}`}
+                onClick={() => setMobileOpen(false)}
+              >
+                <span className="text-lg">{item.icon}</span>
+                <span>{t(item.key)}</span>
+              </Link>
+            </div>
+          ))}
         </RoleGuard>
 
         {/* Admin Section — Admin Only */}

@@ -1,7 +1,7 @@
 "use client";
 import { createContext, useContext, useState, useCallback, useEffect, useMemo, type ReactNode } from "react";
 import { t as translate, type Locale } from "./i18n";
-import type { AppDatabase, AppUser, UserRole } from "./types";
+import type { AppDatabase, AppUser, UserRole, BuffetCycleEntry, Reservation } from "./types";
 import { supabase, isSupabaseConfigured } from "./supabaseClient";
 import { useAuthSession, signOut as authSignOut } from "./auth";
 import * as db from "./supabaseData";
@@ -30,6 +30,8 @@ const EMPTY_DB: AppDatabase = {
   internalTransfers: [],
   units: [],
   ingestionLogs: [],
+  buffetCycleEntries: [],
+  reservations: [],
   nextIds: {},
 };
 
@@ -122,17 +124,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const [
         users, suppliers, supplierProducts, orders, orderItems, supplierPayments,
         stockTakings, inventorySnapshots, ingredients, recipes, menus, prepLists,
-        internalTransfers, units, ingestionLogs,
+        internalTransfers, units, ingestionLogs, buffetCycleEntries, reservations,
       ] = await Promise.all([
         db.fetchUsers(), db.fetchSuppliers(), db.fetchSupplierProducts(), db.fetchOrders(),
         db.fetchOrderItems(), db.fetchPayments(), db.fetchStockTakings(), db.fetchInventorySnapshots(),
         db.fetchIngredients(), db.fetchRecipes(), db.fetchMenus(), db.fetchPrepLists(),
         db.fetchInternalTransfers(), db.fetchUnits(), db.fetchIngestionLogs(),
+        db.fetchBuffetCycleEntries(), db.fetchReservations(),
       ]);
       setData({
         version: 1, users, suppliers, supplierProducts, orders, orderItems, supplierPayments,
         stockTakings, inventorySnapshots, ingredients, recipes, menus, prepLists,
-        internalTransfers, units, ingestionLogs,
+        internalTransfers, units, ingestionLogs, buffetCycleEntries, reservations,
         nextIds: {},
       });
       setDataStatus("ready");

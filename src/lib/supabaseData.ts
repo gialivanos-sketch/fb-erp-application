@@ -1715,3 +1715,185 @@ export async function deleteInternalTransfer(id: number): Promise<void> {
   const { error } = await client.from("internal_transfers").delete().eq("id", id);
   if (error) throw error;
 }
+
+// ------------------------------------------------------------
+// BUFFET MENU CYCLE (Κύκλος Μενού Μπουφέ)
+// ------------------------------------------------------------
+import type { BuffetCycleEntry, BuffetDish, MealType, DayOfWeek, Reservation, BoardType } from "./types";
+
+export async function fetchBuffetCycleEntries(): Promise<BuffetCycleEntry[]> {
+  const client = requireClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: entries, error } = await (client as any)
+    .from("buffet_cycle_entries")
+    .select("id, week_number, day_of_week, meal_type, notes, created_at")
+    .order("week_number", { ascending: true });
+  if (error) throw error;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: dishes, error: dishErr } = await (client as any)
+    .from("buffet_dishes")
+    .select("id, cycle_entry_id, dish_name, dish_category, kg_per_person, unit, recipe_id, sort_order")
+    .order("sort_order", { ascending: true });
+  if (dishErr) throw dishErr;
+
+  return (entries ?? []).map((e: {
+    id: number; week_number: number; day_of_week: number; meal_type: string; notes: string | null; created_at: string;
+  }): BuffetCycleEntry => ({
+    id: e.id,
+    weekNumber: e.week_number as 1 | 2 | 3 | 4,
+    dayOfWeek: e.day_of_week as DayOfWeek,
+    mealType: e.meal_type as MealType,
+    notes: e.notes,
+    createdAt: e.created_at,
+    dishes: (dishes ?? [])
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .filter((d: any) => d.cycle_entry_id === e.id)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .map((d: any): BuffetDish => ({
+        id: d.id,
+        cycleEntryId: d.cycle_entry_id,
+        dishName: d.dish_name,
+        dishCategory: d.dish_category,
+        kgPerPerson: d.kg_per_person,
+        unit: d.unit,
+        recipeId: d.recipe_id,
+        sortOrder: d.sort_order,
+      })),
+  }));
+}
+
+export async function upsertBuffetCycleEntry(
+  entry: Omit<BuffetCycleEntry, "id" | "createdAt" | "dishes"> & { id?: number },
+  dishes: Omit<BuffetDish, "id" | "cycleEntryId">[],
+): Promise<number> {
+  const client = requireClient();
+  let entryId: number;
+
+  if (entry.id) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error } = await (client as any).from("buffet_cycle_entries").update({
+      week_number: entry.weekNumber,
+      day_of_week: entry.dayOfWeek,
+      meal_type: entry.mealType,
+      notes: entry.notes ?? null,
+    }).eq("id", entry.id);
+    if (error) throw error;
+    entryId = entry.id;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error: delErr } = await (client as any).from("buffet_dishes").delete().eq("cycle_entry_id", entryId);
+    if (delErr) throw delErr;
+  } else {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (client as any).from("buffet_cycle_entries").insert({
+      week_number: entry.weekNumber,
+      day_of_week: entry.dayOfWeek,
+      meal_type: entry.mealType,
+      notes: entry.notes ?? null,
+    }).select("id").single();
+    if (error) throw error;
+    entryId = data.id as number;
+  }
+
+  if (dishes.length > 0) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error: dishErr } = await (client as any).from("buffet_dishes").insert(
+      dishes.map((d, idx) => ({
+        cycle_entry_id: entryId,
+        dish_name: d.dishName,
+        dish_category: d.dishCategory,
+        kg_per_person: d.kgPerPerson,
+        unit: d.unit,
+        recipe_id: d.recipeId ?? null,
+        sort_order: d.sortOrder ?? idx,
+      }))
+    );
+    if (dishErr) throw dishErr;
+  }
+  return entryId;
+}
+
+export async function deleteBuffetCycleEntry(id: number): Promise<void> {
+  const client = requireClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error: dishErr } = await (client as any).from("buffet_dishes").delete().eq("cycle_entry_id", id);
+  if (dishErr) throw dishErr;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error } = await (client as any).from("buffet_cycle_entries").delete().eq("id", id);
+  if (error) throw error;
+}
+
+// ------------------------------------------------------------
+// RESERVATIONS (Κρατήσεις Μπουφέ)
+// ------------------------------------------------------------
+export async function fetchReservations(): Promise<Reservation[]> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (requireClient() as any)
+    .from("reservations")
+    .select("id, reservation_date, meal_type, board_type, pax, source, week_number, notes, created_at")
+    .order("reservation_date", { ascending: false });
+  if (error) throw error;
+  return (data ?? []).map((r: {
+    id: number; reservation_date: string; meal_type: string; board_type: string;
+    pax: number; source: string; week_number: number | null; notes: string | null; created_at: string;
+  }): Reservation => ({
+    id: r.id,
+    reservationDate: r.reservation_date,
+    mealType: r.meal_type as MealType,
+    boardType: r.board_type as BoardType,
+    pax: r.pax,
+    source: r.source as "manual" | "excel_import",
+    weekNumber: r.week_number,
+    notes: r.notes,
+    createdAt: r.created_at,
+  }));
+}
+
+export async function createReservation(input: Omit<Reservation, "id" | "createdAt">): Promise<number> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (requireClient() as any)
+    .from("reservations")
+    .insert({
+      reservation_date: input.reservationDate,
+      meal_type: input.mealType,
+      board_type: input.boardType,
+      pax: input.pax,
+      source: input.source,
+      week_number: input.weekNumber ?? null,
+      notes: input.notes ?? null,
+    })
+    .select("id")
+    .single();
+  if (error) throw error;
+  return data.id as number;
+}
+
+export async function createReservationsBulk(rows: Omit<Reservation, "id" | "createdAt">[]): Promise<number> {
+  if (rows.length === 0) return 0;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error, count } = await (requireClient() as any)
+    .from("reservations")
+    .insert(rows.map((r) => ({
+      reservation_date: r.reservationDate,
+      meal_type: r.mealType,
+      board_type: r.boardType,
+      pax: r.pax,
+      source: r.source,
+      week_number: r.weekNumber ?? null,
+      notes: r.notes ?? null,
+    })), { count: "exact" });
+  if (error) throw error;
+  return count ?? rows.length;
+}
+
+export async function deleteReservation(id: number): Promise<void> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error } = await (requireClient() as any).from("reservations").delete().eq("id", id);
+  if (error) throw error;
+}
+
+export async function deleteReservationsByDate(date: string): Promise<void> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error } = await (requireClient() as any).from("reservations").delete().eq("reservation_date", date);
+  if (error) throw error;
+}
