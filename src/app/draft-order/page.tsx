@@ -281,7 +281,7 @@ export default function DraftOrderPage() {
       doc.setTextColor(255, 255, 255);
       doc.setFontSize(13);
       doc.setFont("helvetica", "bold");
-      doc.text("NOE BEACH CLUB  —  ΦΥΛΛΟ ΠΑΡΑΓΓΕΛΙΑΣ", MAR + 4, y + 7);
+      doc.text("NOE BEACH CLUB  -  ORDER FORM", MAR + 4, y + 7);
       y += 14;
 
       // ── Header grid ──
@@ -295,10 +295,10 @@ export default function DraftOrderPage() {
       const col4W = COL / 2 - labelW;
 
       const headerRows = [
-        ["Προμηθευτής", supName, "Ημερομηνία", today],
-        ["Στοιχεία Επικοινωνίας", supEmail, "ID Παραγγελίας", orderNum],
-        ["Αρ. Τιμολογίου", invoiceNumber || "", "Συνολική Αξία", groupGross.toFixed(2) + " €"],
-        ["Σημειώσεις", notes || "", "", ""],
+        ["Supplier", supName, "Date", today],
+        ["Contact Email", supEmail, "Order ID", orderNum],
+        ["Invoice No.", invoiceNumber || "", "Total Amount", groupGross.toFixed(2) + " EUR"],
+        ["Notes", notes || "", "", ""],
       ];
 
       for (const [l1, v1, l2, v2] of headerRows) {
@@ -347,7 +347,7 @@ export default function DraftOrderPage() {
       doc.setTextColor(255, 255, 255);
       doc.setFontSize(8);
       doc.setFont("helvetica", "bold");
-      const headers = ["Προϊόν", "Ποσότητα", "Τιμή", "Μονάδα", "Σύνολο"];
+      const headers = ["Product", "Quantity", "Unit Price", "Unit", "Total"];
       const aligns: ("left" | "right" | "center")[] = ["left", "center", "right", "center", "right"];
       for (let c = 0; c < headers.length; c++) {
         const x = c === 0 ? colX[c] + 2 : c === 4 ? colX[c] + colWidths[c] - 2 : colX[c] + colWidths[c] / 2;
@@ -392,8 +392,8 @@ export default function DraftOrderPage() {
       // ── Totals ──
       y += 2;
       const totals: [string, string][] = [
-        ["Καθαρή Αξία:", groupNet.toFixed(2) + " €"],
-        ["ΦΠΑ:", groupVat.toFixed(2) + " €"],
+        ["Net Amount:", groupNet.toFixed(2) + " EUR"],
+        ["VAT:", groupVat.toFixed(2) + " EUR"],
       ];
       for (const [label, val] of totals) {
         doc.setFillColor(248, 250, 252);
@@ -413,19 +413,20 @@ export default function DraftOrderPage() {
       doc.setTextColor(255, 255, 255);
       doc.setFontSize(9);
       doc.setFont("helvetica", "bold");
-      doc.text("ΣΥΝΟΛΟ:", colX[3] + colWidths[3] - 2, y + 5.5, { align: "right" });
-      doc.text(groupGross.toFixed(2) + " €", colX[4] + colWidths[4] - 2, y + 5.5, { align: "right" });
+      doc.text("TOTAL:", colX[3] + colWidths[3] - 2, y + 5.5, { align: "right" });
+      doc.text(groupGross.toFixed(2) + " EUR", colX[4] + colWidths[4] - 2, y + 5.5, { align: "right" });
       y += 12;
 
       // ── Footer ──
       doc.setTextColor(148, 163, 184);
       doc.setFontSize(8);
       doc.setFont("helvetica", "normal");
-      doc.text(`NOE BEACH CLUB  |  Παραγγελία ${orderNum}  |  ${today}`, W / 2, 287, { align: "center" });
+      doc.text(`NOE BEACH CLUB  |  Order ${orderNum}  |  ${today}`, W / 2, 287, { align: "center" });
     }
 
-    const filename = `Παραγγελία_${orderNum}_${new Date(orderDate).toISOString().split("T")[0]}.pdf`;
-    doc.save(filename);
+    // Open in new tab (works on desktop + mobile without download prompt)
+    const blobUrl = doc.output("bloburl");
+    window.open(blobUrl, "_blank");
   }
 
   function handleExportExcel() {
