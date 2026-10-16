@@ -495,7 +495,8 @@ export default function DraftOrderPage() {
               }
               function sendEmail(sid: number) {
                 const g = supplierGroups.get(sid)!;
-                const s = g.sup;
+                // Re-lookup supplier at call time in case async load finished after initial render
+                const s = g.sup ?? suppliers.find(x => x.id === sid);
                 if (!s?.contactEmail) {
                   window.alert(locale === "gr" ? "⚠️ Δεν βρέθηκε email προμηθευτή" : "⚠️ No supplier email found");
                   return;
@@ -530,11 +531,15 @@ export default function DraftOrderPage() {
                 a.href = url; a.target = "_blank"; a.rel = "noopener";
                 document.body.appendChild(a); a.click(); document.body.removeChild(a);
               }
-              return Array.from(supplierGroups.entries()).map(([sid, g]) => (
-                <button key={sid} onClick={() => sendEmail(sid)} className="erp-btn-secondary">
-                  📧 {g.sup ? (locale === "gr" ? g.sup.name : (g.sup.nameEn || g.sup.name)) : "—"} ({fmt(g.gross)})
-                </button>
-              ));
+              return Array.from(supplierGroups.entries()).map(([sid, g]) => {
+                const sup = g.sup ?? suppliers.find(x => x.id === sid);
+                const supLabel = sup ? (locale === "gr" ? sup.name : (sup.nameEn || sup.name)) : `#${sid}`;
+                return (
+                  <button key={sid} onClick={() => sendEmail(sid)} className="erp-btn-secondary">
+                    📧 {supLabel} ({fmt(g.gross)})
+                  </button>
+                );
+              });
             })()}
           </div>
         </div>
