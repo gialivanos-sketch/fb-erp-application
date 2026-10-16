@@ -344,10 +344,25 @@ export default function MenuPlannerPage() {
     setEditing(true);
     setMenuTitle(menu.title);
     setMenuTitleEn(menu.titleEn || "");
-    setMenuRecipes((menu.recipes || []).map(r => ({
-      ...r,
-      portionType: (r.portionType ?? "portion") as "portion" | "kg",
-    })));
+    // Το μενού αποθηκεύει snapshot κόστους. Αν η συνταγή κοστολογήθηκε
+    // αργότερα, πάρε το τρέχον κόστος της αντί για το παλιό (συχνά €0).
+    setMenuRecipes((menu.recipes || []).map(r => {
+      const live = allRecipes.find(x => x.id === r.recipeId);
+      const liveCost = Number(live?.totalCost ?? 0);
+      const margin = Number(r.profitMargin || live?.profitMarginPercent || 60);
+      const foodCost = liveCost > 0 ? liveCost : Number(r.foodCost || 0);
+      const storedSell = Number(r.sellingPrice || 0);
+      const costChanged = liveCost > 0 && Number(r.foodCost || 0) !== liveCost;
+      const sell = (costChanged || storedSell <= 0)
+        ? (foodCost > 0 && margin < 100 ? foodCost / (1 - margin / 100) : 0)
+        : storedSell;
+      return {
+        ...r,
+        portionType: (r.portionType ?? "portion") as "portion" | "kg",
+        foodCost: foodCost.toFixed(2),
+        sellingPrice: sell.toFixed(2),
+      };
+    }));
   }
 
   function newMenu() {
@@ -444,7 +459,7 @@ export default function MenuPlannerPage() {
         {editing && <button onClick={() => window.print()} className="erp-btn-secondary">🖨️ {t("btnPrint")}</button>}
       </PageHeader>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6 print:hidden">
         <KpiCard label={locale === "gr" ? "Σύνολο Συνταγών" : "Total Recipes"} value={totalRecipes} color="blue" icon="👨‍🍳" />
         <KpiCard label={locale === "gr" ? "Σύνολο Μερίδων" : "Total Portions"} value={totalPortions} color="green" icon="🍽️" />
         <KpiCard label={locale === "gr" ? "Σύνολο Κόστους" : "Total Food Cost"} value={fmt(totalFoodCost)} color="amber" icon="💰" />
@@ -483,6 +498,54 @@ export default function MenuPlannerPage() {
             </div>
           </div>
         </div>
+
+        {/* Καθαρή αναφορά μόνο για εκτύπωση (κρυφή στην οθόνη) */}
+        {editing && (
+          <div id="printable-recipe-area" className="hidden print:block text-[11pt] text-black">
+            <div style={{ borderBottom: "2px solid #0f172a", paddingBottom: 8, marginBottom: 12 }}>
+              <div style={{ fontSize: "9pt", letterSpacing: 1, color: "#475569" }}>NOE BEACH CLUB — {locale === "gr" ? "ΚΟΣΤΟΛΟΓΗΣΗ ΜΕΝΟΥ" : "MENU COSTING"}</div>
+              <div style={{ fontSize: "18pt", fontWeight: 700 }}>{menuTitle || "—"}</div>
+              {menuTitleEn && <div style={{ fontSize: "11pt", color: "#475569" }}>{menuTitleEn}</div>}
+              <div style={{ fontSize: "9pt", color: "#475569", marginTop: 4 }}>{new Date().toLocaleDateString("el-GR")}</div>
+            </div>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "10pt" }}>
+              <thead>
+                <tr style={{ background: "#f1f5f9" }}>
+                  {["#", locale === "gr" ? "Συνταγή" : "Recipe", locale === "gr" ? "Τύπος" : "Type", locale === "gr" ? "Ποσότητα" : "Qty", locale === "gr" ? "Κόστος/μον." : "Cost/unit", locale === "gr" ? "Τιμή Πώλησης" : "Selling", locale === "gr" ? "Κέρδος %" : "Margin %"].map((h, k) => (
+                    <th key={k} style={{ textAlign: k >= 3 ? "right" : "left", padding: "6px", borderBottom: "1px solid #cbd5e1" }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {menuRecipes.map((mr, i) => (
+                  <tr key={i} style={{ breakInside: "avoid" }}>
+                    <td style={{ padding: "5px 6px", borderBottom: "1px solid #e5e7eb" }}>{i + 1}</td>
+                    <td style={{ padding: "5px 6px", borderBottom: "1px solid #e5e7eb" }}>{mr.recipeName}</td>
+                    <td style={{ padding: "5px 6px", borderBottom: "1px solid #e5e7eb" }}>{mr.portionType === "kg" ? (locale === "gr" ? "Κιλό" : "Kg") : (locale === "gr" ? "Μερίδα" : "Portion")}</td>
+                    <td style={{ padding: "5px 6px", borderBottom: "1px solid #e5e7eb", textAlign: "right" }}>{mr.portions} {mr.portionType === "kg" ? "kg" : (locale === "gr" ? "μερ." : "pcs")}</td>
+                    <td style={{ padding: "5px 6px", borderBottom: "1px solid #e5e7eb", textAlign: "right" }}>{fmt(Number(mr.foodCost))}</td>
+                    <td style={{ padding: "5px 6px", borderBottom: "1px solid #e5e7eb", textAlign: "right" }}>{fmt(Number(mr.sellingPrice))}</td>
+                    <td style={{ padding: "5px 6px", borderBottom: "1px solid #e5e7eb", textAlign: "right" }}>{mr.profitMargin}%</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr style={{ fontWeight: 700, borderTop: "2px solid #0f172a" }}>
+                  <td colSpan={3} style={{ padding: "6px", textAlign: "right" }}>{t("total")}:</td>
+                  <td style={{ padding: "6px", textAlign: "right" }}>{totalPortions}</td>
+                  <td style={{ padding: "6px", textAlign: "right" }}>{fmt(totalFoodCost)}</td>
+                  <td style={{ padding: "6px", textAlign: "right" }}>{fmt(menuRecipes.reduce((s, r) => s + Number(r.sellingPrice) * r.portions, 0))}</td>
+                  <td style={{ padding: "6px", textAlign: "right" }}>{avgMargin.toFixed(1)}%</td>
+                </tr>
+              </tfoot>
+            </table>
+            {menuRecipes.some(r => Number(r.foodCost) <= 0) && (
+              <div style={{ marginTop: 10, fontSize: "9pt", color: "#b45309" }}>
+                {locale === "gr" ? "* Συνταγές με €0.00 δεν έχουν κοστολογηθεί ακόμα." : "* Recipes at €0.00 have not been costed yet."}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Επεξεργαστής μενού */}
         {editing && (
