@@ -19,6 +19,7 @@ import type {
   AppUser, Supplier, SupplierProduct, Order, OrderItem, SupplierPayment,
   StockTaking, StockTakingItem, InventorySnapshot, Ingredient, Recipe,
   RecipeIngredient, Menu, MenuRecipe, PrepListItem, Unit, IngestionLog, UserRole,
+  InternalTransfer, InternalTransferItem,
 } from "./types";
 
 function requireClient() {
@@ -1612,5 +1613,105 @@ export async function renameSkuGroup(oldSku: string, newSku: string): Promise<vo
     .from("product_sku_map")
     .update({ sku: newSku })
     .eq("sku", oldSku);
+  if (error) throw error;
+}
+
+// ------------------------------------------------------------
+// INTERNAL TRANSFERS (Εσωτερική Διακίνηση)
+// ------------------------------------------------------------
+export async function fetchInternalTransfers(): Promise<InternalTransfer[]> {
+  const client = requireClient();
+  const { data: transfers, error } = await client
+    .from("internal_transfers")
+    .select("id, transfer_number, transfer_date, from_department, to_department, delivered_by, received_by, notes, created_at")
+    .order("transfer_date", { ascending: false });
+  if (error) throw error;
+
+  const { data: items, error: itemsError } = await client
+    .from("internal_transfer_items")
+    .select("id, transfer_id, ingredient_id, ingredient_name, quantity, unit");
+  if (itemsError) throw itemsError;
+
+  return (transfers ?? []).map((t) => ({
+    id: t.id,
+    transferNumber: t.transfer_number,
+    transferDate: t.transfer_date,
+    fromDepartment: t.from_department,
+    toDepartment: t.to_department,
+    deliveredBy: t.delivered_by,
+    receivedBy: t.received_by,
+    notes: t.notes,
+    createdAt: t.created_at,
+    items: (items ?? [])
+      .filter((i) => i.transfer_id === t.id)
+      .map((i) => ({
+        id: i.id,
+        transferId: i.transfer_id,
+        ingredientId: i.ingredient_id,
+        ingredientName: i.ingredient_name,
+        quantity: i.quantity,
+        unit: i.unit,
+      })),
+  }));
+}
+
+export async function createInternalTransfer(
+  transfer: Omit<InternalTransfer, "id" | "createdAt">,
+): Promise<InternalTransfer> {
+  const client = requireClient();
+  const { data: row, error } = await client
+    .from("internal_transfers")
+    .insert({
+      transfer_number: transfer.transferNumber,
+      transfer_date: transfer.transferDate,
+      from_department: transfer.fromDepartment,
+      to_department: transfer.toDepartment,
+      delivered_by: transfer.deliveredBy,
+      received_by: transfer.receivedBy,
+      notes: transfer.notes,
+    })
+    .select("id, transfer_number, transfer_date, from_department, to_department, delivered_by, received_by, notes, created_at")
+    .single();
+  if (error) throw error;
+
+  const itemRows = transfer.items.map((item) => ({
+    transfer_id: row.id,
+    ingredient_id: item.ingredientId,
+    ingredient_name: item.ingredientName,
+    quantity: item.quantity,
+    unit: item.unit,
+  }));
+  const { data: insertedItems, error: itemsError } = await client
+    .from("internal_transfer_items")
+    .insert(itemRows)
+    .select("id, transfer_id, ingredient_id, ingredient_name, quantity, unit");
+  if (itemsError) throw itemsError;
+
+  return {
+    id: row.id,
+    transferNumber: row.transfer_number,
+    transferDate: row.transfer_date,
+    fromDepartment: row.from_department,
+    toDepartment: row.to_department,
+    deliveredBy: row.delivered_by,
+    receivedBy: row.received_by,
+    notes: row.notes,
+    createdAt: row.created_at,
+    items: (insertedItems ?? []).map((i) => ({
+      id: i.id,
+      transferId: i.transfer_id,
+      ingredientId: i.ingredient_id,
+      ingredientName: i.ingredient_name,
+      quantity: i.quantity,
+      unit: i.unit,
+    })),
+  };
+}
+
+export async function deleteInternalTransfer(id: number): Promise<void> {
+  const client = requireClient();
+  const { error: itemsError } = await client.from("internal_transfer_items").delete().eq("transfer_id", id);
+  if (itemsError) throw itemsError;
+  const { error } = await client.from("internal_transfers").delete().eq("id", id);
   if (error) throw error;
 }

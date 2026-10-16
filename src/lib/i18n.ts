@@ -24,7 +24,7 @@ export const translations: Record<string, { gr: string; en: string }> = {
   navMenuPlanner: { gr: "Κοστολόγηση Μενού", en: "Menu Planner" },
   navMenuArchive: { gr: "Αρχείο Μενού", en: "Menu Archive" },
   navUnits: { gr: "Πίνακες Μονάδων", en: "Units & Conversions" },
-  navPrepList: { gr: "Mise en Place", en: "Mise en Place" },
+  navPrepList: { gr: "Εσωτερική Διακίνηση", en: "Internal Transfers" },
 
   // Sidebar sections
   sectionProcurement: { gr: "ΑΓΟΡΕΣ & ΕΙΣΠΡΑΞΕΙΣ", en: "PROCUREMENT & LEDGERS" },
@@ -177,7 +177,7 @@ export const translations: Record<string, { gr: string; en: string }> = {
   headerMenuPlanner: { gr: "Κοστολόγηση Μενού", en: "Menu Planner & Exporter" },
   headerMenuArchive: { gr: "Αρχείο Μενού", en: "Menu Directory Archive" },
   headerUnits: { gr: "Πίνακες Μονάδων & Μετατροπών", en: "Units & Conversion Dictionary" },
-  headerPrepList: { gr: "Mise en Place (Prep List)", en: "Experience-Based Mise en Place" },
+  headerPrepList: { gr: "Εσωτερική Διακίνηση", en: "Internal Transfers" },
 
   // Filters
   filterAll: { gr: "Όλα", en: "All" },

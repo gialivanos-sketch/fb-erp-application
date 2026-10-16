@@ -26,7 +26,7 @@ const kitchenLinks = [
   { key: "navMenuPlanner", href: "/menu-planner", icon: "🍽️" },
   { key: "navMenuArchive", href: "/menu-archive", icon: "📚" },
   { key: "navUnits", href: "/units", icon: "⚖️" },
-  { key: "navPrepList", href: "/prep-list", icon: "🔪" },
+  { key: "navPrepList", href: "/prep-list", icon: "🔄" },
 ];
 
 const adminLinks = [

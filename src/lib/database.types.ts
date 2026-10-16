@@ -459,6 +459,51 @@ export interface Database {
         Update: Partial<Database["public"]["Tables"]["units"]["Insert"]>;
         Relationships: [];
       };
+      internal_transfer_items: {
+        Row: {
+          id: number;
+          transfer_id: number;
+          ingredient_id: number | null;
+          ingredient_name: string;
+          quantity: number;
+          unit: string;
+        };
+        Insert: {
+          id?: number;
+          transfer_id: number;
+          ingredient_id?: number | null;
+          ingredient_name: string;
+          quantity?: number;
+          unit?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["internal_transfer_items"]["Insert"]>;
+        Relationships: [];
+      };
+      internal_transfers: {
+        Row: {
+          id: number;
+          transfer_number: string;
+          transfer_date: string;
+          from_department: string;
+          to_department: string;
+          delivered_by: string | null;
+          received_by: string | null;
+          notes: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: number;
+          transfer_number: string;
+          transfer_date?: string;
+          from_department?: string;
+          to_department: string;
+          delivered_by?: string | null;
+          received_by?: string | null;
+          notes?: string | null;
+        };
+        Update: Partial<Database["public"]["Tables"]["internal_transfers"]["Insert"]>;
+        Relationships: [];
+      };
       ingestion_logs: {
         Row: {
           id: number;

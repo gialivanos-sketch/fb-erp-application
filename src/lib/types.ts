@@ -266,6 +266,28 @@ export interface IngredientSupplierOption {
   unit: string;
 }
 
+export interface InternalTransferItem {
+  id?: number;
+  transferId?: number;
+  ingredientId: number | null;
+  ingredientName: string;
+  quantity: number;
+  unit: string;
+}
+
+export interface InternalTransfer {
+  id: number;
+  transferNumber: string;       // ΔΕΔ-001, ΔΕΔ-002 κλπ
+  transferDate: string;
+  fromDepartment: string;       // πάντα ΑΠΟΘΗΚΗ
+  toDepartment: string;         // ΚΟΥΖΙΝΑ / ΖΑΧΑΡΟΠΛΑΣΤΕΙΟ / κλπ
+  deliveredBy: string | null;   // αποθηκάριος
+  receivedBy: string | null;    // τμηματάρχης
+  notes: string | null;
+  createdAt?: string;
+  items: InternalTransferItem[];
+}
+
 export interface IngestionLog {
   id: number;
   fileName: string;
@@ -294,6 +316,7 @@ export interface AppDatabase {
   recipes: Recipe[];
   menus: Menu[];
   prepLists: PrepListItem[];
+  internalTransfers: InternalTransfer[];
   units: Unit[];
   ingestionLogs: IngestionLog[];
   // Auto-incrementing id counters, one per entity, so ids never collide
