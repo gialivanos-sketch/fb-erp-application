@@ -244,7 +244,145 @@ export default function DraftOrderPage() {
   }
 
   function handleExportPDF() {
-    window.print();
+    // Gather data for the print window
+    const today = new Date(orderDate).toLocaleDateString("el-GR", { day: "2-digit", month: "2-digit", year: "numeric" });
+
+    // Group items by supplier
+    const groups = new Map<number, { sup: typeof suppliers[0] | undefined; items: typeof items }>();
+    for (const item of items) {
+      const sid = item.supplierId || selectedSupplier || 0;
+      if (!groups.has(sid)) groups.set(sid, { sup: suppliers.find(x => x.id === sid), items: [] });
+      groups.get(sid)!.items.push(item);
+    }
+
+    // Build one print page per supplier group
+    const pages = Array.from(groups.entries()).map(([sid, g]) => {
+      const sup = g.sup ?? suppliers.find(x => x.id === sid);
+      const supName = sup ? (locale === "gr" ? sup.name : (sup.nameEn || sup.name)) : "—";
+      const supEmail = sup?.contactEmail ?? "—";
+      const groupNet = g.items.reduce((s, i) => s + i.netAmount, 0);
+      const groupVat = g.items.reduce((s, i) => s + i.vatAmount, 0);
+      const groupGross = g.items.reduce((s, i) => s + i.grossAmount, 0);
+
+      const rows = g.items.map((item, idx) => `
+        <tr>
+          <td>${item.productName}</td>
+          <td class="center">${item.orderedQuantity % 1 === 0 ? item.orderedQuantity.toFixed(0) : item.orderedQuantity.toFixed(3)}</td>
+          <td class="right">${item.basePrice.toFixed(2)} €</td>
+          <td class="center">${item.unit}</td>
+          <td class="right bold">${item.grossAmount.toFixed(2)} €</td>
+        </tr>
+      `).join("");
+
+      return `
+        <div class="page">
+          <table class="header-table">
+            <tr>
+              <td class="label">Προμηθευτής</td>
+              <td class="value bold">${supName}</td>
+              <td class="label">Ημερομηνία</td>
+              <td class="value">${today}</td>
+            </tr>
+            <tr>
+              <td class="label">Στοιχεία Επικοινωνίας</td>
+              <td class="value">${supEmail}</td>
+              <td class="label">ID Παραγγελίας</td>
+              <td class="value">${orderNum}</td>
+            </tr>
+            <tr>
+              <td class="label" rowspan="2">Σημειώσεις</td>
+              <td class="value" rowspan="2">${notes || ""}</td>
+              <td class="label">Αριθμός Τιμολογίου</td>
+              <td class="value">${invoiceNumber || ""}</td>
+            </tr>
+            <tr>
+              <td class="label">Συνολική Αξία</td>
+              <td class="value bold">${groupGross.toFixed(2)} €</td>
+            </tr>
+          </table>
+
+          <table class="items-table">
+            <thead>
+              <tr>
+                <th>Προϊόν</th>
+                <th class="center">Ποσότητα</th>
+                <th class="right">Τιμή</th>
+                <th class="center">Μονάδα</th>
+                <th class="right">Σύνολο</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+            <tfoot>
+              <tr class="total-row">
+                <td colspan="4" class="right">Καθαρή Αξία:</td>
+                <td class="right">${groupNet.toFixed(2)} €</td>
+              </tr>
+              <tr class="total-row">
+                <td colspan="4" class="right">ΦΠΑ:</td>
+                <td class="right">${groupVat.toFixed(2)} €</td>
+              </tr>
+              <tr class="total-row grand">
+                <td colspan="4" class="right bold">ΣΥΝΟΛΟ:</td>
+                <td class="right bold">${groupGross.toFixed(2)} €</td>
+              </tr>
+            </tfoot>
+          </table>
+
+          <div class="footer">NOE BEACH CLUB &nbsp;|&nbsp; Παραγγελία ${orderNum} &nbsp;|&nbsp; ${today}</div>
+        </div>
+      `;
+    });
+
+    const html = `<!DOCTYPE html>
+<html lang="el">
+<head>
+<meta charset="UTF-8"/>
+<title>Παραγγελία ${orderNum}</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: Arial, sans-serif; font-size: 12px; color: #222; background: #fff; }
+  .page { padding: 32px; max-width: 800px; margin: 0 auto; page-break-after: always; }
+  .page:last-child { page-break-after: avoid; }
+
+  /* Header table */
+  .header-table { width: 100%; border-collapse: collapse; margin-bottom: 24px; }
+  .header-table td { border: 1px solid #ccc; padding: 8px 12px; }
+  .header-table td.label { background: #1e40af; color: #fff; font-weight: bold; width: 160px; }
+  .header-table td.value { width: 240px; }
+
+  /* Items table */
+  .items-table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
+  .items-table th { background: #1e40af; color: #fff; padding: 8px 12px; text-align: left; font-weight: bold; }
+  .items-table th.center { text-align: center; }
+  .items-table th.right { text-align: right; }
+  .items-table td { border-bottom: 1px solid #e5e7eb; padding: 8px 12px; }
+  .items-table td.center { text-align: center; }
+  .items-table td.right { text-align: right; }
+  .items-table tbody tr:nth-child(even) { background: #f8fafc; }
+
+  /* Totals */
+  .total-row td { border-top: 1px solid #cbd5e1; padding: 6px 12px; background: #f8fafc; }
+  .grand td { background: #1e3a8a; color: #fff; font-size: 13px; }
+  .bold { font-weight: bold; }
+  .right { text-align: right; }
+  .center { text-align: center; }
+
+  .footer { text-align: center; font-size: 10px; color: #94a3b8; margin-top: 32px; border-top: 1px solid #e5e7eb; padding-top: 8px; }
+
+  @media print {
+    body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .page { padding: 16px; }
+  }
+</style>
+</head>
+<body>
+${pages.join("")}
+<script>window.onload = function(){ window.print(); };<\/script>
+</body>
+</html>`;
+
+    const w = window.open("", "_blank", "width=900,height=700");
+    if (w) { w.document.write(html); w.document.close(); }
   }
 
   return (
