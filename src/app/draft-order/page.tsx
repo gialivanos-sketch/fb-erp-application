@@ -790,8 +790,8 @@ export default function DraftOrderPage() {
                 const fullUrl = `mailto:${s.contactEmail}?subject=${s_enc}&body=${b_enc}`;
                 // Fallback: items only if full URL too long for mobile
                 const shortBody = [
-                  `Παραγγελία ${orderNum} – ${supplierName} – ${today}`, SEP2,
-                  tableRows, SEP2,
+                  `Παραγγελία ${orderNum} – ${supplierName} – ${today}`,
+                  tableRows,
                   `ΣΥΝΟΛΟ: ${g.gross.toFixed(2)} EUR`,
                 ].join("\n");
                 const shortUrl = `mailto:${s.contactEmail}?subject=${s_enc}&body=${encodeURIComponent(shortBody)}`;
