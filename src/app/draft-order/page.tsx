@@ -751,21 +751,18 @@ export default function DraftOrderPage() {
                 const today = new Date(orderDate).toLocaleDateString("el-GR", { day: "2-digit", month: "2-digit", year: "numeric" });
                 const subject = `Παραγγελία ${orderNum} – NOE BEACH CLUB – ${today}`;
                 const SEP = "================================================";
-                const SEP2 = "------------------------------------------------";
-                // Build aligned table rows
-                const pad = (str: string, len: number) => str.length >= len ? str.substring(0, len) : str + " ".repeat(len - str.length);
-                const tableRows = g.items.map((item) => {
+                // Build pipe-separated rows — readable in any email font
+                const tableRows = g.items.map((item, idx) => {
                   const qty = item.orderedQuantity % 1 === 0 ? item.orderedQuantity.toFixed(0) : item.orderedQuantity.toFixed(3);
-                  const price = item.basePrice.toFixed(2) + " EUR";
-                  const total = item.grossAmount.toFixed(2) + " EUR";
-                  return `${pad(item.productName, 36)} ${pad(qty + " " + item.unit, 10)} ${pad(price, 12)} ${total}`;
+                  const name = item.productName.length > 32 ? item.productName.substring(0, 31) + "…" : item.productName;
+                  return `${String(idx + 1).padStart(2)}. ${name.padEnd(33)} | ${(qty + " " + item.unit).padEnd(9)} | ${(item.basePrice.toFixed(2) + " EUR").padStart(10)} | ${(item.grossAmount.toFixed(2) + " EUR").padStart(10)}`;
                 }).join("\n");
                 const body = [
-                  `NOE BEACH CLUB`,
+                  `NOE BEACH CLUB — ΠΑΡΑΓΓΕΛΙΑ`,
                   SEP,
-                  `Προμηθευτής  : ${supplierName}`,
-                  `Email        : ${s.contactEmail}`,
-                  `Ημερομηνία   : ${today}`,
+                  `Προμηθευτής   : ${supplierName}`,
+                  `Email         : ${s.contactEmail}`,
+                  `Ημερομηνία    : ${today}`,
                   `ID Παραγγελίας: ${orderNum}`,
                   invoiceNumber ? `Αρ. Τιμολογίου: ${invoiceNumber}` : "",
                   SEP,
@@ -774,14 +771,13 @@ export default function DraftOrderPage() {
                   `Σας αποστέλλουμε την παραγγελία μας.`,
                   `Παρακαλούμε επιβεβαιώστε διαθεσιμότητα και ημερομηνία παράδοσης.`,
                   ``,
-                  SEP2,
-                  `${pad("ΠΡΟΪΟΝ", 36)} ${pad("ΠΟΣΟΤΗΤΑ", 10)} ${pad("ΤΙΜΗ", 12)} ΣΥΝΟΛΟ`,
-                  SEP2,
+                  `  #  ${"ΠΡΟΪΟΝ".padEnd(33)} | ${"ΠΟΣΟΤΗΤΑ".padEnd(9)} |   ΤΙΜΗ/ΜΟΝ |     ΣΥΝΟΛΟ`,
+                  `     ${"-".repeat(33)}-+-${"-".repeat(9)}-+${"-".repeat(11)}-+${"-".repeat(11)}`,
                   tableRows,
-                  SEP2,
-                  `${pad("", 36)} ${pad("", 10)} ${pad("Καθαρή Αξία:", 12)} ${g.net.toFixed(2)} EUR`,
-                  `${pad("", 36)} ${pad("", 10)} ${pad("ΦΠΑ:", 12)} ${g.vat.toFixed(2)} EUR`,
-                  `${pad("", 36)} ${pad("", 10)} ${pad("ΣΥΝΟΛΟ:", 12)} ${g.gross.toFixed(2)} EUR`,
+                  `     ${"-".repeat(33)}-+-${"-".repeat(9)}-+${"-".repeat(11)}-+${"-".repeat(11)}`,
+                  `${"".padEnd(48)}  Καθαρή Αξία : ${g.net.toFixed(2)} EUR`,
+                  `${"".padEnd(48)}  ΦΠΑ         : ${g.vat.toFixed(2)} EUR`,
+                  `${"".padEnd(48)}  ΣΥΝΟΛΟ      : ${g.gross.toFixed(2)} EUR`,
                   SEP,
                   notes ? `Σημειώσεις: ${notes}` : "",
                   ``,
