@@ -550,6 +550,30 @@ export default function MenuPlannerPage() {
         onClose={() => setShowConsumption(false)}
         title={locale === "gr" ? `📋 Αναφορά Ανάλωσης — ${menuTitle}` : `📋 Consumption Report — ${menuTitle}`}
         size="lg"
+        footer={
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap gap-2">
+              {Array.from(bySupplier.entries()).map(([supplierName, items]) => (
+                <button
+                  key={supplierName}
+                  onClick={() => sendOrderEmail(supplierName, items)}
+                  className="erp-btn-secondary text-xs"
+                  title={`Αποστολή παραγγελίας στον ${supplierName}`}
+                >
+                  📧 {supplierName} — €{items.reduce((s, i) => s + i.cost, 0).toFixed(2)}
+                </button>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => window.print()} className="erp-btn-secondary text-xs">
+                🖨️ {locale === "gr" ? "Εκτύπωση" : "Print"}
+              </button>
+              <button onClick={() => setShowConsumption(false)} className="erp-btn-primary text-xs">
+                ✓ {locale === "gr" ? "Κλείσιμο" : "Close"}
+              </button>
+            </div>
+          </div>
+        }
       >
         <div className="space-y-4">
           {/* Επιλογή αριθμού ατόμων */}
@@ -711,36 +735,6 @@ export default function MenuPlannerPage() {
             </div>
           )}
 
-          {/* Κουμπιά αποστολής παραγγελίας ανά προμηθευτή */}
-          {bySupplier.size > 0 && (
-            <div className="border-t pt-3 mt-2">
-              <p className="text-xs text-slate-500 mb-2 font-medium">
-                📧 {locale === "gr" ? "Αποστολή Παραγγελίας ανά Προμηθευτή:" : "Send Order by Supplier:"}
-              </p>
-              <div className="flex flex-wrap gap-2">
-                {Array.from(bySupplier.entries()).map(([supplierName, items]) => (
-                  <button
-                    key={supplierName}
-                    onClick={() => sendOrderEmail(supplierName, items)}
-                    className="erp-btn-secondary text-xs"
-                    title={`Αποστολή παραγγελίας στον ${supplierName}`}
-                  >
-                    📧 {supplierName} — €{items.reduce((s, i) => s + i.cost, 0).toFixed(2)}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Κουμπιά */}
-          <div className="flex justify-end gap-2 pt-2">
-            <button onClick={() => window.print()} className="erp-btn-secondary">
-              🖨️ {locale === "gr" ? "Εκτύπωση" : "Print"}
-            </button>
-            <button onClick={() => setShowConsumption(false)} className="erp-btn-primary">
-              ✓ {locale === "gr" ? "Κλείσιμο" : "Close"}
-            </button>
-          </div>
         </div>
       </Modal>
     </div>

@@ -90,12 +90,14 @@ export function Modal({
   onClose,
   title,
   children,
+  footer,
   size = "md",
 }: {
   isOpen: boolean;
   onClose: () => void;
   title: string;
   children: ReactNode;
+  footer?: ReactNode;
   size?: "sm" | "md" | "lg" | "xl";
 }) {
   if (!isOpen) return null;
@@ -110,7 +112,7 @@ export function Modal({
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
       <div className={`relative bg-white rounded-2xl shadow-2xl w-full ${sizeClass} max-h-[90vh] flex flex-col`}>
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 shrink-0">
           <h3 className="text-lg font-semibold text-slate-800">{title}</h3>
           <button onClick={onClose} className="p-1 hover:bg-slate-100 rounded-lg transition-colors">
             <svg className="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -119,6 +121,11 @@ export function Modal({
           </button>
         </div>
         <div className="flex-1 overflow-y-auto p-6">{children}</div>
+        {footer && (
+          <div className="shrink-0 border-t border-slate-200 px-6 py-3 bg-white rounded-b-2xl">
+            {footer}
+          </div>
+        )}
       </div>
     </div>
   );
