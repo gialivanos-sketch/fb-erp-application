@@ -4,6 +4,7 @@ import { useApp } from "@/lib/context";
 import { PageHeader, Badge, KpiCard } from "@/components/shared";
 import * as db from "@/lib/supabaseData";
 import type { SupplierProduct } from "@/lib/types";
+import * as XLSX from "xlsx";
 
 interface OrderItemDraft {
   id?: number;
@@ -385,6 +386,70 @@ ${pages.join("")}
     if (w) { w.document.write(html); w.document.close(); }
   }
 
+  function handleExportExcel() {
+    const today = new Date(orderDate).toLocaleDateString("el-GR", { day: "2-digit", month: "2-digit", year: "numeric" });
+
+    // Group items by supplier
+    const groups = new Map<number, { sup: typeof suppliers[0] | undefined; items: typeof items }>();
+    for (const item of items) {
+      const sid = item.supplierId || selectedSupplier || 0;
+      if (!groups.has(sid)) groups.set(sid, { sup: suppliers.find(x => x.id === sid), items: [] });
+      groups.get(sid)!.items.push(item);
+    }
+
+    const wb = XLSX.utils.book_new();
+
+    for (const [sid, g] of groups.entries()) {
+      const sup = g.sup ?? suppliers.find(x => x.id === sid);
+      const supName = sup ? (locale === "gr" ? sup.name : (sup.nameEn || sup.name)) : `SUP-${sid}`;
+      const supEmail = sup?.contactEmail ?? "";
+      const groupNet = g.items.reduce((s, i) => s + i.netAmount, 0);
+      const groupVat = g.items.reduce((s, i) => s + i.vatAmount, 0);
+      const groupGross = g.items.reduce((s, i) => s + i.grossAmount, 0);
+
+      const rows: (string | number)[][] = [
+        // Header block
+        ["Προμηθευτής", supName, "", "Ημερομηνία", today],
+        ["Στοιχεία Επικοινωνίας", supEmail, "", "ID Παραγγελίας", orderNum],
+        ["Σημειώσεις", notes || "", "", "Αριθμός Τιμολογίου", invoiceNumber || ""],
+        ["", "", "", "Συνολική Αξία", groupGross],
+        [],
+        // Column headers
+        ["Προϊόν", "Ποσότητα", "Τιμή Μονάδας", "ΦΠΑ %", "Μονάδα", "Σύνολο"],
+        // Items
+        ...g.items.map(item => [
+          item.productName,
+          item.orderedQuantity,
+          item.basePrice,
+          `${item.vatPercent}%`,
+          item.unit,
+          item.grossAmount,
+        ]),
+        [],
+        // Totals
+        ["", "", "", "", "Καθαρή Αξία:", groupNet],
+        ["", "", "", "", "ΦΠΑ:", groupVat],
+        ["", "", "", "", "ΣΥΝΟΛΟ:", groupGross],
+        [],
+        ["NOE BEACH CLUB", "", "", "", "", ""],
+      ];
+
+      const ws = XLSX.utils.aoa_to_sheet(rows);
+
+      // Column widths
+      ws["!cols"] = [
+        { wch: 45 }, { wch: 12 }, { wch: 14 }, { wch: 10 }, { wch: 12 }, { wch: 14 },
+      ];
+
+      // Safe sheet name (max 31 chars, no special chars)
+      const sheetName = supName.replace(/[\\/*?[\]:]/g, "").substring(0, 31);
+      XLSX.utils.book_append_sheet(wb, ws, sheetName);
+    }
+
+    const filename = `Παραγγελία_${orderNum}_${new Date(orderDate).toISOString().split("T")[0]}.xlsx`;
+    XLSX.writeFile(wb, filename);
+  }
+
   return (
     <div>
       <PageHeader title={t("headerDraftOrder")} subtitle="Φύλλο Παραγγελίας | Invoice-Grade Draft Order Form" />
@@ -616,7 +681,8 @@ ${pages.join("")}
               {saving ? "…" : "💾"} {t("btnSaveOrder")}
             </button>
             <button onClick={() => window.print()} className="erp-btn-secondary">🖨️ {t("btnPrint")}</button>
-            <button onClick={handleExportPDF} className="erp-btn-secondary">📄 {t("btnExportPDF")}</button>
+            <button onClick={handleExportPDF} disabled={items.length === 0} className="erp-btn-secondary">📄 PDF</button>
+            <button onClick={handleExportExcel} disabled={items.length === 0} className="erp-btn-secondary">📊 Excel</button>
             {items.length > 0 && (() => {
               // Group items by supplierId to build per-supplier email buttons
               const supplierGroups = new Map<number, { sup: typeof suppliers[0] | undefined; items: typeof items; net: number; vat: number; gross: number }>();
@@ -641,29 +707,55 @@ ${pages.join("")}
                 }
                 const supplierName = locale === "gr" ? s.name : (s.nameEn || s.name);
                 const today = new Date(orderDate).toLocaleDateString("el-GR", { day: "2-digit", month: "2-digit", year: "numeric" });
-                const subject = `Παραγγελία – NOE BEACH CLUB – ${today}`;
-                const SEP = "--------------------------------------------";
-                const rows = g.items.map((item, i) =>
-                  `${i + 1}. ${item.productName}  ${item.orderedQuantity} ${item.unit} | ${item.basePrice.toFixed(2)}EUR | ΦΠΑ ${item.vatPercent}% | ${item.grossAmount.toFixed(2)}EUR`
-                ).join("\n");
+                const subject = `Παραγγελία ${orderNum} – NOE BEACH CLUB – ${today}`;
+                const SEP = "================================================";
+                const SEP2 = "------------------------------------------------";
+                // Build aligned table rows
+                const pad = (str: string, len: number) => str.length >= len ? str.substring(0, len) : str + " ".repeat(len - str.length);
+                const tableRows = g.items.map((item) => {
+                  const qty = item.orderedQuantity % 1 === 0 ? item.orderedQuantity.toFixed(0) : item.orderedQuantity.toFixed(3);
+                  const price = item.basePrice.toFixed(2) + " EUR";
+                  const total = item.grossAmount.toFixed(2) + " EUR";
+                  return `${pad(item.productName, 36)} ${pad(qty + " " + item.unit, 10)} ${pad(price, 12)} ${total}`;
+                }).join("\n");
                 const body = [
-                  `NOE BEACH CLUB`, `ΠΑΡΑΓΓΕΛΙΑ`, SEP,
-                  `Ημερομηνία : ${today}`,
-                  `Προμηθευτής: ${supplierName}`,
-                  SEP, ``,
+                  `NOE BEACH CLUB`,
+                  SEP,
+                  `Προμηθευτής  : ${supplierName}`,
+                  `Email        : ${s.contactEmail}`,
+                  `Ημερομηνία   : ${today}`,
+                  `ID Παραγγελίας: ${orderNum}`,
+                  invoiceNumber ? `Αρ. Τιμολογίου: ${invoiceNumber}` : "",
+                  SEP,
+                  ``,
                   `Αγαπητοί,`,
                   `Σας αποστέλλουμε την παραγγελία μας.`,
                   `Παρακαλούμε επιβεβαιώστε διαθεσιμότητα και ημερομηνία παράδοσης.`,
-                  ``, rows, SEP,
-                  `ΚΑΘΑΡΗ ΑΞΙΑ: ${g.net.toFixed(2)} EUR`,
-                  `ΦΠΑ:         ${g.vat.toFixed(2)} EUR`,
-                  `ΣΥΝΟΛΟ:      ${g.gross.toFixed(2)} EUR`,
-                  ``, `Με εκτίμηση,`, `NOE BEACH CLUB`,
-                ].join("\n");
+                  ``,
+                  SEP2,
+                  `${pad("ΠΡΟΪΟΝ", 36)} ${pad("ΠΟΣΟΤΗΤΑ", 10)} ${pad("ΤΙΜΗ", 12)} ΣΥΝΟΛΟ`,
+                  SEP2,
+                  tableRows,
+                  SEP2,
+                  `${pad("", 36)} ${pad("", 10)} ${pad("Καθαρή Αξία:", 12)} ${g.net.toFixed(2)} EUR`,
+                  `${pad("", 36)} ${pad("", 10)} ${pad("ΦΠΑ:", 12)} ${g.vat.toFixed(2)} EUR`,
+                  `${pad("", 36)} ${pad("", 10)} ${pad("ΣΥΝΟΛΟ:", 12)} ${g.gross.toFixed(2)} EUR`,
+                  SEP,
+                  notes ? `Σημειώσεις: ${notes}` : "",
+                  ``,
+                  `Με εκτίμηση,`,
+                  `NOE BEACH CLUB`,
+                ].filter(l => l !== undefined).join("\n");
                 const s_enc = encodeURIComponent(subject);
                 const b_enc = encodeURIComponent(body);
                 const fullUrl = `mailto:${s.contactEmail}?subject=${s_enc}&body=${b_enc}`;
-                const shortUrl = `mailto:${s.contactEmail}?subject=${s_enc}&body=${encodeURIComponent(rows + "\n\nΣΥΝΟΛΟ: " + g.gross.toFixed(2) + " EUR")}`;
+                // Fallback: items only if full URL too long for mobile
+                const shortBody = [
+                  `Παραγγελία ${orderNum} – ${supplierName} – ${today}`, SEP2,
+                  tableRows, SEP2,
+                  `ΣΥΝΟΛΟ: ${g.gross.toFixed(2)} EUR`,
+                ].join("\n");
+                const shortUrl = `mailto:${s.contactEmail}?subject=${s_enc}&body=${encodeURIComponent(shortBody)}`;
                 const url = fullUrl.length < 2000 ? fullUrl : shortUrl;
                 const a = document.createElement("a");
                 a.href = url; a.target = "_blank"; a.rel = "noopener";
