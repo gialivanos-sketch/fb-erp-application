@@ -244,7 +244,7 @@ export default function RecipeCostingPage() {
         </div>
       </div>
 
-      <div className="flex gap-6">
+      <div id="printable-recipe-area" className="flex gap-6">
         {/* Recipe List */}
         <div className="w-full lg:w-1/3">
           <div className="erp-card">
