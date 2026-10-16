@@ -172,26 +172,27 @@ function printRecipePDF(recipe: Recipe, ingredients: DraftIngredient[], locale: 
   <div class="recipe-name-label">${isGr ? "ΟΝΟΜΑ ΣΥΝΤΑΓΗΣ:" : "RECIPE NAME:"}</div>
   <div class="recipe-name-row">${recipe.name.toUpperCase()}${recipe.nameEn ? ` (${recipe.nameEn.toUpperCase()})` : ""}</div>
 
+  <!-- Επικεφαλίδα υλικών -->
+  <div style="background:#1a5276;color:#fff;font-size:8px;font-weight:bold;text-transform:uppercase;padding:3px 6px;margin-top:4px;">
+    ${isGr ? "ΥΛΙΚΑ ΣΥΝΤΑΓΗΣ" : "RECIPE INGREDIENTS"}
+  </div>
+
   <!-- Πίνακας υλικών -->
   <table class="ing-table">
     <thead>
       <tr>
-        <th class="th-portions" colspan="1" style="width:35%">&nbsp;</th>
-        <th class="th-portions" style="background:#154360;width:9%">${isGr ? "ΜΕΡΙΔΕΣ" : "PORTIONS"}</th>
-        <th style="background:#154360;font-size:12px;font-weight:900;width:5%">${recipe.portionYield}</th>
+        <th class="th-portions" style="width:37%">&nbsp;<span style="float:right">${isGr ? "ΜΕΡΙΔΕΣ" : "PORTIONS"} <strong>${recipe.portionYield}</strong></span></th>
         <th style="width:12%">${isGr ? "ΜΟΝΑΔΕΣ" : "UNITS"}</th>
         <th style="width:13%">${isGr ? "ΤΙΜΗ/ΜΟΝΑΔΑ" : "PRICE/UNIT"}</th>
         <th style="width:13%">${isGr ? "ΠΟΣΟΤΗΤΑ / ΜΕΡΙΔΑ" : "QTY / PORTION"}</th>
         <th style="width:13%">${isGr ? "ΣΥΝΟΛΙΚΗ ΠΟΣΟΤΗΤΑ" : "TOTAL QTY"}</th>
-        <th style="width:13%">${isGr ? "ΚΟΣΤΟΣ ΥΛΙΚΩΝ / ΜΕΡΙΔΑ" : "COST / PORTION"}</th>
+        <th style="width:12%">${isGr ? "ΚΟΣΤΟΣ ΥΛΙΚΩΝ / ΜΕΡΙΔΑ" : "COST / PORTION"}</th>
       </tr>
     </thead>
     <tbody>
       ${ingredients.map((ing) => `
       <tr>
-        <td class="td-name" colspan="1">${ing.productName.toUpperCase()}</td>
-        <td></td>
-        <td></td>
+        <td class="td-name">${ing.productName.toUpperCase()}</td>
         <td class="td-unit">${ing.unit.toUpperCase()}</td>
         <td class="td-num">${ing.unitCost.toFixed(2)} €</td>
         <td class="td-num">${(ing.quantity / portions).toFixed(3)}</td>
@@ -200,8 +201,7 @@ function printRecipePDF(recipe: Recipe, ingredients: DraftIngredient[], locale: 
       </tr>`).join("")}
       ${Array.from({length: Math.max(0, MIN_ROWS - ingredients.length)}).map(() => `
       <tr>
-        <td colspan="1">&nbsp;</td><td></td><td></td>
-        <td></td><td></td><td></td><td></td><td></td>
+        <td>&nbsp;</td><td></td><td></td><td></td><td></td><td></td>
       </tr>`).join("")}
     </tbody>
   </table>
