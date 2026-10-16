@@ -244,8 +244,7 @@ export default function MenuPlannerPage() {
     document.body.removeChild(a);
   }, [suppliers, selectedMenu, menuTitle]);
 
-  async function handleExportPDF(supplierName: string, items: typeof consumptionItems) {
-    const { jsPDF } = await import("jspdf");
+  function handleExportPDF(supplierName: string, items: typeof consumptionItems) {
     const sup = suppliers.find(s => s.name === supplierName || s.nameEn === supplierName);
     const toEmail = sup?.contactEmail ?? "—";
     const today = new Date().toLocaleDateString("el-GR", { day: "2-digit", month: "2-digit", year: "numeric" });
@@ -254,150 +253,89 @@ export default function MenuPlannerPage() {
     const gross = items.reduce((s, i) => s + i.cost, 0);
     const vat = gross - net;
 
-    const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
-    const W = 210;
-    const MAR = 14;
-    const COL = W - MAR * 2;
-    let y = MAR;
-
-    // Title bar
-    doc.setFillColor(30, 64, 175);
-    doc.rect(MAR, y, COL, 10, "F");
-    doc.setTextColor(255, 255, 255);
-    doc.setFontSize(13);
-    doc.setFont("helvetica", "bold");
-    doc.text("NOE BEACH CLUB  -  ORDER FORM", MAR + 4, y + 7);
-    y += 14;
-
-    // Header grid
-    const hRowH = 8;
-    const labelW = 42;
-    const col1X = MAR;
-    const col2X = MAR + labelW;
-    const col3X = MAR + COL / 2 + 2;
-    const col4X = col3X + labelW;
-    const col2W = COL / 2 - labelW - 2;
-    const col4W = COL / 2 - labelW;
-
-    const headerRows = [
-      ["Supplier", supplierName, "Date", today],
-      ["Contact Email", toEmail, "Menu", menuName],
-      ["Covers", String(coverCount), "Total Amount", gross > 0 ? gross.toFixed(2) + " EUR" : "-"],
-    ];
-
-    for (const [l1, v1, l2, v2] of headerRows) {
-      doc.setFillColor(30, 64, 175);
-      doc.rect(col1X, y, labelW, hRowH, "F");
-      doc.setTextColor(255, 255, 255);
-      doc.setFontSize(8);
-      doc.setFont("helvetica", "bold");
-      doc.text(l1, col1X + 2, y + 5.5);
-      doc.setFillColor(248, 250, 252);
-      doc.rect(col2X, y, col2W, hRowH, "F");
-      doc.setDrawColor(200, 200, 200);
-      doc.rect(col2X, y, col2W, hRowH, "S");
-      doc.setTextColor(30, 30, 30);
-      doc.setFont("helvetica", "normal");
-      doc.text(String(v1).substring(0, 38), col2X + 2, y + 5.5);
-      if (l2) {
-        doc.setFillColor(30, 64, 175);
-        doc.rect(col3X, y, labelW, hRowH, "F");
-        doc.setTextColor(255, 255, 255);
-        doc.setFont("helvetica", "bold");
-        doc.text(l2, col3X + 2, y + 5.5);
-        doc.setFillColor(248, 250, 252);
-        doc.rect(col4X, y, col4W, hRowH, "F");
-        doc.setDrawColor(200, 200, 200);
-        doc.rect(col4X, y, col4W, hRowH, "S");
-        doc.setTextColor(30, 30, 30);
-        doc.setFont("helvetica", "normal");
-        doc.text(String(v2).substring(0, 30), col4X + 2, y + 5.5);
-      }
-      y += hRowH;
-    }
-    y += 6;
-
-    // Items table header
-    const colWidths = [86, 22, 26, 18, 30];
-    const colX = [MAR, MAR + 86, MAR + 108, MAR + 134, MAR + 152];
-    const rowH = 7;
-    const aligns: ("left" | "right" | "center")[] = ["left", "center", "right", "center", "right"];
-
-    doc.setFillColor(30, 64, 175);
-    doc.rect(MAR, y, COL, rowH, "F");
-    doc.setTextColor(255, 255, 255);
-    doc.setFontSize(8);
-    doc.setFont("helvetica", "bold");
-    const headers = ["Product", "Quantity", "Unit Price", "Unit", "Total"];
-    for (let c = 0; c < headers.length; c++) {
-      const x = c === 0 ? colX[c] + 2 : c === 4 ? colX[c] + colWidths[c] - 2 : colX[c] + colWidths[c] / 2;
-      doc.text(headers[c], x, y + 5, { align: aligns[c] });
-    }
-    y += rowH;
-
-    // Item rows
-    for (let i = 0; i < items.length; i++) {
-      const item = items[i];
-      const isEven = i % 2 === 0;
-      doc.setFillColor(isEven ? 248 : 255, isEven ? 250 : 255, isEven ? 252 : 255);
-      doc.rect(MAR, y, COL, rowH, "F");
-      doc.setDrawColor(229, 231, 235);
-      doc.line(MAR, y + rowH, MAR + COL, y + rowH);
-      doc.setTextColor(30, 30, 30);
-      doc.setFontSize(8);
-      doc.setFont("helvetica", "normal");
+    const rows = items.map((item, idx) => {
       const qty = item.qty % 1 === 0 ? item.qty.toFixed(0) : item.qty.toFixed(3);
-      const vals = [
-        item.name.substring(0, 46),
-        qty,
-        item.unitCost > 0 ? item.unitCost.toFixed(2) + " EUR" : "-",
-        item.unit,
-        item.cost > 0 ? item.cost.toFixed(2) + " EUR" : "-",
-      ];
-      for (let c = 0; c < vals.length; c++) {
-        const x = c === 0 ? colX[c] + 2 : c === 4 ? colX[c] + colWidths[c] - 2 : colX[c] + colWidths[c] / 2;
-        doc.text(vals[c], x, y + 5, { align: aligns[c] });
-      }
-      y += rowH;
-      if (y > 265) { doc.addPage(); y = MAR; }
-    }
+      const bg = idx % 2 === 0 ? "#f8fafc" : "#ffffff";
+      return `<tr style="background:${bg}">
+        <td style="padding:5px 6px;border-bottom:1px solid #e5e7eb">${item.name}</td>
+        <td style="padding:5px 6px;border-bottom:1px solid #e5e7eb;text-align:center">${qty}</td>
+        <td style="padding:5px 6px;border-bottom:1px solid #e5e7eb;text-align:right">${item.unitCost > 0 ? item.unitCost.toFixed(2) + " €" : "-"}</td>
+        <td style="padding:5px 6px;border-bottom:1px solid #e5e7eb;text-align:center">${item.unit}</td>
+        <td style="padding:5px 6px;border-bottom:1px solid #e5e7eb;text-align:right">${item.cost > 0 ? item.cost.toFixed(2) + " €" : "-"}</td>
+      </tr>`;
+    }).join("");
 
-    // Totals
-    y += 2;
-    if (gross > 0) {
-      const totals: [string, string][] = [
-        ["Net Amount:", net.toFixed(2) + " EUR"],
-        ["VAT:", vat.toFixed(2) + " EUR"],
-      ];
-      for (const [label, val] of totals) {
-        doc.setFillColor(248, 250, 252);
-        doc.rect(MAR, y, COL, 7, "F");
-        doc.setDrawColor(203, 213, 225);
-        doc.line(MAR, y + 7, MAR + COL, y + 7);
-        doc.setTextColor(100, 100, 100);
-        doc.setFontSize(8);
-        doc.setFont("helvetica", "normal");
-        doc.text(label, colX[3] + colWidths[3] - 2, y + 5, { align: "right" });
-        doc.text(val, colX[4] + colWidths[4] - 2, y + 5, { align: "right" });
-        y += 7;
-      }
-    }
-    doc.setFillColor(30, 58, 138);
-    doc.rect(MAR, y, COL, 8, "F");
-    doc.setTextColor(255, 255, 255);
-    doc.setFontSize(9);
-    doc.setFont("helvetica", "bold");
-    doc.text("TOTAL:", colX[3] + colWidths[3] - 2, y + 5.5, { align: "right" });
-    doc.text(gross > 0 ? gross.toFixed(2) + " EUR" : "-", colX[4] + colWidths[4] - 2, y + 5.5, { align: "right" });
+    const html = `<!DOCTYPE html><html lang="el"><head><meta charset="UTF-8">
+      <title>Παραγγελία – ${supplierName}</title>
+      <style>
+        body { font-family: Arial, sans-serif; margin: 20px; color: #1e293b; }
+        @media print { body { margin: 10mm; } @page { size: A4; margin: 10mm; } }
+      </style>
+    </head><body>
+      <div>
+        <div style="background:#1e40af;color:#fff;padding:10px 14px;font-size:15px;font-weight:700;letter-spacing:0.5px">
+          NOE BEACH CLUB &nbsp;–&nbsp; ORDER FORM
+        </div>
+        <table style="width:100%;border-collapse:collapse;margin-bottom:14px">
+          <tr>
+            <td style="width:22%;background:#1e40af;color:#fff;font-weight:700;font-size:10px;padding:5px 8px">Προμηθευτής</td>
+            <td style="width:28%;background:#f8fafc;border:1px solid #e2e8f0;font-size:10px;padding:5px 8px">${supplierName}</td>
+            <td style="width:22%;background:#1e40af;color:#fff;font-weight:700;font-size:10px;padding:5px 8px">Ημερομηνία</td>
+            <td style="width:28%;background:#f8fafc;border:1px solid #e2e8f0;font-size:10px;padding:5px 8px">${today}</td>
+          </tr>
+          <tr>
+            <td style="background:#1e40af;color:#fff;font-weight:700;font-size:10px;padding:5px 8px">Email Επικοινωνίας</td>
+            <td style="background:#f8fafc;border:1px solid #e2e8f0;font-size:10px;padding:5px 8px">${toEmail}</td>
+            <td style="background:#1e40af;color:#fff;font-weight:700;font-size:10px;padding:5px 8px">Μενού</td>
+            <td style="background:#f8fafc;border:1px solid #e2e8f0;font-size:10px;padding:5px 8px">${menuName}</td>
+          </tr>
+          <tr>
+            <td style="background:#1e40af;color:#fff;font-weight:700;font-size:10px;padding:5px 8px">Κόβερ</td>
+            <td style="background:#f8fafc;border:1px solid #e2e8f0;font-size:10px;padding:5px 8px">${coverCount}</td>
+            <td style="background:#1e40af;color:#fff;font-weight:700;font-size:10px;padding:5px 8px">Συνολική Αξία</td>
+            <td style="background:#f8fafc;border:1px solid #e2e8f0;font-size:10px;padding:5px 8px;font-weight:700">${gross > 0 ? gross.toFixed(2) + " EUR" : "-"}</td>
+          </tr>
+        </table>
+        <table style="width:100%;border-collapse:collapse">
+          <thead>
+            <tr style="background:#1e40af;color:#fff">
+              <th style="padding:6px 8px;text-align:left;font-size:10px;font-weight:700">Προϊόν</th>
+              <th style="padding:6px 8px;text-align:center;font-size:10px;font-weight:700">Ποσότητα</th>
+              <th style="padding:6px 8px;text-align:right;font-size:10px;font-weight:700">Τιμή Μονάδας</th>
+              <th style="padding:6px 8px;text-align:center;font-size:10px;font-weight:700">Μονάδα</th>
+              <th style="padding:6px 8px;text-align:right;font-size:10px;font-weight:700">Σύνολο</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+        <table style="width:100%;border-collapse:collapse;margin-top:2px">
+          ${gross > 0 ? `
+          <tr>
+            <td colspan="3"></td>
+            <td style="background:#f8fafc;border-bottom:1px solid #cbd5e1;padding:5px 8px;text-align:right;font-size:10px;color:#666">Καθαρή Αξία:</td>
+            <td style="background:#f8fafc;border-bottom:1px solid #cbd5e1;padding:5px 8px;text-align:right;font-size:10px;color:#666;width:100px">${net.toFixed(2)} EUR</td>
+          </tr>
+          <tr>
+            <td colspan="3"></td>
+            <td style="background:#f8fafc;border-bottom:1px solid #cbd5e1;padding:5px 8px;text-align:right;font-size:10px;color:#666">ΦΠΑ:</td>
+            <td style="background:#f8fafc;border-bottom:1px solid #cbd5e1;padding:5px 8px;text-align:right;font-size:10px;color:#666">${vat.toFixed(2)} EUR</td>
+          </tr>` : ""}
+          <tr>
+            <td colspan="3"></td>
+            <td style="background:#1e3a8a;color:#fff;padding:6px 8px;text-align:right;font-size:11px;font-weight:700">ΣΥΝΟΛΟ:</td>
+            <td style="background:#1e3a8a;color:#fff;padding:6px 8px;text-align:right;font-size:11px;font-weight:700">${gross > 0 ? gross.toFixed(2) + " EUR" : "-"}</td>
+          </tr>
+        </table>
+        <div style="text-align:center;margin-top:30px;font-size:9px;color:#94a3b8">
+          NOE BEACH CLUB &nbsp;|&nbsp; ${supplierName} &nbsp;|&nbsp; ${today}
+        </div>
+      </div>
+    </body></html>`;
 
-    // Footer
-    doc.setTextColor(148, 163, 184);
-    doc.setFontSize(8);
-    doc.setFont("helvetica", "normal");
-    doc.text(`NOE BEACH CLUB  |  ${supplierName}  |  ${today}`, W / 2, 287, { align: "center" });
-
-    const blobUrl = doc.output("bloburl");
-    window.open(blobUrl, "_blank");
+    const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const win = window.open(url, "_blank");
+    if (win) win.onload = () => URL.revokeObjectURL(url);
   }
 
   function loadMenu(menu: Menu) {
