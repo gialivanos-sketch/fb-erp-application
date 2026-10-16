@@ -188,44 +188,52 @@ export default function MenuPlannerPage() {
     const toEmail = sup?.contactEmail ?? "";
     const today = new Date().toLocaleDateString("el-GR", { day: "2-digit", month: "2-digit", year: "numeric" });
     const menuName = selectedMenu?.title ?? menuTitle;
-    const total = items.reduce((s, i) => s + i.cost, 0);
+    const net = items.reduce((s, i) => s + (i.unitCost > 0 ? i.cost / 1.24 : 0), 0);
+    const gross = items.reduce((s, i) => s + i.cost, 0);
+    const vat = gross - net;
 
-    // Simple line format — avoids Unicode box chars that bloat encodeURIComponent
-    const SEP = "--------------------------------------------";
-    const rows = items.map((item, i) => {
+    const SEP = "================================================";
+    const tableRows = items.map((item, idx) => {
       const qtyStr = item.qty % 1 === 0 ? item.qty.toFixed(0) : item.qty.toFixed(3);
-      const priceStr = item.unitCost > 0 ? ` | ${item.unitCost.toFixed(2)}/${item.unit} | ${item.cost.toFixed(2)}EUR` : "";
-      return `${i + 1}. ${item.name}  ${qtyStr} ${item.unit}${priceStr}`;
+      const name = item.name.length > 32 ? item.name.substring(0, 31) + "..." : item.name;
+      if (item.unitCost > 0) {
+        return `${String(idx + 1).padStart(2)}. ${name.padEnd(33)} | ${(qtyStr + " " + item.unit).padEnd(9)} | ${(item.unitCost.toFixed(2) + " EUR").padStart(10)} | ${(item.cost.toFixed(2) + " EUR").padStart(10)}`;
+      } else {
+        return `${String(idx + 1).padStart(2)}. ${name.padEnd(33)} | ${(qtyStr + " " + item.unit).padEnd(9)} |          - |          -`;
+      }
     }).join("\n");
 
-    const subject = `Παραγγελία Υλικών – NOE BEACH CLUB – ${today}`;
+    const subject = `Παραγγελία ${today} – NOE BEACH CLUB – ${supplierName}`;
     const body = [
-      `NOE BEACH CLUB`,
-      `ΠΑΡΑΓΓΕΛΙΑ ΥΛΙΚΩΝ`,
+      `NOE BEACH CLUB — ΠΑΡΑΓΓΕΛΙΑ`,
       SEP,
-      `Ημερομηνία : ${today}`,
-      `Μενού      : ${menuName}`,
-      `Προμηθευτής: ${supplierName}`,
+      `Προμηθευτής   : ${supplierName}`,
+      `Email         : ${toEmail}`,
+      `Ημερομηνία    : ${today}`,
+      `Μενού         : ${menuName}`,
       SEP,
       ``,
       `Αγαπητοί,`,
-      `Σας αποστέλλουμε την παραγγελία υλικών.`,
+      `Σας αποστέλλουμε την παραγγελία υλικών μας.`,
       `Παρακαλούμε επιβεβαιώστε διαθεσιμότητα και ημερομηνία παράδοσης.`,
       ``,
-      rows,
+      `  #  ${"ΠΡΟΪΟΝ".padEnd(33)} | ${"ΠΟΣΟΤΗΤΑ".padEnd(9)} |   ΤΙΜΗ/ΜΟΝ |     ΣΥΝΟΛΟ`,
+      `     ${"-".repeat(33)}-+-${"-".repeat(9)}-+${"-".repeat(11)}-+${"-".repeat(11)}`,
+      tableRows,
+      `     ${"-".repeat(33)}-+-${"-".repeat(9)}-+${"-".repeat(11)}-+${"-".repeat(11)}`,
+      gross > 0 ? `${"".padEnd(48)}  Καθαρή Αξία : ${net.toFixed(2)} EUR` : "",
+      gross > 0 ? `${"".padEnd(48)}  ΦΠΑ         : ${vat.toFixed(2)} EUR` : "",
+      gross > 0 ? `${"".padEnd(48)}  ΣΥΝΟΛΟ      : ${gross.toFixed(2)} EUR` : "",
       SEP,
-      `ΣΥΝΟΛΟ: ${total > 0 ? total.toFixed(2) + " EUR" : "-"}`,
       ``,
       `Με εκτίμηση,`,
       `NOE BEACH CLUB`,
-    ].join("\n");
+    ].filter(l => l !== undefined).join("\n");
 
     const subject_enc = encodeURIComponent(subject);
     const body_enc = encodeURIComponent(body);
-    // Android Chrome limits mailto: URLs. If body is too long, open with subject only
-    // and user can paste — but try full first.
     const fullUrl = `mailto:${toEmail}?subject=${subject_enc}&body=${body_enc}`;
-    const shortUrl = `mailto:${toEmail}?subject=${subject_enc}&body=${encodeURIComponent(rows + "\n\nΣΥΝΟΛΟ: " + (total > 0 ? total.toFixed(2) + " EUR" : "-"))}`;
+    const shortUrl = `mailto:${toEmail}?subject=${subject_enc}&body=${encodeURIComponent(tableRows)}`;
     const url = fullUrl.length < 2000 ? fullUrl : shortUrl;
     const a = document.createElement("a");
     a.href = url;
@@ -235,6 +243,162 @@ export default function MenuPlannerPage() {
     a.click();
     document.body.removeChild(a);
   }, [suppliers, selectedMenu, menuTitle]);
+
+  async function handleExportPDF(supplierName: string, items: typeof consumptionItems) {
+    const { jsPDF } = await import("jspdf");
+    const sup = suppliers.find(s => s.name === supplierName || s.nameEn === supplierName);
+    const toEmail = sup?.contactEmail ?? "—";
+    const today = new Date().toLocaleDateString("el-GR", { day: "2-digit", month: "2-digit", year: "numeric" });
+    const menuName = selectedMenu?.title ?? menuTitle;
+    const net = items.reduce((s, i) => s + (i.unitCost > 0 ? i.cost / 1.24 : 0), 0);
+    const gross = items.reduce((s, i) => s + i.cost, 0);
+    const vat = gross - net;
+
+    const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+    const W = 210;
+    const MAR = 14;
+    const COL = W - MAR * 2;
+    let y = MAR;
+
+    // Title bar
+    doc.setFillColor(30, 64, 175);
+    doc.rect(MAR, y, COL, 10, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(13);
+    doc.setFont("helvetica", "bold");
+    doc.text("NOE BEACH CLUB  -  ORDER FORM", MAR + 4, y + 7);
+    y += 14;
+
+    // Header grid
+    const hRowH = 8;
+    const labelW = 42;
+    const col1X = MAR;
+    const col2X = MAR + labelW;
+    const col3X = MAR + COL / 2 + 2;
+    const col4X = col3X + labelW;
+    const col2W = COL / 2 - labelW - 2;
+    const col4W = COL / 2 - labelW;
+
+    const headerRows = [
+      ["Supplier", supplierName, "Date", today],
+      ["Contact Email", toEmail, "Menu", menuName],
+      ["Covers", String(coverCount), "Total Amount", gross > 0 ? gross.toFixed(2) + " EUR" : "-"],
+    ];
+
+    for (const [l1, v1, l2, v2] of headerRows) {
+      doc.setFillColor(30, 64, 175);
+      doc.rect(col1X, y, labelW, hRowH, "F");
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(8);
+      doc.setFont("helvetica", "bold");
+      doc.text(l1, col1X + 2, y + 5.5);
+      doc.setFillColor(248, 250, 252);
+      doc.rect(col2X, y, col2W, hRowH, "F");
+      doc.setDrawColor(200, 200, 200);
+      doc.rect(col2X, y, col2W, hRowH, "S");
+      doc.setTextColor(30, 30, 30);
+      doc.setFont("helvetica", "normal");
+      doc.text(String(v1).substring(0, 38), col2X + 2, y + 5.5);
+      if (l2) {
+        doc.setFillColor(30, 64, 175);
+        doc.rect(col3X, y, labelW, hRowH, "F");
+        doc.setTextColor(255, 255, 255);
+        doc.setFont("helvetica", "bold");
+        doc.text(l2, col3X + 2, y + 5.5);
+        doc.setFillColor(248, 250, 252);
+        doc.rect(col4X, y, col4W, hRowH, "F");
+        doc.setDrawColor(200, 200, 200);
+        doc.rect(col4X, y, col4W, hRowH, "S");
+        doc.setTextColor(30, 30, 30);
+        doc.setFont("helvetica", "normal");
+        doc.text(String(v2).substring(0, 30), col4X + 2, y + 5.5);
+      }
+      y += hRowH;
+    }
+    y += 6;
+
+    // Items table header
+    const colWidths = [86, 22, 26, 18, 30];
+    const colX = [MAR, MAR + 86, MAR + 108, MAR + 134, MAR + 152];
+    const rowH = 7;
+    const aligns: ("left" | "right" | "center")[] = ["left", "center", "right", "center", "right"];
+
+    doc.setFillColor(30, 64, 175);
+    doc.rect(MAR, y, COL, rowH, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(8);
+    doc.setFont("helvetica", "bold");
+    const headers = ["Product", "Quantity", "Unit Price", "Unit", "Total"];
+    for (let c = 0; c < headers.length; c++) {
+      const x = c === 0 ? colX[c] + 2 : c === 4 ? colX[c] + colWidths[c] - 2 : colX[c] + colWidths[c] / 2;
+      doc.text(headers[c], x, y + 5, { align: aligns[c] });
+    }
+    y += rowH;
+
+    // Item rows
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      const isEven = i % 2 === 0;
+      doc.setFillColor(isEven ? 248 : 255, isEven ? 250 : 255, isEven ? 252 : 255);
+      doc.rect(MAR, y, COL, rowH, "F");
+      doc.setDrawColor(229, 231, 235);
+      doc.line(MAR, y + rowH, MAR + COL, y + rowH);
+      doc.setTextColor(30, 30, 30);
+      doc.setFontSize(8);
+      doc.setFont("helvetica", "normal");
+      const qty = item.qty % 1 === 0 ? item.qty.toFixed(0) : item.qty.toFixed(3);
+      const vals = [
+        item.name.substring(0, 46),
+        qty,
+        item.unitCost > 0 ? item.unitCost.toFixed(2) + " EUR" : "-",
+        item.unit,
+        item.cost > 0 ? item.cost.toFixed(2) + " EUR" : "-",
+      ];
+      for (let c = 0; c < vals.length; c++) {
+        const x = c === 0 ? colX[c] + 2 : c === 4 ? colX[c] + colWidths[c] - 2 : colX[c] + colWidths[c] / 2;
+        doc.text(vals[c], x, y + 5, { align: aligns[c] });
+      }
+      y += rowH;
+      if (y > 265) { doc.addPage(); y = MAR; }
+    }
+
+    // Totals
+    y += 2;
+    if (gross > 0) {
+      const totals: [string, string][] = [
+        ["Net Amount:", net.toFixed(2) + " EUR"],
+        ["VAT:", vat.toFixed(2) + " EUR"],
+      ];
+      for (const [label, val] of totals) {
+        doc.setFillColor(248, 250, 252);
+        doc.rect(MAR, y, COL, 7, "F");
+        doc.setDrawColor(203, 213, 225);
+        doc.line(MAR, y + 7, MAR + COL, y + 7);
+        doc.setTextColor(100, 100, 100);
+        doc.setFontSize(8);
+        doc.setFont("helvetica", "normal");
+        doc.text(label, colX[3] + colWidths[3] - 2, y + 5, { align: "right" });
+        doc.text(val, colX[4] + colWidths[4] - 2, y + 5, { align: "right" });
+        y += 7;
+      }
+    }
+    doc.setFillColor(30, 58, 138);
+    doc.rect(MAR, y, COL, 8, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "bold");
+    doc.text("TOTAL:", colX[3] + colWidths[3] - 2, y + 5.5, { align: "right" });
+    doc.text(gross > 0 ? gross.toFixed(2) + " EUR" : "-", colX[4] + colWidths[4] - 2, y + 5.5, { align: "right" });
+
+    // Footer
+    doc.setTextColor(148, 163, 184);
+    doc.setFontSize(8);
+    doc.setFont("helvetica", "normal");
+    doc.text(`NOE BEACH CLUB  |  ${supplierName}  |  ${today}`, W / 2, 287, { align: "center" });
+
+    const blobUrl = doc.output("bloburl");
+    window.open(blobUrl, "_blank");
+  }
 
   function loadMenu(menu: Menu) {
     if (!menu) return;
@@ -554,20 +718,25 @@ export default function MenuPlannerPage() {
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex flex-wrap gap-2">
               {Array.from(bySupplier.entries()).map(([supplierName, items]) => (
-                <button
-                  key={supplierName}
-                  onClick={() => sendOrderEmail(supplierName, items)}
-                  className="erp-btn-secondary text-xs"
-                  title={`Αποστολή παραγγελίας στον ${supplierName}`}
-                >
-                  📧 {supplierName} — €{items.reduce((s, i) => s + i.cost, 0).toFixed(2)}
-                </button>
+                <span key={supplierName} className="flex gap-1">
+                  <button
+                    onClick={() => handleExportPDF(supplierName, items)}
+                    className="erp-btn-secondary text-xs"
+                    title={`PDF παραγγελίας για ${supplierName}`}
+                  >
+                    📄 PDF
+                  </button>
+                  <button
+                    onClick={() => sendOrderEmail(supplierName, items)}
+                    className="erp-btn-secondary text-xs"
+                    title={`Αποστολή παραγγελίας στον ${supplierName}`}
+                  >
+                    📧 {supplierName} — €{items.reduce((s, i) => s + i.cost, 0).toFixed(2)}
+                  </button>
+                </span>
               ))}
             </div>
             <div className="flex gap-2">
-              <button onClick={() => window.print()} className="erp-btn-secondary text-xs">
-                🖨️ {locale === "gr" ? "Εκτύπωση" : "Print"}
-              </button>
               <button onClick={() => setShowConsumption(false)} className="erp-btn-primary text-xs">
                 ✓ {locale === "gr" ? "Κλείσιμο" : "Close"}
               </button>
