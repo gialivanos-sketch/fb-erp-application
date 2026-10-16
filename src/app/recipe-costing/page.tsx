@@ -30,149 +30,130 @@ export default function RecipeCostingPage() {
   const avgMargin = recipes.length > 0 ? recipes.reduce((s, r) => s + Number(r.profitMarginPercent || 0), 0) / recipes.length : 0;
   const avgCost = recipes.length > 0 ? recipes.reduce((s, r) => s + Number(r.totalCost || 0), 0) / recipes.length : 0;
 
-  async function handleExportPDF() {
+  function handleExportPDF() {
     if (!selectedRecipe) return;
-    const { jsPDF } = await import("jspdf");
     const c = calcCosting(selectedRecipe);
     const today = new Date().toLocaleDateString("el-GR", { day: "2-digit", month: "2-digit", year: "numeric" });
-    const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
-    const W = 210; const MAR = 14; const COL = W - MAR * 2;
-    let y = MAR;
 
-    // Title bar
-    doc.setFillColor(30, 64, 175);
-    doc.rect(MAR, y, COL, 10, "F");
-    doc.setTextColor(255, 255, 255);
-    doc.setFontSize(13); doc.setFont("helvetica", "bold");
-    doc.text("NOE BEACH CLUB  -  RECIPE COSTING", MAR + 4, y + 7);
-    y += 14;
+    const ingredientRows = (selectedRecipe.ingredients ?? []).map((ing, idx) => {
+      const bg = idx % 2 === 0 ? "#f8fafc" : "#ffffff";
+      return `<tr style="background:${bg}">
+        <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb">${ing.ingredientName}</td>
+        <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb;text-align:center">${Number(ing.quantity).toFixed(3)}</td>
+        <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb;text-align:center">${ing.unit}</td>
+        <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb;text-align:right">${Number(ing.unitCost).toFixed(2)} €</td>
+        <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb;text-align:right">${Number(ing.totalCost).toFixed(2)} €</td>
+      </tr>`;
+    }).join("");
 
-    // Header grid
-    const hRowH = 8; const labelW = 42;
-    const col1X = MAR; const col2X = MAR + labelW;
-    const col3X = MAR + COL / 2 + 2; const col4X = col3X + labelW;
-    const col2W = COL / 2 - labelW - 2; const col4W = COL / 2 - labelW;
+    const html = `<!DOCTYPE html><html lang="el"><head><meta charset="UTF-8">
+      <title>Recipe Costing – ${selectedRecipe.name}</title>
+      <style>
+        body { font-family: Arial, sans-serif; margin: 20px; color: #1e293b; font-size: 12px; }
+        @media print { body { margin: 10mm; } @page { size: A4; margin: 10mm; } }
+        table { width: 100%; border-collapse: collapse; }
+      </style>
+    </head><body>
 
-    const headerRows = [
-      ["Recipe", selectedRecipe.name, "Date", today],
-      ["Portion Yield", `${selectedRecipe.portionYield} ${selectedRecipe.portionUnit || ""}`, "Portions", String(c.portionYield)],
-      ["Profit Margin", `${profitMargin}%`, "VAT", `${vatPercent}%`],
-    ];
-    for (const [l1, v1, l2, v2] of headerRows) {
-      doc.setFillColor(30, 64, 175); doc.rect(col1X, y, labelW, hRowH, "F");
-      doc.setTextColor(255, 255, 255); doc.setFontSize(8); doc.setFont("helvetica", "bold");
-      doc.text(l1, col1X + 2, y + 5.5);
-      doc.setFillColor(248, 250, 252); doc.rect(col2X, y, col2W, hRowH, "F");
-      doc.setDrawColor(200, 200, 200); doc.rect(col2X, y, col2W, hRowH, "S");
-      doc.setTextColor(30, 30, 30); doc.setFont("helvetica", "normal");
-      doc.text(String(v1).substring(0, 38), col2X + 2, y + 5.5);
-      doc.setFillColor(30, 64, 175); doc.rect(col3X, y, labelW, hRowH, "F");
-      doc.setTextColor(255, 255, 255); doc.setFont("helvetica", "bold");
-      doc.text(l2, col3X + 2, y + 5.5);
-      doc.setFillColor(248, 250, 252); doc.rect(col4X, y, col4W, hRowH, "F");
-      doc.setDrawColor(200, 200, 200); doc.rect(col4X, y, col4W, hRowH, "S");
-      doc.setTextColor(30, 30, 30); doc.setFont("helvetica", "normal");
-      doc.text(String(v2), col4X + 2, y + 5.5);
-      y += hRowH;
-    }
-    y += 6;
+      <!-- Title bar -->
+      <div style="background:#1e40af;color:#fff;padding:10px 14px;font-size:15px;font-weight:700;letter-spacing:0.5px;margin-bottom:0">
+        NOE BEACH CLUB &nbsp;–&nbsp; RECIPE COSTING
+      </div>
 
-    // Cost breakdown section
-    doc.setFillColor(30, 64, 175); doc.rect(MAR, y, COL, 7, "F");
-    doc.setTextColor(255, 255, 255); doc.setFontSize(9); doc.setFont("helvetica", "bold");
-    doc.text("COST BREAKDOWN", MAR + 4, y + 5);
-    y += 7;
+      <!-- Header info -->
+      <table style="margin-bottom:14px">
+        <tr>
+          <td style="width:22%;background:#1e40af;color:#fff;font-weight:700;font-size:10px;padding:5px 8px">Συνταγή</td>
+          <td style="width:28%;background:#f8fafc;border:1px solid #e2e8f0;font-size:10px;padding:5px 8px">${selectedRecipe.name}</td>
+          <td style="width:22%;background:#1e40af;color:#fff;font-weight:700;font-size:10px;padding:5px 8px">Ημερομηνία</td>
+          <td style="width:28%;background:#f8fafc;border:1px solid #e2e8f0;font-size:10px;padding:5px 8px">${today}</td>
+        </tr>
+        <tr>
+          <td style="background:#1e40af;color:#fff;font-weight:700;font-size:10px;padding:5px 8px">Απόδοση Μερίδας</td>
+          <td style="background:#f8fafc;border:1px solid #e2e8f0;font-size:10px;padding:5px 8px">${selectedRecipe.portionYield} ${selectedRecipe.portionUnit || ""}</td>
+          <td style="background:#1e40af;color:#fff;font-weight:700;font-size:10px;padding:5px 8px">Μερίδες</td>
+          <td style="background:#f8fafc;border:1px solid #e2e8f0;font-size:10px;padding:5px 8px">${c.portionYield}</td>
+        </tr>
+        <tr>
+          <td style="background:#1e40af;color:#fff;font-weight:700;font-size:10px;padding:5px 8px">Περιθώριο Κέρδους</td>
+          <td style="background:#f8fafc;border:1px solid #e2e8f0;font-size:10px;padding:5px 8px">${profitMargin}%</td>
+          <td style="background:#1e40af;color:#fff;font-weight:700;font-size:10px;padding:5px 8px">ΦΠΑ</td>
+          <td style="background:#f8fafc;border:1px solid #e2e8f0;font-size:10px;padding:5px 8px">${vatPercent}%</td>
+        </tr>
+      </table>
 
-    const costRows: [string, string, boolean][] = [
-      ["Raw Material Cost", `${c.rawMaterial.toFixed(2)} EUR`, false],
-      ["Labor Cost", `${c.labor.toFixed(2)} EUR`, false],
-      ["Overhead Cost", `${c.overhead.toFixed(2)} EUR`, false],
-      ["Total Cost", `${c.total.toFixed(2)} EUR`, true],
-    ];
-    for (const [label, val, bold] of costRows) {
-      doc.setFillColor(bold ? 241 : 248, bold ? 245 : 250, bold ? 255 : 252);
-      doc.rect(MAR, y, COL, 8, "F");
-      doc.setDrawColor(203, 213, 225); doc.line(MAR, y + 8, MAR + COL, y + 8);
-      doc.setTextColor(30, 30, 30); doc.setFontSize(9);
-      doc.setFont("helvetica", bold ? "bold" : "normal");
-      doc.text(label, MAR + 4, y + 5.5);
-      doc.text(val, MAR + COL - 4, y + 5.5, { align: "right" });
-      y += 8;
-    }
-    y += 6;
+      <!-- Cost breakdown -->
+      <div style="background:#1e40af;color:#fff;padding:6px 10px;font-size:10px;font-weight:700;margin-bottom:0">
+        ΑΝΑΛΥΣΗ ΚΟΣΤΟΥΣ
+      </div>
+      <table style="margin-bottom:14px">
+        <tr>
+          <td style="background:#f8fafc;border-bottom:1px solid #cbd5e1;padding:5px 10px;font-size:10px">Κόστος Α΄ Υλών</td>
+          <td style="background:#f8fafc;border-bottom:1px solid #cbd5e1;padding:5px 10px;font-size:10px;text-align:right">${c.rawMaterial.toFixed(2)} EUR</td>
+        </tr>
+        <tr>
+          <td style="background:#ffffff;border-bottom:1px solid #cbd5e1;padding:5px 10px;font-size:10px">Κόστος Εργασίας</td>
+          <td style="background:#ffffff;border-bottom:1px solid #cbd5e1;padding:5px 10px;font-size:10px;text-align:right">${c.labor.toFixed(2)} EUR</td>
+        </tr>
+        <tr>
+          <td style="background:#f8fafc;border-bottom:1px solid #cbd5e1;padding:5px 10px;font-size:10px">Γενικά Έξοδα</td>
+          <td style="background:#f8fafc;border-bottom:1px solid #cbd5e1;padding:5px 10px;font-size:10px;text-align:right">${c.overhead.toFixed(2)} EUR</td>
+        </tr>
+        <tr>
+          <td style="background:#f1f5ff;border-bottom:1px solid #cbd5e1;padding:5px 10px;font-size:10px;font-weight:700">Συνολικό Κόστος</td>
+          <td style="background:#f1f5ff;border-bottom:1px solid #cbd5e1;padding:5px 10px;font-size:10px;font-weight:700;text-align:right">${c.total.toFixed(2)} EUR</td>
+        </tr>
+      </table>
 
-    // Pricing section
-    doc.setFillColor(30, 64, 175); doc.rect(MAR, y, COL, 7, "F");
-    doc.setTextColor(255, 255, 255); doc.setFontSize(9); doc.setFont("helvetica", "bold");
-    doc.text("PRICING", MAR + 4, y + 5);
-    y += 7;
+      <!-- Pricing -->
+      <div style="background:#1e40af;color:#fff;padding:6px 10px;font-size:10px;font-weight:700;margin-bottom:0">
+        ΤΙΜΟΛΟΓΗΣΗ
+      </div>
+      <table style="margin-bottom:14px">
+        <tr>
+          <td style="background:#f8fafc;border-bottom:1px solid #cbd5e1;padding:5px 10px;font-size:10px">Τιμή Πώλησης (${profitMargin}% περιθώριο)</td>
+          <td style="background:#f8fafc;border-bottom:1px solid #cbd5e1;padding:5px 10px;font-size:10px;text-align:right">${c.selling.toFixed(2)} EUR</td>
+        </tr>
+        <tr>
+          <td style="background:#ffffff;border-bottom:1px solid #cbd5e1;padding:5px 10px;font-size:10px">Τιμή Μενού + ΦΠΑ (${vatPercent}%)</td>
+          <td style="background:#ffffff;border-bottom:1px solid #cbd5e1;padding:5px 10px;font-size:10px;text-align:right">${c.menuVat.toFixed(2)} EUR</td>
+        </tr>
+        <tr>
+          <td style="background:#1e3a8a;color:#fff;padding:6px 10px;font-size:11px;font-weight:700">Τελική Τιμή Μενού / Μερίδα</td>
+          <td style="background:#1e3a8a;color:#fff;padding:6px 10px;font-size:11px;font-weight:700;text-align:right">${c.finalPrice.toFixed(2)} EUR</td>
+        </tr>
+      </table>
 
-    const priceRows: [string, string, boolean][] = [
-      [`Selling Price (${profitMargin}% margin)`, `${c.selling.toFixed(2)} EUR`, false],
-      [`Menu Price + VAT (${vatPercent}%)`, `${c.menuVat.toFixed(2)} EUR`, false],
-      ["Final Menu Price / Portion", `${c.finalPrice.toFixed(2)} EUR`, true],
-    ];
-    for (const [label, val, bold] of priceRows) {
-      doc.setFillColor(bold ? 30 : 248, bold ? 58 : 250, bold ? 138 : 252);
-      doc.rect(MAR, y, COL, 8, "F");
-      if (!bold) { doc.setDrawColor(203, 213, 225); doc.line(MAR, y + 8, MAR + COL, y + 8); }
-      doc.setTextColor(bold ? 255 : 30, bold ? 255 : 30, bold ? 255 : 30);
-      doc.setFontSize(bold ? 10 : 9);
-      doc.setFont("helvetica", bold ? "bold" : "normal");
-      doc.text(label, MAR + 4, y + 5.5);
-      doc.text(val, MAR + COL - 4, y + 5.5, { align: "right" });
-      y += 8;
-    }
-    y += 8;
+      ${(selectedRecipe.ingredients ?? []).length > 0 ? `
+      <!-- Ingredients section header -->
+      <div style="background:#1e40af;color:#fff;padding:6px 10px;font-size:10px;font-weight:700;margin-bottom:0">
+        ΥΛΙΚΑ ΣΥΝΤΑΓΗΣ
+      </div>
+      <!-- Ingredients column headers -->
+      <table>
+        <thead>
+          <tr style="background:#475569;color:#fff">
+            <th style="padding:6px 8px;text-align:left;font-size:10px;font-weight:700">Προϊόν</th>
+            <th style="padding:6px 8px;text-align:center;font-size:10px;font-weight:700">Ποσότητα</th>
+            <th style="padding:6px 8px;text-align:center;font-size:10px;font-weight:700">Μονάδα</th>
+            <th style="padding:6px 8px;text-align:right;font-size:10px;font-weight:700">Τιμή Μονάδας</th>
+            <th style="padding:6px 8px;text-align:right;font-size:10px;font-weight:700">Σύνολο</th>
+          </tr>
+        </thead>
+        <tbody>${ingredientRows}</tbody>
+      </table>
+      ` : ""}
 
-    // Ingredients table
-    if (selectedRecipe.ingredients && selectedRecipe.ingredients.length > 0) {
-      doc.setFillColor(30, 64, 175); doc.rect(MAR, y, COL, 7, "F");
-      doc.setTextColor(255, 255, 255); doc.setFontSize(9); doc.setFont("helvetica", "bold");
-      doc.text("INGREDIENT BREAKDOWN", MAR + 4, y + 5);
-      y += 7;
+      <div style="text-align:center;margin-top:30px;font-size:9px;color:#94a3b8">
+        NOE BEACH CLUB &nbsp;|&nbsp; ${selectedRecipe.name} &nbsp;|&nbsp; ${today}
+      </div>
 
-      const colW = [74, 22, 20, 28, 28]; // Product, Qty, Unit, Unit Cost, Total
-      const colXi = [MAR, MAR+74, MAR+96, MAR+116, MAR+144];
-      const hdrs = ["Product", "Qty", "Unit", "Unit Cost", "Total"];
-      const ali: ("left"|"right"|"center")[] = ["left","center","center","right","right"];
+    </body></html>`;
 
-      doc.setFillColor(71, 85, 105); doc.rect(MAR, y, COL, 7, "F");
-      doc.setTextColor(255, 255, 255); doc.setFontSize(8); doc.setFont("helvetica", "bold");
-      for (let c2 = 0; c2 < hdrs.length; c2++) {
-        const x = c2===0 ? colXi[c2]+2 : c2===4 ? colXi[c2]+colW[c2]-2 : colXi[c2]+colW[c2]/2;
-        doc.text(hdrs[c2], x, y+5, { align: ali[c2] });
-      }
-      y += 7;
-
-      for (let i = 0; i < selectedRecipe.ingredients.length; i++) {
-        const ing = selectedRecipe.ingredients[i];
-        const isEven = i % 2 === 0;
-        doc.setFillColor(isEven?248:255, isEven?250:255, isEven?252:255);
-        doc.rect(MAR, y, COL, 7, "F");
-        doc.setDrawColor(229, 231, 235); doc.line(MAR, y+7, MAR+COL, y+7);
-        doc.setTextColor(30,30,30); doc.setFontSize(8); doc.setFont("helvetica","normal");
-        const vals2 = [
-          ing.ingredientName.substring(0,38),
-          Number(ing.quantity).toFixed(3),
-          ing.unit,
-          `${Number(ing.unitCost).toFixed(2)} EUR`,
-          `${Number(ing.totalCost).toFixed(2)} EUR`,
-        ];
-        for (let c2 = 0; c2 < vals2.length; c2++) {
-          const x = c2===0 ? colXi[c2]+2 : c2===4 ? colXi[c2]+colW[c2]-2 : colXi[c2]+colW[c2]/2;
-          doc.text(vals2[c2], x, y+5, { align: ali[c2] });
-        }
-        y += 7;
-        if (y > 265) { doc.addPage(); y = MAR; }
-      }
-    }
-
-    // Footer
-    doc.setTextColor(148,163,184); doc.setFontSize(8); doc.setFont("helvetica","normal");
-    doc.text(`NOE BEACH CLUB  |  ${selectedRecipe.name}  |  ${today}`, W/2, 287, { align:"center" });
-
-    window.open(doc.output("bloburl"), "_blank");
+    const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const win = window.open(url, "_blank");
+    if (win) win.onload = () => URL.revokeObjectURL(url);
   }
 
   function handleExportExcel() {
