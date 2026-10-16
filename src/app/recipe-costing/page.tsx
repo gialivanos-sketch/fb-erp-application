@@ -220,6 +220,7 @@ export default function RecipeCostingPage() {
   return (
     <div>
       <PageHeader title={t("headerRecipeCosting")} subtitle="Κοστολόγηση Συνταγής & Margin Analysis">
+        <button onClick={() => window.print()} className="erp-btn-secondary">🖨️ {t("btnPrint")}</button>
         <button onClick={handleExportPDF} disabled={!selectedRecipe} className="erp-btn-secondary">📄 PDF</button>
         <button onClick={handleExportExcel} disabled={!selectedRecipe} className="erp-btn-secondary">📊 Excel</button>
       </PageHeader>
