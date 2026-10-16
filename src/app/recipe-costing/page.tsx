@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useLanguage } from "@/lib/context";
 import { PageHeader, KpiCard, Badge, FilterBar } from "@/components/shared";
 import type { Recipe } from "@/lib/types";
+import * as XLSX from "xlsx";
 
 export default function RecipeCostingPage() {
   const { t, locale, data } = useLanguage();
@@ -29,11 +30,198 @@ export default function RecipeCostingPage() {
   const avgMargin = recipes.length > 0 ? recipes.reduce((s, r) => s + Number(r.profitMarginPercent || 0), 0) / recipes.length : 0;
   const avgCost = recipes.length > 0 ? recipes.reduce((s, r) => s + Number(r.totalCost || 0), 0) / recipes.length : 0;
 
+  async function handleExportPDF() {
+    if (!selectedRecipe) return;
+    const { jsPDF } = await import("jspdf");
+    const c = calcCosting(selectedRecipe);
+    const today = new Date().toLocaleDateString("el-GR", { day: "2-digit", month: "2-digit", year: "numeric" });
+    const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+    const W = 210; const MAR = 14; const COL = W - MAR * 2;
+    let y = MAR;
+
+    // Title bar
+    doc.setFillColor(30, 64, 175);
+    doc.rect(MAR, y, COL, 10, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(13); doc.setFont("helvetica", "bold");
+    doc.text("NOE BEACH CLUB  -  RECIPE COSTING", MAR + 4, y + 7);
+    y += 14;
+
+    // Header grid
+    const hRowH = 8; const labelW = 42;
+    const col1X = MAR; const col2X = MAR + labelW;
+    const col3X = MAR + COL / 2 + 2; const col4X = col3X + labelW;
+    const col2W = COL / 2 - labelW - 2; const col4W = COL / 2 - labelW;
+
+    const headerRows = [
+      ["Recipe", selectedRecipe.name, "Date", today],
+      ["Portion Yield", `${selectedRecipe.portionYield} ${selectedRecipe.portionUnit || ""}`, "Portions", String(c.portionYield)],
+      ["Profit Margin", `${profitMargin}%`, "VAT", `${vatPercent}%`],
+    ];
+    for (const [l1, v1, l2, v2] of headerRows) {
+      doc.setFillColor(30, 64, 175); doc.rect(col1X, y, labelW, hRowH, "F");
+      doc.setTextColor(255, 255, 255); doc.setFontSize(8); doc.setFont("helvetica", "bold");
+      doc.text(l1, col1X + 2, y + 5.5);
+      doc.setFillColor(248, 250, 252); doc.rect(col2X, y, col2W, hRowH, "F");
+      doc.setDrawColor(200, 200, 200); doc.rect(col2X, y, col2W, hRowH, "S");
+      doc.setTextColor(30, 30, 30); doc.setFont("helvetica", "normal");
+      doc.text(String(v1).substring(0, 38), col2X + 2, y + 5.5);
+      doc.setFillColor(30, 64, 175); doc.rect(col3X, y, labelW, hRowH, "F");
+      doc.setTextColor(255, 255, 255); doc.setFont("helvetica", "bold");
+      doc.text(l2, col3X + 2, y + 5.5);
+      doc.setFillColor(248, 250, 252); doc.rect(col4X, y, col4W, hRowH, "F");
+      doc.setDrawColor(200, 200, 200); doc.rect(col4X, y, col4W, hRowH, "S");
+      doc.setTextColor(30, 30, 30); doc.setFont("helvetica", "normal");
+      doc.text(String(v2), col4X + 2, y + 5.5);
+      y += hRowH;
+    }
+    y += 6;
+
+    // Cost breakdown section
+    doc.setFillColor(30, 64, 175); doc.rect(MAR, y, COL, 7, "F");
+    doc.setTextColor(255, 255, 255); doc.setFontSize(9); doc.setFont("helvetica", "bold");
+    doc.text("COST BREAKDOWN", MAR + 4, y + 5);
+    y += 7;
+
+    const costRows: [string, string, boolean][] = [
+      ["Raw Material Cost", `${c.rawMaterial.toFixed(2)} EUR`, false],
+      ["Labor Cost", `${c.labor.toFixed(2)} EUR`, false],
+      ["Overhead Cost", `${c.overhead.toFixed(2)} EUR`, false],
+      ["Total Cost", `${c.total.toFixed(2)} EUR`, true],
+    ];
+    for (const [label, val, bold] of costRows) {
+      doc.setFillColor(bold ? 241 : 248, bold ? 245 : 250, bold ? 255 : 252);
+      doc.rect(MAR, y, COL, 8, "F");
+      doc.setDrawColor(203, 213, 225); doc.line(MAR, y + 8, MAR + COL, y + 8);
+      doc.setTextColor(30, 30, 30); doc.setFontSize(9);
+      doc.setFont("helvetica", bold ? "bold" : "normal");
+      doc.text(label, MAR + 4, y + 5.5);
+      doc.text(val, MAR + COL - 4, y + 5.5, { align: "right" });
+      y += 8;
+    }
+    y += 6;
+
+    // Pricing section
+    doc.setFillColor(30, 64, 175); doc.rect(MAR, y, COL, 7, "F");
+    doc.setTextColor(255, 255, 255); doc.setFontSize(9); doc.setFont("helvetica", "bold");
+    doc.text("PRICING", MAR + 4, y + 5);
+    y += 7;
+
+    const priceRows: [string, string, boolean][] = [
+      [`Selling Price (${profitMargin}% margin)`, `${c.selling.toFixed(2)} EUR`, false],
+      [`Menu Price + VAT (${vatPercent}%)`, `${c.menuVat.toFixed(2)} EUR`, false],
+      ["Final Menu Price / Portion", `${c.finalPrice.toFixed(2)} EUR`, true],
+    ];
+    for (const [label, val, bold] of priceRows) {
+      doc.setFillColor(bold ? 30 : 248, bold ? 58 : 250, bold ? 138 : 252);
+      doc.rect(MAR, y, COL, 8, "F");
+      if (!bold) { doc.setDrawColor(203, 213, 225); doc.line(MAR, y + 8, MAR + COL, y + 8); }
+      doc.setTextColor(bold ? 255 : 30, bold ? 255 : 30, bold ? 255 : 30);
+      doc.setFontSize(bold ? 10 : 9);
+      doc.setFont("helvetica", bold ? "bold" : "normal");
+      doc.text(label, MAR + 4, y + 5.5);
+      doc.text(val, MAR + COL - 4, y + 5.5, { align: "right" });
+      y += 8;
+    }
+    y += 8;
+
+    // Ingredients table
+    if (selectedRecipe.ingredients && selectedRecipe.ingredients.length > 0) {
+      doc.setFillColor(30, 64, 175); doc.rect(MAR, y, COL, 7, "F");
+      doc.setTextColor(255, 255, 255); doc.setFontSize(9); doc.setFont("helvetica", "bold");
+      doc.text("INGREDIENT BREAKDOWN", MAR + 4, y + 5);
+      y += 7;
+
+      const colW = [74, 22, 20, 28, 28]; // Product, Qty, Unit, Unit Cost, Total
+      const colXi = [MAR, MAR+74, MAR+96, MAR+116, MAR+144];
+      const hdrs = ["Product", "Qty", "Unit", "Unit Cost", "Total"];
+      const ali: ("left"|"right"|"center")[] = ["left","center","center","right","right"];
+
+      doc.setFillColor(71, 85, 105); doc.rect(MAR, y, COL, 7, "F");
+      doc.setTextColor(255, 255, 255); doc.setFontSize(8); doc.setFont("helvetica", "bold");
+      for (let c2 = 0; c2 < hdrs.length; c2++) {
+        const x = c2===0 ? colXi[c2]+2 : c2===4 ? colXi[c2]+colW[c2]-2 : colXi[c2]+colW[c2]/2;
+        doc.text(hdrs[c2], x, y+5, { align: ali[c2] });
+      }
+      y += 7;
+
+      for (let i = 0; i < selectedRecipe.ingredients.length; i++) {
+        const ing = selectedRecipe.ingredients[i];
+        const isEven = i % 2 === 0;
+        doc.setFillColor(isEven?248:255, isEven?250:255, isEven?252:255);
+        doc.rect(MAR, y, COL, 7, "F");
+        doc.setDrawColor(229, 231, 235); doc.line(MAR, y+7, MAR+COL, y+7);
+        doc.setTextColor(30,30,30); doc.setFontSize(8); doc.setFont("helvetica","normal");
+        const vals2 = [
+          ing.ingredientName.substring(0,38),
+          Number(ing.quantity).toFixed(3),
+          ing.unit,
+          `${Number(ing.unitCost).toFixed(2)} EUR`,
+          `${Number(ing.totalCost).toFixed(2)} EUR`,
+        ];
+        for (let c2 = 0; c2 < vals2.length; c2++) {
+          const x = c2===0 ? colXi[c2]+2 : c2===4 ? colXi[c2]+colW[c2]-2 : colXi[c2]+colW[c2]/2;
+          doc.text(vals2[c2], x, y+5, { align: ali[c2] });
+        }
+        y += 7;
+        if (y > 265) { doc.addPage(); y = MAR; }
+      }
+    }
+
+    // Footer
+    doc.setTextColor(148,163,184); doc.setFontSize(8); doc.setFont("helvetica","normal");
+    doc.text(`NOE BEACH CLUB  |  ${selectedRecipe.name}  |  ${today}`, W/2, 287, { align:"center" });
+
+    window.open(doc.output("bloburl"), "_blank");
+  }
+
+  function handleExportExcel() {
+    if (!selectedRecipe) return;
+    const c = calcCosting(selectedRecipe);
+    const today = new Date().toLocaleDateString("el-GR", { day: "2-digit", month: "2-digit", year: "numeric" });
+
+    const wb = XLSX.utils.book_new();
+    const rows: (string | number)[][] = [
+      ["NOE BEACH CLUB — RECIPE COSTING"],
+      [],
+      ["Recipe:", selectedRecipe.name],
+      ["Date:", today],
+      ["Portion Yield:", `${selectedRecipe.portionYield} ${selectedRecipe.portionUnit || ""}`],
+      ["Profit Margin:", `${profitMargin}%`],
+      ["VAT:", `${vatPercent}%`],
+      [],
+      ["COST BREAKDOWN"],
+      ["Raw Material Cost", c.rawMaterial],
+      ["Labor Cost", c.labor],
+      ["Overhead Cost", c.overhead],
+      ["Total Cost", c.total],
+      [],
+      ["PRICING"],
+      [`Selling Price (${profitMargin}% margin)`, c.selling],
+      [`Menu Price + VAT (${vatPercent}%)`, c.menuVat],
+      ["Final Menu Price / Portion", c.finalPrice],
+      [],
+      ["INGREDIENT BREAKDOWN"],
+      ["Product", "Quantity", "Unit", "Unit Cost (EUR)", "Total (EUR)"],
+    ];
+
+    if (selectedRecipe.ingredients) {
+      for (const ing of selectedRecipe.ingredients) {
+        rows.push([ing.ingredientName, Number(ing.quantity), ing.unit, Number(ing.unitCost), Number(ing.totalCost)]);
+      }
+    }
+
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    ws["!cols"] = [{ wch: 40 }, { wch: 14 }, { wch: 10 }, { wch: 16 }, { wch: 14 }];
+    XLSX.utils.book_append_sheet(wb, ws, "Costing");
+    XLSX.writeFile(wb, `Costing_${selectedRecipe.name.replace(/\s+/g,"_")}_${new Date().toISOString().split("T")[0]}.xlsx`);
+  }
+
   return (
     <div>
       <PageHeader title={t("headerRecipeCosting")} subtitle="Κοστολόγηση Συνταγής & Margin Analysis">
-        <button onClick={() => window.print()} className="erp-btn-secondary">🖨️ {t("btnPrint")}</button>
-        <button className="erp-btn-secondary">📄 {t("btnExportPDF")}</button>
+        <button onClick={handleExportPDF} disabled={!selectedRecipe} className="erp-btn-secondary">📄 PDF</button>
+        <button onClick={handleExportExcel} disabled={!selectedRecipe} className="erp-btn-secondary">📊 Excel</button>
       </PageHeader>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">

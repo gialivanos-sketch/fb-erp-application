@@ -610,7 +610,7 @@ export default function MenuPlannerPage() {
                             <select
                               value={mr.portionType ?? "portion"}
                               onChange={e => updateMenuRecipe(i, "portionType", e.target.value)}
-                              className="erp-input text-sm py-1 w-28"
+                              className="erp-input text-sm py-1 min-w-[9rem]"
                             >
                               <option value="portion">{locale === "gr" ? "Μερίδα" : "Portion"}</option>
                               <option value="kg">{locale === "gr" ? "Κιλό (μπουφές)" : "Kg (buffet)"}</option>
