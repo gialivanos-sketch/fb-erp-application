@@ -244,8 +244,8 @@ export default function DraftOrderPage() {
     }
   }
 
-  function handleExportPDF() {
-    // Gather data for the print window
+  async function handleExportPDF() {
+    const { jsPDF } = await import("jspdf");
     const today = new Date(orderDate).toLocaleDateString("el-GR", { day: "2-digit", month: "2-digit", year: "numeric" });
 
     // Group items by supplier
@@ -256,8 +256,13 @@ export default function DraftOrderPage() {
       groups.get(sid)!.items.push(item);
     }
 
-    // Build one print page per supplier group
-    const pages = Array.from(groups.entries()).map(([sid, g]) => {
+    const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+    const W = 210; // A4 width mm
+    const MAR = 14; // margin
+    const COL = W - MAR * 2; // content width
+    let firstPage = true;
+
+    for (const [sid, g] of groups.entries()) {
       const sup = g.sup ?? suppliers.find(x => x.id === sid);
       const supName = sup ? (locale === "gr" ? sup.name : (sup.nameEn || sup.name)) : "—";
       const supEmail = sup?.contactEmail ?? "—";
@@ -265,125 +270,162 @@ export default function DraftOrderPage() {
       const groupVat = g.items.reduce((s, i) => s + i.vatAmount, 0);
       const groupGross = g.items.reduce((s, i) => s + i.grossAmount, 0);
 
-      const rows = g.items.map((item, idx) => `
-        <tr>
-          <td>${item.productName}</td>
-          <td class="center">${item.orderedQuantity % 1 === 0 ? item.orderedQuantity.toFixed(0) : item.orderedQuantity.toFixed(3)}</td>
-          <td class="right">${item.basePrice.toFixed(2)} €</td>
-          <td class="center">${item.unit}</td>
-          <td class="right bold">${item.grossAmount.toFixed(2)} €</td>
-        </tr>
-      `).join("");
+      if (!firstPage) doc.addPage();
+      firstPage = false;
 
-      return `
-        <div class="page">
-          <table class="header-table">
-            <tr>
-              <td class="label">Προμηθευτής</td>
-              <td class="value bold">${supName}</td>
-              <td class="label">Ημερομηνία</td>
-              <td class="value">${today}</td>
-            </tr>
-            <tr>
-              <td class="label">Στοιχεία Επικοινωνίας</td>
-              <td class="value">${supEmail}</td>
-              <td class="label">ID Παραγγελίας</td>
-              <td class="value">${orderNum}</td>
-            </tr>
-            <tr>
-              <td class="label" rowspan="2">Σημειώσεις</td>
-              <td class="value" rowspan="2">${notes || ""}</td>
-              <td class="label">Αριθμός Τιμολογίου</td>
-              <td class="value">${invoiceNumber || ""}</td>
-            </tr>
-            <tr>
-              <td class="label">Συνολική Αξία</td>
-              <td class="value bold">${groupGross.toFixed(2)} €</td>
-            </tr>
-          </table>
+      let y = MAR;
 
-          <table class="items-table">
-            <thead>
-              <tr>
-                <th>Προϊόν</th>
-                <th class="center">Ποσότητα</th>
-                <th class="right">Τιμή</th>
-                <th class="center">Μονάδα</th>
-                <th class="right">Σύνολο</th>
-              </tr>
-            </thead>
-            <tbody>${rows}</tbody>
-            <tfoot>
-              <tr class="total-row">
-                <td colspan="4" class="right">Καθαρή Αξία:</td>
-                <td class="right">${groupNet.toFixed(2)} €</td>
-              </tr>
-              <tr class="total-row">
-                <td colspan="4" class="right">ΦΠΑ:</td>
-                <td class="right">${groupVat.toFixed(2)} €</td>
-              </tr>
-              <tr class="total-row grand">
-                <td colspan="4" class="right bold">ΣΥΝΟΛΟ:</td>
-                <td class="right bold">${groupGross.toFixed(2)} €</td>
-              </tr>
-            </tfoot>
-          </table>
+      // ── Title bar ──
+      doc.setFillColor(30, 64, 175); // blue-700
+      doc.rect(MAR, y, COL, 10, "F");
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(13);
+      doc.setFont("helvetica", "bold");
+      doc.text("NOE BEACH CLUB  —  ΦΥΛΛΟ ΠΑΡΑΓΓΕΛΙΑΣ", MAR + 4, y + 7);
+      y += 14;
 
-          <div class="footer">NOE BEACH CLUB &nbsp;|&nbsp; Παραγγελία ${orderNum} &nbsp;|&nbsp; ${today}</div>
-        </div>
-      `;
-    });
+      // ── Header grid ──
+      const hRowH = 8;
+      const labelW = 42;
+      const col1X = MAR;
+      const col2X = MAR + labelW;
+      const col3X = MAR + COL / 2 + 2;
+      const col4X = col3X + labelW;
+      const col2W = COL / 2 - labelW - 2;
+      const col4W = COL / 2 - labelW;
 
-    const html = `<!DOCTYPE html>
-<html lang="el">
-<head>
-<meta charset="UTF-8"/>
-<title>Παραγγελία ${orderNum}</title>
-<style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: Arial, sans-serif; font-size: 12px; color: #222; background: #fff; }
-  .page { padding: 32px; max-width: 800px; margin: 0 auto; page-break-after: always; }
-  .page:last-child { page-break-after: avoid; }
+      const headerRows = [
+        ["Προμηθευτής", supName, "Ημερομηνία", today],
+        ["Στοιχεία Επικοινωνίας", supEmail, "ID Παραγγελίας", orderNum],
+        ["Αρ. Τιμολογίου", invoiceNumber || "", "Συνολική Αξία", groupGross.toFixed(2) + " €"],
+        ["Σημειώσεις", notes || "", "", ""],
+      ];
 
-  /* Header table */
-  .header-table { width: 100%; border-collapse: collapse; margin-bottom: 24px; }
-  .header-table td { border: 1px solid #ccc; padding: 8px 12px; }
-  .header-table td.label { background: #1e40af; color: #fff; font-weight: bold; width: 160px; }
-  .header-table td.value { width: 240px; }
+      for (const [l1, v1, l2, v2] of headerRows) {
+        // left label
+        doc.setFillColor(30, 64, 175);
+        doc.rect(col1X, y, labelW, hRowH, "F");
+        doc.setTextColor(255, 255, 255);
+        doc.setFontSize(8);
+        doc.setFont("helvetica", "bold");
+        doc.text(l1, col1X + 2, y + 5.5);
+        // left value
+        doc.setFillColor(248, 250, 252);
+        doc.rect(col2X, y, col2W, hRowH, "F");
+        doc.setDrawColor(200, 200, 200);
+        doc.rect(col2X, y, col2W, hRowH, "S");
+        doc.setTextColor(30, 30, 30);
+        doc.setFont("helvetica", "normal");
+        doc.text(String(v1).substring(0, 38), col2X + 2, y + 5.5);
+        // right label (if present)
+        if (l2) {
+          doc.setFillColor(30, 64, 175);
+          doc.rect(col3X, y, labelW, hRowH, "F");
+          doc.setTextColor(255, 255, 255);
+          doc.setFont("helvetica", "bold");
+          doc.text(l2, col3X + 2, y + 5.5);
+          // right value
+          doc.setFillColor(248, 250, 252);
+          doc.rect(col4X, y, col4W, hRowH, "F");
+          doc.setDrawColor(200, 200, 200);
+          doc.rect(col4X, y, col4W, hRowH, "S");
+          doc.setTextColor(30, 30, 30);
+          doc.setFont("helvetica", "normal");
+          doc.text(String(v2), col4X + 2, y + 5.5);
+        }
+        y += hRowH;
+      }
+      y += 6;
 
-  /* Items table */
-  .items-table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
-  .items-table th { background: #1e40af; color: #fff; padding: 8px 12px; text-align: left; font-weight: bold; }
-  .items-table th.center { text-align: center; }
-  .items-table th.right { text-align: right; }
-  .items-table td { border-bottom: 1px solid #e5e7eb; padding: 8px 12px; }
-  .items-table td.center { text-align: center; }
-  .items-table td.right { text-align: right; }
-  .items-table tbody tr:nth-child(even) { background: #f8fafc; }
+      // ── Items table header ──
+      const colWidths = [86, 22, 26, 18, 30]; // Product, Qty, Price, Unit, Total
+      const colX = [MAR, MAR + 86, MAR + 108, MAR + 134, MAR + 152];
+      const rowH = 7;
 
-  /* Totals */
-  .total-row td { border-top: 1px solid #cbd5e1; padding: 6px 12px; background: #f8fafc; }
-  .grand td { background: #1e3a8a; color: #fff; font-size: 13px; }
-  .bold { font-weight: bold; }
-  .right { text-align: right; }
-  .center { text-align: center; }
+      doc.setFillColor(30, 64, 175);
+      doc.rect(MAR, y, COL, rowH, "F");
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(8);
+      doc.setFont("helvetica", "bold");
+      const headers = ["Προϊόν", "Ποσότητα", "Τιμή", "Μονάδα", "Σύνολο"];
+      const aligns: ("left" | "right" | "center")[] = ["left", "center", "right", "center", "right"];
+      for (let c = 0; c < headers.length; c++) {
+        const x = c === 0 ? colX[c] + 2 : c === 4 ? colX[c] + colWidths[c] - 2 : colX[c] + colWidths[c] / 2;
+        doc.text(headers[c], x, y + 5, { align: aligns[c] });
+      }
+      y += rowH;
 
-  .footer { text-align: center; font-size: 10px; color: #94a3b8; margin-top: 32px; border-top: 1px solid #e5e7eb; padding-top: 8px; }
+      // ── Item rows ──
+      for (let i = 0; i < g.items.length; i++) {
+        const item = g.items[i];
+        const isEven = i % 2 === 0;
+        doc.setFillColor(isEven ? 248 : 255, isEven ? 250 : 255, isEven ? 252 : 255);
+        doc.rect(MAR, y, COL, rowH, "F");
+        doc.setDrawColor(229, 231, 235);
+        doc.line(MAR, y + rowH, MAR + COL, y + rowH);
 
-  @media print {
-    body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-    .page { padding: 16px; }
-  }
-</style>
-</head>
-<body>
-${pages.join("")}
-<script>window.onload = function(){ window.print(); };<\/script>
-</body>
-</html>`;
+        doc.setTextColor(30, 30, 30);
+        doc.setFontSize(8);
+        doc.setFont("helvetica", "normal");
 
-    const w = window.open("", "_blank", "width=900,height=700");
-    if (w) { w.document.write(html); w.document.close(); }
+        const qty = item.orderedQuantity % 1 === 0 ? item.orderedQuantity.toFixed(0) : item.orderedQuantity.toFixed(3);
+        const vals = [
+          item.productName.substring(0, 46),
+          qty,
+          item.basePrice.toFixed(2) + " €",
+          item.unit,
+          item.grossAmount.toFixed(2) + " €",
+        ];
+        for (let c = 0; c < vals.length; c++) {
+          const x = c === 0 ? colX[c] + 2 : c === 4 ? colX[c] + colWidths[c] - 2 : colX[c] + colWidths[c] / 2;
+          doc.text(vals[c], x, y + 5, { align: aligns[c] });
+        }
+        y += rowH;
+
+        // New page if needed
+        if (y > 265) {
+          doc.addPage();
+          y = MAR;
+        }
+      }
+
+      // ── Totals ──
+      y += 2;
+      const totals: [string, string][] = [
+        ["Καθαρή Αξία:", groupNet.toFixed(2) + " €"],
+        ["ΦΠΑ:", groupVat.toFixed(2) + " €"],
+      ];
+      for (const [label, val] of totals) {
+        doc.setFillColor(248, 250, 252);
+        doc.rect(MAR, y, COL, 7, "F");
+        doc.setDrawColor(203, 213, 225);
+        doc.line(MAR, y + 7, MAR + COL, y + 7);
+        doc.setTextColor(100, 100, 100);
+        doc.setFontSize(8);
+        doc.setFont("helvetica", "normal");
+        doc.text(label, colX[3] + colWidths[3] - 2, y + 5, { align: "right" });
+        doc.text(val, colX[4] + colWidths[4] - 2, y + 5, { align: "right" });
+        y += 7;
+      }
+      // Grand total
+      doc.setFillColor(30, 58, 138); // darker blue
+      doc.rect(MAR, y, COL, 8, "F");
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(9);
+      doc.setFont("helvetica", "bold");
+      doc.text("ΣΥΝΟΛΟ:", colX[3] + colWidths[3] - 2, y + 5.5, { align: "right" });
+      doc.text(groupGross.toFixed(2) + " €", colX[4] + colWidths[4] - 2, y + 5.5, { align: "right" });
+      y += 12;
+
+      // ── Footer ──
+      doc.setTextColor(148, 163, 184);
+      doc.setFontSize(8);
+      doc.setFont("helvetica", "normal");
+      doc.text(`NOE BEACH CLUB  |  Παραγγελία ${orderNum}  |  ${today}`, W / 2, 287, { align: "center" });
+    }
+
+    const filename = `Παραγγελία_${orderNum}_${new Date(orderDate).toISOString().split("T")[0]}.pdf`;
+    doc.save(filename);
   }
 
   function handleExportExcel() {
