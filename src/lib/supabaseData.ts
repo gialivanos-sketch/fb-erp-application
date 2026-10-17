@@ -653,9 +653,12 @@ function mapIngredient(row: {
 }
 
 export async function fetchIngredients(): Promise<Ingredient[]> {
-  const { data, error } = await requireClient().from("ingredients").select("id, sku, name, name_en, current_stock, unit, base_price, conversion_factor, conversion_per_unit, mapped_supplier_product_id, wastage_factor, calories, is_active, created_at").order("name", { ascending: true });
-  if (error) throw error;
-  return (data ?? []).map(mapIngredient);
+  // σε σελίδες — τα υλικά είναι 2.800+ και το Supabase δίνει έως 1000 ανά αίτημα
+  const client = requireClient();
+  const data = await fetchAllPages<any>((from, to) => client.from("ingredients")
+    .select("id, sku, name, name_en, current_stock, unit, base_price, conversion_factor, conversion_per_unit, mapped_supplier_product_id, wastage_factor, calories, is_active, created_at")
+    .order("name", { ascending: true }).order("id", { ascending: true }).range(from, to));
+  return data.map(mapIngredient);
 }
 
 export interface IngredientCurrentPrice {
@@ -939,34 +942,25 @@ function mapRecipeIngredient(row: {
 export async function fetchRecipes(): Promise<Recipe[]> {
   const client = requireClient();
 
-  // 1 αίτημα: όλες οι συνταγές (χωρίς τα υλικά τους ακόμα)
-  const { data: recipes, error } = await client
+  // Όλες οι συνταγές (χωρίς τα υλικά τους ακόμα), σε σελίδες
+  const recipes = await fetchAllPages<any>((from, to) => client
     .from("recipes")
     .select("id, name, name_en, portion_yield, portion_unit, allergens, technical_guide, total_raw_material_cost, labor_cost, overhead_cost, total_cost, profit_margin_percent, selling_price, menu_price_vat, menu_price_final, is_active, created_at")
-    .order("name", { ascending: true });
-  if (error) throw error;
+    .order("name", { ascending: true })
+    .order("id", { ascending: true })
+    .range(from, to));
 
-  // Όλες οι γραμμές recipe_ingredients σε batches των 5000,
-  // για να ξεπεράσουμε το default Supabase limit των 1000 rows.
-  const allIngredients: Array<{
+  // Όλες οι γραμμές recipe_ingredients σε σελίδες των 1000 (όριο Supabase).
+  const allIngredients = await fetchAllPages<{
     id: number; recipe_id: number; ingredient_id: number | null;
     ingredient_name: string; quantity: number; unit: string;
     unit_cost: number; total_cost: number; wastage_factor: number;
     requires_prep: boolean; prep_notes: string | null;
-  }> = [];
-  const PAGE_SIZE = 5000;
-  let from = 0;
-  while (true) {
-    const { data: page, error: ingError } = await client
-      .from("recipe_ingredients")
-      .select("id, recipe_id, ingredient_id, ingredient_name, quantity, unit, unit_cost, total_cost, wastage_factor, requires_prep, prep_notes")
-      .range(from, from + PAGE_SIZE - 1);
-    if (ingError) throw ingError;
-    if (!page || page.length === 0) break;
-    allIngredients.push(...page);
-    if (page.length < PAGE_SIZE) break;
-    from += PAGE_SIZE;
-  }
+  }>((from, to) => client
+    .from("recipe_ingredients")
+    .select("id, recipe_id, ingredient_id, ingredient_name, quantity, unit, unit_cost, total_cost, wastage_factor, requires_prep, prep_notes")
+    .order("id", { ascending: true })
+    .range(from, to));
 
   // Ομαδοποίηση στη μνήμη: recipe_id -> λίστα υλικών του.
   const ingredientsByRecipeId = new Map<number, typeof allIngredients>();
@@ -1771,6 +1765,50 @@ export async function activateBusiness(id: number, copySkuFrom?: number | null):
   if (!supabase) throw new Error("Supabase not initialized");
   const { error } = await (supabase as any).rpc("activate_business", { p_id: id, p_copy_sku_from: copySkuFrom ?? null });
   if (error) throw error;
+}
+
+// ── Τιμές συνταγών από αγορές ────────────────────────────────────────────────
+export interface SkuConversion { sku: string; unit: string; grams: number }
+
+/** null = δεν έχει τρέξει το migration_recipe_pricing.sql */
+export async function fetchSkuConversions(): Promise<SkuConversion[] | null> {
+  if (!supabase) throw new Error("Supabase not initialized");
+  const client = supabase;
+  try {
+    const rows = await fetchAllPages<any>((from, to) => (client as any).from("sku_unit_conversions")
+      .select("sku, unit, grams").order("id").range(from, to));
+    return rows.map((r: any) => ({ sku: r.sku, unit: r.unit, grams: Number(r.grams) }));
+  } catch { return null; }
+}
+
+export async function upsertSkuConversion(sku: string, unit: string, grams: number): Promise<void> {
+  if (!supabase) throw new Error("Supabase not initialized");
+  const { error } = await (supabase as any).from("sku_unit_conversions")
+    .upsert({ sku, unit, grams, updated_at: new Date().toISOString() }, { onConflict: "business_id,sku,unit" });
+  if (error) throw error;
+}
+
+export interface RecipePricePayload {
+  ingredients: { id: number; unit_cost: number; total_cost: number }[];
+  recipes: { id: number; raw: number; total: number; selling: number; menu_vat: number; menu_final: number }[];
+}
+
+/** Μαζική εγγραφή τιμών υλικών + κόστους συνταγών (RPC apply_recipe_prices). */
+export async function applyRecipePrices(p: RecipePricePayload): Promise<{ ingredients: number; recipes: number }> {
+  if (!supabase) throw new Error("Supabase not initialized");
+  let ing = 0, rec = 0;
+  const CH = 1500;
+  for (let i = 0; i < Math.max(p.ingredients.length, 1); i += CH) {
+    const { data, error } = await (supabase as any).rpc("apply_recipe_prices", { p: { ingredients: p.ingredients.slice(i, i + CH), recipes: [] } });
+    if (error) throw error;
+    ing += Number(data?.ingredients ?? 0);
+  }
+  for (let i = 0; i < p.recipes.length; i += CH) {
+    const { data, error } = await (supabase as any).rpc("apply_recipe_prices", { p: { ingredients: [], recipes: p.recipes.slice(i, i + CH) } });
+    if (error) throw error;
+    rec += Number(data?.recipes ?? 0);
+  }
+  return { ingredients: ing, recipes: rec };
 }
 
 // ── SKU Group rename ──────────────────────────────────────────────────────────

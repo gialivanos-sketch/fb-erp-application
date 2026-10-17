@@ -5,6 +5,7 @@ import { PageHeader, KpiCard, Badge, FilterBar } from "@/components/shared";
 import type { Recipe } from "@/lib/types";
 import * as XLSX from "xlsx";
 import { useBusinessName } from "@/lib/useBusinessName";
+import RecipePricingPanel from "@/components/RecipePricingPanel";
 
 export default function RecipeCostingPage() {
   const bizName = useBusinessName();
@@ -207,6 +208,8 @@ export default function RecipeCostingPage() {
         <button onClick={handleExportPDF} disabled={!selectedRecipe} className="erp-btn-secondary">📄 PDF</button>
         <button onClick={handleExportExcel} disabled={!selectedRecipe} className="erp-btn-secondary">📊 Excel</button>
       </PageHeader>
+
+      <RecipePricingPanel />
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
         <KpiCard label={locale === "gr" ? "Μέσο Κόστος" : "Avg Cost"} value={fmt(avgCost)} color="blue" icon="💰" />
