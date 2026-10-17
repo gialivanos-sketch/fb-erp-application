@@ -13,7 +13,7 @@ import { useApp } from "@/lib/context";
 import * as db from "@/lib/supabaseData";
 import { buildSkuLookup, groupLines, normKey, type PurchaseLine } from "@/lib/itemAnalysis";
 import {
-  buildGroupPrices, priceIngredient, suggestGroups, recipeTotals, PRICE_WINDOW_DAYS, suggestPackGrams, purchaseUnitKey, isPiecesKey, recipeUnitInfo,
+  buildGroupPrices, priceIngredient, suggestGroups, recipeTotals, PRICE_WINDOW_DAYS, suggestPackGrams, purchaseUnitKey, isPiecesKey, recipeUnitInfo, linkLooksWrong,
   type GroupCandidate, type IngredientPrice, type ScoredCandidate,
 } from "@/lib/recipePricing";
 
@@ -41,7 +41,9 @@ export default function RecipePricingPanel() {
   const [skuMap, setSkuMap] = useState<db.ProductSkuMapEntry[] | null>(null);
   const [convs, setConvs] = useState<db.SkuConversion[] | null | undefined>(undefined);
   const [open, setOpen] = useState(false);
-  const [tab, setTab] = useState<"link" | "conv" | "other">("link");
+  const [tab, setTab] = useState<"link" | "review" | "conv" | "other">("link");
+  const [onlySuspicious, setOnlySuspicious] = useState(true);
+  const [reviewFilter, setReviewFilter] = useState("");
   const [choice, setChoice] = useState<Record<string, string>>({});   // υλικό → "SKU|ομάδα"
   const [gramsIn, setGramsIn] = useState<Record<string, string>>({});  // "sku|unit" → γρ.
   const [busy, setBusy] = useState(false);
@@ -183,6 +185,37 @@ export default function RecipePricingPanel() {
     return m;
   }, [analysis?.unlinked, candidates]);
 
+  // Συνδέσεις υλικών συνταγών → ομάδα, με σήμανση «ύποπτη» (π.χ. ΚΟΥΒΕΡΤΟΥΡΑ → ΚΟΥΒΕΡ ΞΥΛΙΝΟ)
+  const linkedReview = useMemo(() => {
+    if (!analysis) return [];
+    const textBySku = new Map(candidates.map(c => [c.sku, c.text]));
+    const purchased = new Set(purchases.map(p => normKey(p.product)));
+    const m = new Map<string, { name: string; sku: string; group: string; uses: number; rowIds: number[]; suspicious: boolean; isPurchase: boolean }>();
+    for (const r of analysis.rows) {
+      const info = lookup.get(normKey(r.name));
+      if (!info) continue;
+      const k = normKey(r.name);
+      const e = m.get(k) ?? { name: r.name.trim(), sku: info.sku, group: info.group, uses: 0, rowIds: [], suspicious: !purchased.has(k) && linkLooksWrong(r.name, textBySku.get(info.sku) ?? info.group), isPurchase: purchased.has(k) };
+      e.uses++; e.rowIds.push(r.ingId); m.set(k, e);
+    }
+    return [...m.values()].sort((a, b) => Number(b.suspicious) - Number(a.suspicious) || b.uses - a.uses);
+  }, [analysis, lookup, candidates, purchases]);
+
+  async function unlink(item: { name: string; group: string; rowIds: number[] }) {
+    if (!confirm(gr ? `Αποσύνδεση «${item.name}» από «${item.group}»;\n\nΗ τιμή του στις ${item.rowIds.length} γραμμές συνταγών μηδενίζεται μέχρι να το συνδέσεις σωστά.` : `Unlink "${item.name}"?`)) return;
+    setBusy(true); setMsg(null);
+    try {
+      await db.deleteProductSkuMapByName(item.name);
+      await db.applyRecipePrices({ ingredients: item.rowIds.map(id => ({ id, unit_cost: 0, total_cost: 0 })), recipes: [] });
+      const k = normKey(item.name);
+      setSkuMap(prev => (prev ?? []).filter(e => normKey(e.productName) !== k));
+      setChoice(c => ({ ...c, [item.name]: "" }));
+      setMsg({ ok: true, text: gr ? `✅ «${item.name}» αποσυνδέθηκε — βρίσκεται ξανά στη «Σύνδεση με ομάδα».` : "✅ Unlinked." });
+    } catch (err) {
+      setMsg({ ok: false, text: (gr ? "Αποτυχία: " : "Failed: ") + String((err as { message?: string })?.message ?? err) });
+    } finally { setBusy(false); }
+  }
+
   // Προσυμπλήρωση ΜΟΝΟ για βέβαιες προτάσεις — στις πιθανές διαλέγει ο χρήστης.
   function chosen(name: string): string {
     if (choice[name] !== undefined) return choice[name];
@@ -309,7 +342,7 @@ export default function RecipePricingPanel() {
       {open && (
         <div className="border-t border-slate-100">
           <div className="flex gap-1 px-4 pt-3">
-            {([["link", gr ? `Σύνδεση με ομάδα (${analysis.unlinked.length})` : "Link"], ["conv", gr ? `Μετατροπές (${new Set(analysis.needConv.map(c => c.sku)).size})` : "Conversions"], ["other", gr ? "Λοιπά" : "Other"]] as const).map(([k, l]) => (
+            {([["link", gr ? `Σύνδεση με ομάδα (${analysis.unlinked.length})` : "Link"], ["review", gr ? `Έλεγχος συνδέσεων (⚠ ${linkedReview.filter(x => x.suspicious).length})` : "Review links"], ["conv", gr ? `Μετατροπές (${new Set(analysis.needConv.map(c => c.sku)).size})` : "Conversions"], ["other", gr ? "Λοιπά" : "Other"]] as const).map(([k, l]) => (
               <button key={k} onClick={() => setTab(k)} className={`px-3 py-1.5 rounded-t text-sm ${tab === k ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600"}`}>{l}</button>
             ))}
           </div>
@@ -431,6 +464,37 @@ export default function RecipePricingPanel() {
                   {analysis.needConv.length === 0 && <tr><td colSpan={4} className="text-center py-6 text-slate-400">{gr ? "Δεν χρειάζεται καμία μετατροπή 👍" : "Nothing to convert 👍"}</td></tr>}
                 </tbody>
               </table>
+            </div>
+          )}
+
+          {tab === "review" && (
+            <div className="p-4">
+              <div className="flex flex-wrap items-center gap-3 mb-3 text-sm">
+                <input className="erp-input max-w-xs" placeholder={gr ? "Φίλτρο υλικού ή ομάδας…" : "Filter…"} value={reviewFilter} onChange={e => setReviewFilter(e.target.value)} />
+                <label className="flex items-center gap-2"><input type="checkbox" checked={onlySuspicious} onChange={e => setOnlySuspicious(e.target.checked)} />{gr ? "Μόνο ⚠ ύποπτες" : "Suspicious only"}</label>
+                <span className="text-xs text-slate-500">{gr ? "⚠ = η κύρια λέξη του υλικού δεν υπάρχει ολόκληρη στην ομάδα (π.χ. ΚΟΥΒΕΡΤΟΥΡΑ → ΚΟΥΒΕΡ ΞΥΛΙΝΟ)." : ""}</span>
+              </div>
+              <div className="overflow-x-auto max-h-[480px] overflow-y-auto">
+                <table className="erp-table text-sm">
+                  <thead><tr><th>{gr ? "Υλικό συνταγής" : "Ingredient"}</th><th className="text-right">{gr ? "Χρήσεις" : "Uses"}</th><th>{gr ? "Συνδέθηκε με" : "Linked to"}</th><th></th></tr></thead>
+                  <tbody>
+                    {linkedReview
+                      .filter(x => (!onlySuspicious || x.suspicious) && (!reviewFilter || normKey(x.name + " " + x.group).includes(normKey(reviewFilter))))
+                      .slice(0, 300)
+                      .map(x => (
+                        <tr key={x.name} className={x.suspicious ? "bg-amber-50" : ""}>
+                          <td className="font-medium">{x.suspicious && "⚠ "}{x.name}</td>
+                          <td className="text-right">{x.uses}</td>
+                          <td><span className="font-mono text-xs text-slate-500 mr-2">{x.sku}</span>{x.group}</td>
+                          <td>{x.isPurchase
+                            ? <span className="text-[11px] text-slate-400">{gr ? "όνομα προϊόντος αγοράς — αλλάζει από την Ομαδοποίηση SKU" : "purchase product"}</span>
+                            : <button disabled={busy} onClick={() => unlink(x)} className="erp-btn-danger text-xs px-2 py-1">✕ {gr ? "Αποσύνδεση" : "Unlink"}</button>}</td>
+                        </tr>
+                      ))}
+                    {linkedReview.filter(x => !onlySuspicious || x.suspicious).length === 0 && <tr><td colSpan={4} className="text-center py-6 text-slate-400">{gr ? "Καμία ύποπτη σύνδεση 👍" : "Nothing suspicious 👍"}</td></tr>}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
 

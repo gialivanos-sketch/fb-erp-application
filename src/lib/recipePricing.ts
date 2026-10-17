@@ -186,10 +186,25 @@ export function parsePackPieces(productName: string): number | null {
 // ── Προτάσεις ομάδας για υλικό χωρίς σύνδεση ──────────────────────────────
 
 const STOP = new Set(["ΚΑΙ", "ΜΕ", "ΓΙΑ", "ΤΟΥ", "ΤΗΣ", "ΤΑ", "ΤΟ", "Η", "Ο", "ΣΕ", "ΑΠΟ", "ΦΡΕΣΚΟ", "ΦΡΕΣΚΙΑ", "ΦΡΕΣΚΟΣ"]);
-function stems(s: string): string[] {
+function words(s: string): string[] {
   return normKey(s).replace(/[^A-ZΑ-Ω0-9 ]/g, " ").split(" ")
-    .filter(w => w.length >= 3 && !STOP.has(w) && !/^\d/.test(w))
-    .map(w => w.slice(0, Math.max(4, Math.min(6, w.length - 2))));
+    .filter(w => w.length >= 3 && !STOP.has(w) && !/^\d/.test(w));
+}
+function stems(s: string): string[] {
+  return words(s).map(w => w.slice(0, Math.max(4, Math.min(6, w.length - 2))));
+}
+// «Μακριά» ρίζα: όλη η λέξη χωρίς την κατάληξη (κρατά τη διαφορά ΚΟΥΒΕΡΤΟΥΡΑ ≠ ΚΟΥΒΕΡ)
+function longStems(s: string): string[] {
+  return words(s).map(w => w.slice(0, Math.max(4, w.length - 2)));
+}
+
+/** true αν κάποια λέξη του υλικού ΔΕΝ υπάρχει ολόκληρη (χωρίς κατάληξη) στην ομάδα — πιθανό λάθος σύνδεσης. */
+export function linkLooksWrong(ingredientName: string, groupText: string): boolean {
+  const t = normKey(groupText);
+  const ls = longStems(ingredientName);
+  if (ls.length === 0) return false;
+  // αρκεί η 1η (κύρια) λέξη να υπάρχει ολόκληρη
+  return !t.includes(ls[0]);
 }
 
 export interface GroupCandidate {
@@ -205,6 +220,7 @@ export interface ScoredCandidate extends GroupCandidate { score: number; confide
  */
 export function suggestGroups(ingredientName: string, candidates: GroupCandidate[], n = 3): ScoredCandidate[] {
   const st = stems(ingredientName);
+  const ls = longStems(ingredientName);
   if (st.length === 0) return [];
   const scored: { c: GroupCandidate; score: number; all: boolean; first: boolean }[] = [];
   for (const c of candidates) {
@@ -219,7 +235,9 @@ export function suggestGroups(ingredientName: string, candidates: GroupCandidate
   return scored.slice(0, n).map((x, i) => {
     const runnerUp = scored[1];
     const clearWinner = i === 0 && (!runnerUp || !(runnerUp.all && runnerUp.first) || runnerUp.score < x.score - 0.25);
-    return { ...x.c, score: x.score, confidence: x.all && x.first && clearWinner ? "high" : "medium" };
+    // «βέβαιη» μόνο αν και η ολόκληρη κύρια λέξη υπάρχει στην ομάδα (όχι μόνο τα 4-6 πρώτα γράμματα)
+    const fullWord = (x.c.norm ?? normKey(x.c.text)).includes(ls[0]);
+    return { ...x.c, score: x.score, confidence: x.all && x.first && clearWinner && fullWord ? "high" : "medium" };
   });
 }
 

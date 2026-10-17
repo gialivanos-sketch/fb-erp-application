@@ -1688,6 +1688,13 @@ export async function bulkCreateProductSkuMapEntries(rows: { productName: string
   }
 }
 
+/** Αφαιρεί τη σύνδεση ενός ονόματος (π.χ. υλικού συνταγής) από την Ομαδοποίηση SKU της ενεργής επιχείρησης. */
+export async function deleteProductSkuMapByName(productName: string): Promise<void> {
+  if (!supabase) throw new Error("Supabase not initialized");
+  const { error } = await (supabase as any).from("product_sku_map").delete().eq("product_name", productName);
+  if (error) throw error;
+}
+
 export async function deleteProductSkuMapEntry(id: number): Promise<void> {
   if (!supabase) throw new Error("Supabase not initialized");
   const { error } = await (supabase as any).from("product_sku_map").delete().eq("id", id);
