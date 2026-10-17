@@ -26,6 +26,27 @@ import {
 
 const CHUNK = 50;
 
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+
+// Λάθος δικτύου («Failed to fetch», 429/5xx χωρίς CORS) — αξίζει επανάληψη.
+function isNetworkError(err: unknown): boolean {
+  const m = errorText(err).toLowerCase();
+  return m.includes("failed to fetch") || m.includes("networkerror") || m.includes("load failed")
+    || m.includes("timeout") || m.includes("too many") || m.includes("rate limit") || m.includes("503") || m.includes("502");
+}
+
+// Επανάληψη με αυξανόμενη αναμονή (1, 2, 4, 8, 15 δευτ.) για λάθη δικτύου.
+async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
+  const waits = [1000, 2000, 4000, 8000, 15000];
+  for (let attempt = 0; ; attempt++) {
+    try { return await fn(); }
+    catch (err) {
+      if (!isNetworkError(err) || attempt >= waits.length) throw err;
+      await sleep(waits[attempt]);
+    }
+  }
+}
+
 // Τα λάθη του Supabase είναι απλά objects ({ message, details, hint, code }),
 // όχι Error — χωρίς αυτό εμφανίζονται ως «[object Object]».
 function errorText(err: unknown): string {
@@ -113,7 +134,7 @@ export default function ImportOrdersPage() {
     if (!confirm(gr ? `Διόρθωση ${nFix} παραγγελιών ώστε να ταυτίζονται με το Excel${nDeb ? ` και προσθήκη ${nDeb} χρεώσεων` : ""};` : `Fix ${nFix} orders${nDeb ? ` and add ${nDeb} debits` : ""}?`)) return;
     setRunning(true); setProgress(0); setFixResult(null);
     const failed: string[] = [];
-    let fixed = 0, debits = 0;
+    let fixed = 0, debits = 0, consecutiveNet = 0;
     const total = nFix + nDeb;
     let done = 0;
     try {
@@ -121,26 +142,33 @@ export default function ImportOrdersPage() {
         const o = r.order;
         setStatus(gr ? `Διόρθωση ${r.app.orderNumber}…` : `Fixing ${r.app.orderNumber}…`);
         try {
-          await db.replaceOrderItemsDelete(r.app.id, r.appItemCount);
-          await db.bulkInsertOrderItems(o.items.map(it => ({
+          await withRetry(() => db.replaceOrderItemsDelete(r.app.id, r.appItemCount));
+          await withRetry(() => db.bulkInsertOrderItems(o.items.map(it => ({
             orderId: r.app.id, productName: it.productName, quantity: it.quantity, unit: it.unit,
             basePrice: it.priceNet, vatPercent: it.vatPercent, netAmount: it.net, vatAmount: it.vat, grossAmount: it.gross,
-          })));
-          await db.updateOrderStatus(r.app.id, {
+          }))));
+          await withRetry(() => db.updateOrderStatus(r.app.id, {
             ...(r.app.invoiceNumber ? {} : o.invoiceNumber ? { invoiceNumber: o.invoiceNumber } : {}),
             status: "delivered", totalNet: o.totalNet.toFixed(2), totalVat: o.totalVat.toFixed(2), totalGross: o.totalGross.toFixed(2),
-          });
+          }));
           fixed++;
+          consecutiveNet = 0;
         } catch (err) {
           failed.push(`${r.app.orderNumber} / ${o.orderNumber} (${o.orderDate}, ${o.supplierName}): ${errorText(err)}`);
+          if (isNetworkError(err) && ++consecutiveNet >= 3) {
+            failed.push(gr ? "⛔ Η σύνδεση με τη βάση χάθηκε — η διαδικασία σταμάτησε. Ξαναφόρτωσε το αρχείο και πάτα ξανά Διόρθωση· συνεχίζει από εκεί που έμεινε."
+                           : "⛔ Connection to the database lost — stopped. Reload the file and run again; it resumes where it left off.");
+            break;
+          }
         }
+        await sleep(120);
         setProgress(Math.round((++done / total) * 100));
       }
       if (fixDebits) {
         for (const r of reconSum.noDebit) {
           const o = r.order;
           try {
-            await db.bulkInsertDebits([{ supplierId: r.app.supplierId, transactionDate: o.orderDate, amount: o.totalGross, reference: debitReference(o), notes: debitNotes(o) }]);
+            await withRetry(() => db.bulkInsertDebits([{ supplierId: r.app.supplierId, transactionDate: o.orderDate, amount: o.totalGross, reference: debitReference(o), notes: debitNotes(o) }]));
             debits++;
           } catch (err) {
             failed.push(`${o.orderNumber} — χρέωση: ${errorText(err)}`);
@@ -214,19 +242,19 @@ export default function ImportOrdersPage() {
         }
         let created = new Map<string, number>();
         try {
-          created = await db.bulkInsertOrders(batch.map(o => ({
+          created = await withRetry(() => db.bulkInsertOrders(batch.map(o => ({
             orderNumber: o.orderNumber, supplierId: ids.get(supplierKey(o.supplierName))!, orderDate: o.orderDate,
             invoiceNumber: o.invoiceNumber, notes: o.notes, totalNet: o.totalNet, totalVat: o.totalVat, totalGross: o.totalGross,
-          })));
+          }))));
           const items = batch.flatMap(o => o.items.map(it => ({
             orderId: created.get(o.orderNumber)!, productName: it.productName, quantity: it.quantity, unit: it.unit,
             basePrice: it.priceNet, vatPercent: it.vatPercent, netAmount: it.net, vatAmount: it.vat, grossAmount: it.gross,
           })));
-          await db.bulkInsertOrderItems(items);
-          await db.bulkInsertDebits(batch.map(o => ({
+          await withRetry(() => db.bulkInsertOrderItems(items));
+          await withRetry(() => db.bulkInsertDebits(batch.map(o => ({
             supplierId: ids.get(supplierKey(o.supplierName))!, transactionDate: o.orderDate,
             amount: o.totalGross, reference: debitReference(o), notes: debitNotes(o),
-          })));
+          }))));
           ordersDone += batch.length; itemsDone += items.length; debitsDone += batch.length;
         } catch (err) {
           for (const id of created.values()) { try { await db.deleteOrder(id); } catch { /* ignore */ } }
