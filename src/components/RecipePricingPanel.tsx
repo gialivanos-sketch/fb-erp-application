@@ -13,7 +13,7 @@ import { useApp } from "@/lib/context";
 import * as db from "@/lib/supabaseData";
 import { buildSkuLookup, groupLines, normKey, type PurchaseLine } from "@/lib/itemAnalysis";
 import {
-  buildGroupPrices, priceIngredient, suggestGroups, recipeTotals, PRICE_WINDOW_DAYS, suggestPackGrams, purchaseUnitKey,
+  buildGroupPrices, priceIngredient, suggestGroups, recipeTotals, PRICE_WINDOW_DAYS, suggestPackGrams, purchaseUnitKey, isPiecesKey,
   type GroupCandidate, type IngredientPrice, type ScoredCandidate,
 } from "@/lib/recipePricing";
 
@@ -132,7 +132,8 @@ export default function RecipePricingPanel() {
     for (const c of analysis?.needConv ?? []) {
       if (c.unit === "ΤΕΜΑΧΙΟ") continue;
       const k = `${c.sku}|${c.unit}`;
-      const prods = [...(prodBy.get(k) ?? new Map()).entries()].map(([product, qty]) => ({ product, qty }));
+      const buyKey = `${c.sku}|${c.unit.replace("#ΤΕΜ", "")}`;
+      const prods = [...(prodBy.get(buyKey) ?? new Map()).entries()].map(([product, qty]) => ({ product, qty }));
       const sg = suggestPackGrams(prods, c.unit);
       if (sg) out.set(k, sg);
     }
@@ -344,16 +345,16 @@ export default function RecipePricingPanel() {
                         <td className="text-xs text-slate-500 max-w-[16rem]">{[...c.examples].slice(0, 4).join(", ")}</td>
                         <td>
                           <div className="flex items-center gap-2 whitespace-nowrap">
-                            <span>1 {c.unit === "ΤΕΜΑΧΙΟ" ? (gr ? "τεμάχιο συνταγής" : "recipe piece") : c.unit} =</span>
+                            <span>1 {c.unit === "ΤΕΜΑΧΙΟ" ? (gr ? "τεμάχιο συνταγής" : "recipe piece") : c.unit.replace("#ΤΕΜ", "")} =</span>
                             <input className="erp-input text-sm py-1 text-right" style={{ width: "6.5rem", minWidth: "6.5rem" }} inputMode="decimal"
                               value={gramsIn[key] ?? (packSuggest.get(key) ? String(packSuggest.get(key)!.grams) : "")} onChange={e => setGramsIn(g => ({ ...g, [key]: e.target.value }))}
                               onKeyDown={e => { if (e.key === "Enter") saveConversion(c.sku, c.unit); }} />
-                            <span>{gr ? "γρ./ml" : "g/ml"}</span>
+                            <span>{isPiecesKey(c.unit) ? (gr ? "τεμάχια" : "pieces") : (gr ? "γρ./ml" : "g/ml")}</span>
                             <button disabled={busy} onClick={() => saveConversion(c.sku, c.unit)} className="erp-btn-secondary text-xs px-2 py-1">✓</button>
                           </div>
                           {packSuggest.get(key) && gramsIn[key] === undefined
                             ? <div className="text-[11px] text-blue-600 mt-0.5">📏 {gr ? `πρόταση από το όνομα (${packSuggest.get(key)!.parsed}/${packSuggest.get(key)!.total} προϊόντα) — έλεγξε και ✓` : "suggested from name"}</div>
-                            : <div className="text-[11px] text-slate-400 mt-0.5">{gr ? "μέσο βάρος/όγκος · " : ""}{UNIT_HINT[c.unit] ?? ""}</div>}
+                            : <div className="text-[11px] text-slate-400 mt-0.5">{isPiecesKey(c.unit) ? (gr ? "πόσα τεμάχια/μερίδες έχει 1 συσκευασία (π.χ. brioche 1*25 = 25, κέτσαπ 100T = 100)" : "pieces per pack") : <>{gr ? "μέσο βάρος/όγκος · " : ""}{UNIT_HINT[c.unit] ?? ""}</>}</div>}
                         </td>
                       </tr>
                     );

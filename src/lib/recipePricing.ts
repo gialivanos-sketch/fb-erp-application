@@ -144,7 +144,27 @@ export function priceIngredient(
   if (gp.perUnit[buyUnit] != null) {
     return { ...base, status: "ok", unitCost: gp.perUnit[buyUnit] * ru.factor, detail: `${span} · 1 ${buyUnit} αγοράς = 1 ${cu.toLowerCase()}` };
   }
+  // 3) αγορά σε κιβώτια/κουτιά/πακέτα → «1 ΚΙΒ = Ν τεμάχια» (π.χ. brioche 1*25)
+  for (const u of Object.keys(gp.perUnit)) {
+    const n = conversions.find(c => c.sku === info.sku && c.unit === piecesKey(u))?.grams;
+    if (n && n > 0) return { ...base, status: "ok", unitCost: (gp.perUnit[u] / n) * ru.factor, detail: `${span} · 1 ${u} = ${n} τεμ.` };
+  }
+  const packUnit = Object.keys(gp.perUnit).find(u => MULTI_UNITS.includes(u));
+  if (packUnit) return { ...base, status: "needs_conversion", unitCost: 0, needUnit: piecesKey(packUnit) };
   return { ...base, status: "needs_conversion", unitCost: 0, needUnit: cu };
+}
+
+// Μετατροπή «τεμάχια ανά συσκευασία» αποθηκεύεται ως μονάδα "ΚΙΒ#ΤΕΜ" (grams = πλήθος)
+export const MULTI_UNITS = ["ΚΙΒ", "ΚΟΥΤΙ", "ΠΑΚ", "ΚΑΡΤΕΛΑ"];
+export const piecesKey = (u: string) => `${u}#ΤΕΜ`;
+export const isPiecesKey = (u: string) => u.endsWith("#ΤΕΜ");
+
+/** Τεμάχια σε 1 συσκευασία από το όνομα («1*25», «100T», «Χ 35 ΤΜΧ») — ή null. */
+export function parsePackPieces(productName: string): number | null {
+  const s = normKey(productName);
+  const m = s.match(/\b1\s*[*XΧ]\s*(\d+)\b/) ?? s.match(/\b(\d{1,4})\s*(?:T|Τ|ΤΕΜ|TEM|ΤΜΧ|TMX|PCS|ΤΕΜΑΧΙΑ)(?![A-ZΑ-Ω])/);
+  const n = m ? Number(m[1]) : NaN;
+  return n > 1 ? n : null;
 }
 
 // ── Προτάσεις ομάδας για υλικό χωρίς σύνδεση ──────────────────────────────
@@ -231,8 +251,9 @@ export function parsePackGrams(productName: string, purchaseUnit: string): numbe
 /** Μέσο βάρος σταθμισμένο με τις ποσότητες αγοράς (για ομάδα με πολλά μεγέθη). */
 export function suggestPackGrams(products: { product: string; qty: number }[], purchaseUnit: string): { grams: number; parsed: number; total: number } | null {
   let w = 0, sum = 0, parsed = 0;
+  const pieces = isPiecesKey(purchaseUnit);
   for (const p of products) {
-    const g = parsePackGrams(p.product, purchaseUnit);
+    const g = pieces ? parsePackPieces(p.product) : parsePackGrams(p.product, purchaseUnit);
     if (g == null) continue;
     parsed++;
     const q = p.qty > 0 ? p.qty : 1;
