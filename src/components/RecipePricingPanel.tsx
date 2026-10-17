@@ -290,7 +290,7 @@ export default function RecipePricingPanel() {
             <div className="p-4 overflow-x-auto">
               <p className="text-xs text-slate-500 mb-2">{gr ? "Πόσα γραμμάρια (ή ml) είναι 1 μονάδα αγοράς — μία φορά ανά ομάδα. Τα κιλά/λίτρα μετατρέπονται αυτόματα." : "Grams (or ml) per purchase unit — once per group."}</p>
               <table className="erp-table text-sm">
-                <thead><tr><th>SKU</th><th>{gr ? "Ομάδα" : "Group"}</th><th>{gr ? "Υλικά συνταγών" : "Used as"}</th><th>{gr ? "Μετατροπή" : "Conversion"}</th><th></th></tr></thead>
+                <thead><tr><th>SKU</th><th>{gr ? "Ομάδα" : "Group"}</th><th>{gr ? "Υλικά συνταγών" : "Used as"}</th><th>{gr ? "Μετατροπή" : "Conversion"}</th></tr></thead>
                 <tbody>
                   {analysis.needConv.map(c => {
                     const key = `${c.sku}|${c.unit}`;
@@ -299,17 +299,21 @@ export default function RecipePricingPanel() {
                         <td className="font-mono text-xs">{c.sku}</td>
                         <td className="font-medium">{c.label}</td>
                         <td className="text-xs text-slate-500 max-w-[16rem]">{[...c.examples].slice(0, 4).join(", ")}</td>
-                        <td className="whitespace-nowrap">
-                          <span className="mr-2">1 {c.unit === "ΤΕΜΑΧΙΟ" ? (gr ? "τεμάχιο συνταγής" : "recipe piece") : c.unit} =</span>
-                          <input className="erp-input w-28 inline-block text-sm py-1" inputMode="decimal" value={gramsIn[key] ?? ""} onChange={e => setGramsIn(g => ({ ...g, [key]: e.target.value }))} />
-                          <span className="ml-1">{gr ? "γρ./ml" : "g/ml"}</span>
-                          <div className="text-[11px] text-slate-400">{UNIT_HINT[c.unit] ?? ""}</div>
+                        <td>
+                          <div className="flex items-center gap-2 whitespace-nowrap">
+                            <span>1 {c.unit === "ΤΕΜΑΧΙΟ" ? (gr ? "τεμάχιο συνταγής" : "recipe piece") : c.unit} =</span>
+                            <input className="erp-input text-sm py-1 text-right" style={{ width: "6.5rem", minWidth: "6.5rem" }} inputMode="decimal"
+                              value={gramsIn[key] ?? ""} onChange={e => setGramsIn(g => ({ ...g, [key]: e.target.value }))}
+                              onKeyDown={e => { if (e.key === "Enter") saveConversion(c.sku, c.unit); }} />
+                            <span>{gr ? "γρ./ml" : "g/ml"}</span>
+                            <button disabled={busy} onClick={() => saveConversion(c.sku, c.unit)} className="erp-btn-secondary text-xs px-2 py-1">✓</button>
+                          </div>
+                          <div className="text-[11px] text-slate-400 mt-0.5">{UNIT_HINT[c.unit] ?? ""}</div>
                         </td>
-                        <td><button disabled={busy} onClick={() => saveConversion(c.sku, c.unit)} className="erp-btn-secondary text-xs px-2 py-1">✓</button></td>
                       </tr>
                     );
                   })}
-                  {analysis.needConv.length === 0 && <tr><td colSpan={5} className="text-center py-6 text-slate-400">{gr ? "Δεν χρειάζεται καμία μετατροπή 👍" : "Nothing to convert 👍"}</td></tr>}
+                  {analysis.needConv.length === 0 && <tr><td colSpan={4} className="text-center py-6 text-slate-400">{gr ? "Δεν χρειάζεται καμία μετατροπή 👍" : "Nothing to convert 👍"}</td></tr>}
                 </tbody>
               </table>
             </div>
