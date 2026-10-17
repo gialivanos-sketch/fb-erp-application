@@ -14,7 +14,7 @@ import * as db from "@/lib/supabaseData";
 import { buildSkuLookup, groupLines, normKey, type PurchaseLine } from "@/lib/itemAnalysis";
 import {
   buildGroupPrices, priceIngredient, suggestGroups, recipeTotals, PRICE_WINDOW_DAYS,
-  type GroupCandidate, type IngredientPrice,
+  type GroupCandidate, type IngredientPrice, type ScoredCandidate,
 } from "@/lib/recipePricing";
 
 const eur = (n: number, d = 2) => "€" + n.toLocaleString("el-GR", { minimumFractionDigits: d, maximumFractionDigits: d });
@@ -44,6 +44,7 @@ export default function RecipePricingPanel() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [linkFilter, setLinkFilter] = useState("");
+  const [tier, setTier] = useState<"high" | "medium" | "none">("high");
 
   async function reload() {
     const [m, c] = await Promise.all([db.fetchProductSkuMap(), db.fetchSkuConversions()]);
@@ -118,7 +119,7 @@ export default function RecipePricingPanel() {
 
   // Αρχικές προτάσεις για υλικά χωρίς ομάδα
   const suggestions = useMemo(() => {
-    const m = new Map<string, GroupCandidate[]>();
+    const m = new Map<string, ScoredCandidate[]>();
     for (const u of analysis?.unlinked ?? []) m.set(u.name, suggestGroups(u.name, candidates, 3));
     return m;
   }, [analysis?.unlinked, candidates]);
@@ -191,7 +192,10 @@ export default function RecipePricingPanel() {
   if (!analysis) return <div className="erp-card mb-6 p-4 text-sm text-slate-400 print:hidden">{gr ? "Φόρτωση τιμών από αγορές…" : "Loading…"}</div>;
 
   const total = analysis.rows.length;
-  const filteredUnlinked = analysis.unlinked.filter(u => !linkFilter || normKey(u.name).includes(normKey(linkFilter)));
+  const tierOf = (name: string): "high" | "medium" | "none" => suggestions.get(name)?.[0]?.confidence ?? "none";
+  const tierCount = { high: 0, medium: 0, none: 0 };
+  for (const u of analysis.unlinked) tierCount[tierOf(u.name)]++;
+  const filteredUnlinked = analysis.unlinked.filter(u => tierOf(u.name) === tier && (!linkFilter || normKey(u.name).includes(normKey(linkFilter))));
 
   return (
     <div className="erp-card mb-6 print:hidden">
@@ -222,6 +226,16 @@ export default function RecipePricingPanel() {
           {tab === "link" && (
             <div className="p-4">
               <datalist id="sku-groups">{candidates.map(c => <option key={c.key} value={optionValue(c)} />)}</datalist>
+              <div className="flex flex-wrap gap-2 mb-3 text-sm">
+                {([["high", gr ? "✅ Βέβαιες προτάσεις" : "Confident"], ["medium", gr ? "❓ Πιθανές — έλεγξε" : "Possible"], ["none", gr ? "✖ Χωρίς πρόταση" : "No suggestion"]] as const).map(([k, l]) => (
+                  <button key={k} onClick={() => setTier(k)} className={`px-3 py-1 rounded-full border ${tier === k ? "bg-slate-800 text-white border-slate-800" : "bg-white text-slate-600 border-slate-200"}`}>{l} ({tierCount[k]})</button>
+                ))}
+              </div>
+              <p className="text-xs text-slate-500 mb-3">
+                {tier === "high" && (gr ? "Όλες οι λέξεις του υλικού ταιριάζουν και δεν υπάρχει άλλη εξίσου καλή ομάδα. Ρίξε μια ματιά και πάτα «Αποθήκευση όλων»." : "")}
+                {tier === "medium" && (gr ? "Μερικό ταίριασμα ή πολλές παρόμοιες ομάδες — έλεγξε μία-μία (π.χ. «κρεμμύδι» → ξερό ή φρέσκο;)." : "")}
+                {tier === "none" && (gr ? "Δεν βρέθηκε ομάδα — πιθανώς δεν αγοράστηκε φέτος. Γράψε για αναζήτηση ή άφησέ τα κενά (κρατούν την τιμή που έχουν)." : "")}
+              </p>
               <div className="flex flex-wrap items-center gap-2 mb-3 text-sm">
                 <input className="erp-input max-w-xs" placeholder={gr ? "Φίλτρο υλικού…" : "Filter…"} value={linkFilter} onChange={e => setLinkFilter(e.target.value)} />
                 <button disabled={busy} onClick={() => saveLinks(filteredUnlinked.map(u => u.name))} className="erp-btn-success text-sm">

@@ -157,21 +157,31 @@ function stems(s: string): string[] {
 }
 
 export interface GroupCandidate { key: string; label: string; sku: string | null; text: string; weight: number }
+export interface ScoredCandidate extends GroupCandidate { score: number; confidence: "high" | "medium" }
 
-/** Έως `n` προτεινόμενες ομάδες για ένα υλικό (με βάση κοινές ρίζες λέξεων). */
-export function suggestGroups(ingredientName: string, candidates: GroupCandidate[], n = 3): GroupCandidate[] {
+/**
+ * Έως `n` προτεινόμενες ομάδες για ένα υλικό (με βάση κοινές ρίζες λέξεων).
+ * «high»: όλες οι λέξεις του υλικού βρέθηκαν, το όνομα της ομάδας ξεκινά με
+ * την 1η λέξη, και η 2η πρόταση δεν είναι εξίσου καλή (αλλιώς είναι αμφίβολο).
+ */
+export function suggestGroups(ingredientName: string, candidates: GroupCandidate[], n = 3): ScoredCandidate[] {
   const st = stems(ingredientName);
   if (st.length === 0) return [];
-  const scored: { c: GroupCandidate; score: number }[] = [];
+  const scored: { c: GroupCandidate; score: number; all: boolean; first: boolean }[] = [];
   for (const c of candidates) {
     const ct = normKey(c.text);
     let hits = 0;
     for (const s of st) if (ct.includes(s)) hits++;
     if (!hits) continue;
-    const labelFirst = normKey(c.label).startsWith(st[0]) ? 0.5 : 0;
-    scored.push({ c, score: hits / st.length + labelFirst + Math.log10(1 + c.weight) / 10 });
+    const first = normKey(c.label).startsWith(st[0]);
+    scored.push({ c, all: hits === st.length, first, score: hits / st.length + (first ? 0.5 : 0) + Math.log10(1 + c.weight) / 10 });
   }
-  return scored.sort((a, b) => b.score - a.score).slice(0, n).map(x => x.c);
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, n).map((x, i) => {
+    const runnerUp = scored[1];
+    const clearWinner = i === 0 && (!runnerUp || !(runnerUp.all && runnerUp.first) || runnerUp.score < x.score - 0.25);
+    return { ...x.c, score: x.score, confidence: x.all && x.first && clearWinner ? "high" : "medium" };
+  });
 }
 
 // ── Κόστος συνταγής (ίδιος τύπος με τη Φόρμα Συνταγής) ────────────────────
