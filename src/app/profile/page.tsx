@@ -32,6 +32,15 @@ export default function BusinessProfilePage() {
   const [savedMsg, setSavedMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [logoError, setLogoError] = useState("");
 
+  // ── Επιχειρήσεις (μία ενεργή κάθε φορά) ──
+  const [businesses, setBusinesses] = useState<db.BusinessRow[] | null | undefined>(undefined);
+  const [showSwitch, setShowSwitch] = useState(false);
+  const [confirmName, setConfirmName] = useState("");
+  const [newBiz, setNewBiz] = useState({ name: "", address: "", phone: "", email: "", taxId: "" });
+  const [copySku, setCopySku] = useState(true);
+  const [switching, setSwitching] = useState(false);
+  const [switchErr, setSwitchErr] = useState("");
+
   useEffect(() => {
     let cancelled = false;
     db.fetchBusinessProfile()
@@ -54,6 +63,49 @@ export default function BusinessProfilePage() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    db.fetchBusinesses().then(setBusinesses).catch(() => setBusinesses(null));
+  }, []);
+
+  const activeBiz = businesses?.find(b => b.isActive) ?? null;
+  const gr = locale === "gr";
+
+  async function deactivateAndCreate() {
+    if (!activeBiz) return;
+    setSwitchErr("");
+    if (confirmName.trim().toUpperCase() !== activeBiz.name.trim().toUpperCase()) {
+      setSwitchErr(gr ? "Γράψε ακριβώς το όνομα της τρέχουσας επιχείρησης για επιβεβαίωση." : "Type the current business name exactly to confirm.");
+      return;
+    }
+    if (!newBiz.name.trim()) {
+      setSwitchErr(gr ? "Συμπλήρωσε την επωνυμία της νέας επιχείρησης." : "Enter the new business name.");
+      return;
+    }
+    setSwitching(true);
+    try {
+      const id = await db.createBusiness({ ...newBiz, name: newBiz.name.trim() });
+      await db.activateBusiness(id, copySku ? activeBiz.id : null);
+      window.location.reload();
+    } catch (err) {
+      setSwitchErr((gr ? "Αποτυχία: " : "Failed: ") + String((err as { message?: string })?.message ?? err));
+      setSwitching(false);
+    }
+  }
+
+  async function reactivate(b: db.BusinessRow) {
+    if (!confirm(gr
+      ? `Ενεργοποίηση «${b.name}»;\n\nΗ «${activeBiz?.name ?? ""}» θα απενεργοποιηθεί (τα δεδομένα της μένουν). Η αλλαγή ισχύει για όλους τους χρήστες.`
+      : `Activate "${b.name}"? The current business will be deactivated (its data is kept). Applies to all users.`)) return;
+    setSwitching(true);
+    try {
+      await db.activateBusiness(b.id, null);
+      window.location.reload();
+    } catch (err) {
+      alert((gr ? "Αποτυχία: " : "Failed: ") + String((err as { message?: string })?.message ?? err));
+      setSwitching(false);
+    }
+  }
 
   function updateField(field: keyof BusinessProfile, value: string) {
     setProfile((prev) => ({ ...prev, [field]: value }));
@@ -240,6 +292,94 @@ export default function BusinessProfilePage() {
                 {saving ? "…" : "💾"} {locale === "gr" ? "Αποθήκευση" : "Save"}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Επιχειρήσεις ── */}
+      {businesses === null && (
+        <div className="erp-card max-w-2xl mt-6 p-4 text-sm text-amber-800 bg-amber-50 border-amber-300">
+          {gr
+            ? "Η διαχείριση πολλών επιχειρήσεων δεν έχει ενεργοποιηθεί ακόμα στη βάση (χρειάζεται μία φορά το SQL «migration_multi_business.sql»)."
+            : "Multi-business is not enabled in the database yet (run migration_multi_business.sql once)."}
+        </div>
+      )}
+      {businesses && businesses.length > 0 && (
+        <div className="erp-card max-w-2xl mt-6">
+          <div className="erp-card-header">🏢 {gr ? "Επιχειρήσεις" : "Businesses"}</div>
+          <div className="p-4 space-y-3 text-sm">
+            <p className="text-slate-500">
+              {gr
+                ? "Μία επιχείρηση είναι ενεργή κάθε φορά. Προμηθευτές, προσφορές, παραγγελίες, χρεώσεις/πληρωμές, ομαδοποίηση SKU και απογραφές ανήκουν στην επιχείρηση. Συνταγές, μενού και υλικά είναι κοινά. Τίποτα δεν σβήνεται — μια απενεργοποιημένη επιχείρηση μπορεί να ξαναενεργοποιηθεί για να δεις τα δεδομένα της."
+                : "One business is active at a time. Suppliers, quotes, orders, payments, SKU groups and stock counts belong to the business; recipes, menus and ingredients are shared. Nothing is deleted."}
+            </p>
+            <table className="erp-table">
+              <thead><tr><th>{gr ? "Επωνυμία" : "Name"}</th><th>{gr ? "Κατάσταση" : "Status"}</th><th></th></tr></thead>
+              <tbody>
+                {businesses.map(b => (
+                  <tr key={b.id}>
+                    <td className="font-medium">{b.name}</td>
+                    <td>
+                      {b.isActive
+                        ? <span className="text-emerald-700 font-semibold">● {gr ? "Ενεργή" : "Active"}</span>
+                        : <span className="text-slate-400">○ {gr ? "Ανενεργή" : "Inactive"}{b.deactivatedAt ? ` ${gr ? "από" : "since"} ${new Date(b.deactivatedAt).toLocaleDateString("el-GR")}` : ""}</span>}
+                    </td>
+                    <td className="text-right">
+                      {!b.isActive && (
+                        <button onClick={() => reactivate(b)} disabled={switching} className="erp-btn-secondary text-xs px-2 py-1">
+                          ↺ {gr ? "Ενεργοποίηση" : "Activate"}
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            {!showSwitch ? (
+              <button onClick={() => { setShowSwitch(true); setSwitchErr(""); }} className="erp-btn-danger">
+                ⏻ {gr ? "Απενεργοποίηση επιχείρησης & έναρξη νέας" : "Deactivate business & start a new one"}
+              </button>
+            ) : (
+              <div className="border border-red-200 bg-red-50/50 rounded-lg p-4 space-y-3">
+                <div className="font-semibold text-red-700">
+                  ⏻ {gr ? `Απενεργοποίηση «${activeBiz?.name ?? ""}»` : `Deactivate "${activeBiz?.name ?? ""}"`}
+                </div>
+                <p className="text-slate-600">
+                  {gr
+                    ? "Η εφαρμογή θα ξεκινήσει με άδειους προμηθευτές, προσφορές, παραγγελίες και πληρωμές για τη νέα επιχείρηση. Συνταγές και μενού μένουν. Τα δεδομένα της τρέχουσας επιχείρησης ΔΕΝ σβήνονται."
+                    : "The app will start with empty suppliers, quotes, orders and payments for the new business. Recipes and menus stay. Current data is NOT deleted."}
+                </p>
+                <div>
+                  <label className="erp-label">{gr ? `Για επιβεβαίωση γράψε: ${activeBiz?.name ?? ""}` : `To confirm type: ${activeBiz?.name ?? ""}`}</label>
+                  <input className="erp-input" value={confirmName} onChange={e => setConfirmName(e.target.value)} />
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="sm:col-span-2">
+                    <label className="erp-label">{gr ? "Επωνυμία νέας επιχείρησης" : "New business name"}</label>
+                    <input className="erp-input" value={newBiz.name} onChange={e => setNewBiz({ ...newBiz, name: e.target.value })} />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="erp-label">{gr ? "Διεύθυνση" : "Address"}</label>
+                    <input className="erp-input" value={newBiz.address} onChange={e => setNewBiz({ ...newBiz, address: e.target.value })} />
+                  </div>
+                  <div><label className="erp-label">{gr ? "Τηλέφωνο" : "Phone"}</label><input className="erp-input" value={newBiz.phone} onChange={e => setNewBiz({ ...newBiz, phone: e.target.value })} /></div>
+                  <div><label className="erp-label">Email</label><input className="erp-input" value={newBiz.email} onChange={e => setNewBiz({ ...newBiz, email: e.target.value })} /></div>
+                  <div><label className="erp-label">{gr ? "ΑΦΜ" : "Tax ID"}</label><input className="erp-input" value={newBiz.taxId} onChange={e => setNewBiz({ ...newBiz, taxId: e.target.value })} /></div>
+                </div>
+                <label className="flex items-center gap-2">
+                  <input type="checkbox" checked={copySku} onChange={e => setCopySku(e.target.checked)} />
+                  {gr ? "Αντιγραφή της Ομαδοποίησης Ειδών (SKU) στη νέα επιχείρηση" : "Copy SKU grouping to the new business"}
+                </label>
+                {switchErr && <div className="text-red-700">{switchErr}</div>}
+                <div className="flex gap-2">
+                  <button onClick={deactivateAndCreate} disabled={switching} className="erp-btn-danger">
+                    {switching ? "…" : "⏻"} {gr ? "Απενεργοποίηση & έναρξη νέας" : "Deactivate & start new"}
+                  </button>
+                  <button onClick={() => setShowSwitch(false)} disabled={switching} className="erp-btn-ghost">{gr ? "Ακύρωση" : "Cancel"}</button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

@@ -1201,12 +1201,17 @@ export async function setIngredientSupplierOverride(
   supplierProductId: number
 ): Promise<void> {
   const client = requireClient();
-  const { error } = await (client.from("ingredient_supplier_map") as any).upsert({
+  const row = {
     ingredient_name: ingredientName,
     supplier_product_id: supplierProductId,
     is_manual: true,
     updated_at: new Date().toISOString(),
-  }, { onConflict: "ingredient_name" });
+  };
+  // Μετά τη μετάβαση «πολλές επιχειρήσεις» η μοναδικότητα είναι ανά επιχείρηση.
+  let { error } = await (client.from("ingredient_supplier_map") as any).upsert(row, { onConflict: "business_id,ingredient_name" });
+  if (error && (["42P10", "42703", "PGRST204"].includes(error.code) || /no unique|constraint matching|business_id/i.test(error.message ?? ""))) {
+    ({ error } = await (client.from("ingredient_supplier_map") as any).upsert(row, { onConflict: "ingredient_name" }));
+  }
   if (error) throw error;
 }
 
@@ -1696,10 +1701,10 @@ export async function deleteProductSkuMapEntry(id: number): Promise<void> {
 }
 
 // ── Business Profile ─────────────────────────────────────────────────────────
-export async function fetchBusinessProfile(): Promise<{ name: string; address: string; phone: string; email: string; taxId: string; logoDataUrl: string | null } | null> {
-  if (!supabase) throw new Error("Supabase not initialized");
-  const { data } = await (supabase as any).from("business_profile").select("*").eq("id", 1).single();
-  if (!data) return null;
+// Από τη μετάβαση «πολλές επιχειρήσεις» τα στοιχεία βρίσκονται στον πίνακα
+// `businesses` (ενεργή επιχείρηση). Αν η μετάβαση δεν έχει τρέξει ακόμα,
+// χρησιμοποιείται ο παλιός πίνακας `business_profile` (id=1).
+function mapBusinessRow(data: any) {
   return {
     name: data.name ?? "",
     address: data.address ?? "",
@@ -1710,18 +1715,61 @@ export async function fetchBusinessProfile(): Promise<{ name: string; address: s
   };
 }
 
+export async function fetchBusinessProfile(): Promise<{ name: string; address: string; phone: string; email: string; taxId: string; logoDataUrl: string | null } | null> {
+  if (!supabase) throw new Error("Supabase not initialized");
+  const active = await (supabase as any).from("businesses").select("*").eq("is_active", true).limit(1);
+  if (!active.error) return active.data?.[0] ? mapBusinessRow(active.data[0]) : null;
+  const { data } = await (supabase as any).from("business_profile").select("*").eq("id", 1).single();
+  return data ? mapBusinessRow(data) : null;
+}
+
 export async function saveBusinessProfile(input: { name: string; address: string; phone: string; email: string; taxId: string; logoDataUrl?: string | null }): Promise<void> {
   if (!supabase) throw new Error("Supabase not initialized");
-  const { error } = await (supabase as any).from("business_profile").upsert({
-    id: 1,
-    name: input.name,
-    address: input.address,
-    phone: input.phone,
-    email: input.email,
-    tax_id: input.taxId,
-    logo_data_url: input.logoDataUrl ?? null,
-    updated_at: new Date().toISOString(),
-  });
+  const fields = {
+    name: input.name, address: input.address, phone: input.phone, email: input.email,
+    tax_id: input.taxId, logo_data_url: input.logoDataUrl ?? null,
+  };
+  const active = await (supabase as any).from("businesses").select("id").eq("is_active", true).limit(1);
+  if (!active.error && active.data?.[0]) {
+    const { error } = await (supabase as any).from("businesses").update(fields).eq("id", active.data[0].id);
+    if (error) throw error;
+    return;
+  }
+  const { error } = await (supabase as any).from("business_profile").upsert({ id: 1, ...fields, updated_at: new Date().toISOString() });
+  if (error) throw error;
+}
+
+// ── Επιχειρήσεις (μία ενεργή κάθε φορά) ─────────────────────────────────────
+export interface BusinessRow {
+  id: number; name: string; isActive: boolean; createdAt: string; deactivatedAt: string | null;
+}
+
+/** null = η μετάβαση «πολλές επιχειρήσεις» δεν έχει τρέξει στη βάση. */
+export async function fetchBusinesses(): Promise<BusinessRow[] | null> {
+  if (!supabase) throw new Error("Supabase not initialized");
+  const { data, error } = await (supabase as any).from("businesses")
+    .select("id, name, is_active, created_at, deactivated_at").order("id");
+  if (error) return null;
+  return (data ?? []).map((r: any) => ({
+    id: r.id, name: r.name, isActive: r.is_active, createdAt: r.created_at, deactivatedAt: r.deactivated_at,
+  }));
+}
+
+/** Νέα επιχείρηση (ανενεργή). Επιστρέφει το id της. */
+export async function createBusiness(input: { name: string; address?: string; phone?: string; email?: string; taxId?: string }): Promise<number> {
+  if (!supabase) throw new Error("Supabase not initialized");
+  const { data, error } = await (supabase as any).from("businesses").insert({
+    name: input.name, address: input.address ?? "", phone: input.phone ?? "", email: input.email ?? "",
+    tax_id: input.taxId ?? "", is_active: false,
+  }).select("id").single();
+  if (error) throw error;
+  return data.id as number;
+}
+
+/** Ενεργοποιεί επιχείρηση (η τρέχουσα απενεργοποιείται). Προαιρετικά αντιγράφει ομαδοποίηση SKU. */
+export async function activateBusiness(id: number, copySkuFrom?: number | null): Promise<void> {
+  if (!supabase) throw new Error("Supabase not initialized");
+  const { error } = await (supabase as any).rpc("activate_business", { p_id: id, p_copy_sku_from: copySkuFrom ?? null });
   if (error) throw error;
 }
 
