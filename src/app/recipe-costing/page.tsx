@@ -12,13 +12,24 @@ export default function RecipeCostingPage() {
   const { t, locale, data } = useLanguage();
   const recipes = data.recipes;
   const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(null);
-  const [laborCost, setLaborCost] = useState(4.00);
-  const [overheadCost, setOverheadCost] = useState(2.00);
+  // Οι παράμετροι παίρνουν τις τιμές ΤΗΣ ΣΥΝΤΑΓΗΣ όταν την επιλέγεις
+  // (πριν ήταν σταθερά 4€ + 2€ + 60% για όλες τις συνταγές).
+  const [laborCost, setLaborCost] = useState(0);
+  const [overheadCost, setOverheadCost] = useState(0);
   const [profitMargin, setProfitMargin] = useState(60);
-  const [vatPercent, setVatPercent] = useState(24);
+  const [vatPercent, setVatPercent] = useState(13); // εστίαση: φαγητό συνήθως 13%
+
+  function selectRecipe(r: Recipe) {
+    setSelectedRecipe(r);
+    setLaborCost(Number(r.laborCost) || 0);
+    setOverheadCost(Number(r.overheadCost) || 0);
+    setProfitMargin(Number(r.profitMarginPercent) || 60);
+  }
 
   function calcCosting(r: Recipe) {
-    const rawMaterial = Number(r.totalRawMaterialCost);
+    // πρώτη ύλη = άθροισμα υλικών (πάντα ενημερωμένο), αλλιώς η αποθηκευμένη τιμή
+    const ings = r.ingredients ?? [];
+    const rawMaterial = ings.length ? ings.reduce((s, i) => s + (Number(i.totalCost) || 0), 0) : Number(r.totalRawMaterialCost);
     const labor = laborCost;
     const overhead = overheadCost;
     const total = rawMaterial + labor + overhead;
@@ -26,7 +37,9 @@ export default function RecipeCostingPage() {
     const menuVat = selling * (1 + vatPercent / 100);
     const portionYield = Number(r.portionYield) || 1;
     const finalPrice = menuVat / portionYield;
-    return { rawMaterial, labor, overhead, total, selling, menuVat, finalPrice, portionYield };
+    const unpriced = ings.filter(i => !(Number(i.totalCost) > 0)).length;
+    return { rawMaterial, labor, overhead, total, selling, menuVat, finalPrice, portionYield,
+      costPerPortion: total / portionYield, sellingPerPortion: selling / portionYield, unpriced, ingCount: ings.length };
   }
 
   const fmt = (n: number) => `€${n.toFixed(2)}`;
@@ -237,7 +250,7 @@ export default function RecipeCostingPage() {
             <div className="erp-card-header"><h3 className="font-semibold">📋 {locale === "gr" ? "Επιλογή Συνταγής" : "Select Recipe"}</h3></div>
             <div className="divide-y max-h-[500px] overflow-y-auto">
               {recipes.map((r, idx) => (
-                <div key={r?.id ?? `recipe-${idx}`} onClick={() => setSelectedRecipe(r)} className={`p-4 cursor-pointer hover:bg-blue-50/50 transition-colors ${selectedRecipe?.id === r?.id ? "bg-blue-50 border-l-4 border-blue-500" : ""}`}>
+                <div key={r?.id ?? `recipe-${idx}`} onClick={() => selectRecipe(r)} className={`p-4 cursor-pointer hover:bg-blue-50/50 transition-colors ${selectedRecipe?.id === r?.id ? "bg-blue-50 border-l-4 border-blue-500" : ""}`}>
                   <div className="font-medium">{r?.name ?? "—"}</div>
                   {r?.nameEn && <div className="text-xs text-slate-400">{r.nameEn}</div>}
                   <div className="flex gap-2 mt-1">
@@ -262,6 +275,13 @@ export default function RecipeCostingPage() {
                     <Badge color="blue">{selectedRecipe.portionYield} {selectedRecipe.portionUnit}</Badge>
                   </div>
                   <div className="p-6">
+                    {c.unpriced > 0 && (
+                      <div className="mb-4 p-3 rounded-lg bg-amber-50 border border-amber-300 text-amber-800 text-sm">
+                        ⚠️ {locale === "gr"
+                          ? `${c.unpriced} από ${c.ingCount} υλικά δεν έχουν τιμή — το κόστος πρώτης ύλης είναι ελλιπές. Σύνδεσέ τα στο «🔄 Τιμές από αγορές → Εκκρεμότητες» και πάτα «Ενημέρωση τιμών συνταγών».`
+                          : `${c.unpriced} of ${c.ingCount} ingredients have no price.`}
+                      </div>
+                    )}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                       <div className="space-y-4">
                         <h4 className="font-semibold text-slate-700">{locale === "gr" ? "Κόστος" : "Cost Breakdown"}</h4>
@@ -270,6 +290,7 @@ export default function RecipeCostingPage() {
                           <div className="flex justify-between py-2 border-b"><span className="text-slate-600">{t("fieldLaborCost")}</span><span className="font-medium">{fmt(c.labor)}</span></div>
                           <div className="flex justify-between py-2 border-b"><span className="text-slate-600">{t("fieldOverheadCost")}</span><span className="font-medium">{fmt(c.overhead)}</span></div>
                           <div className="flex justify-between py-2 border-b border-slate-300 font-bold"><span>{t("fieldTotalCost")}</span><span className="text-lg">{fmt(c.total)}</span></div>
+                          <div className="flex justify-between py-2 border-b"><span className="text-slate-600">{locale === "gr" ? `Κόστος ανά μερίδα (÷${c.portionYield})` : "Cost per portion"}</span><span className="font-semibold">{fmt(c.costPerPortion)}</span></div>
                         </div>
                       </div>
                       <div className="space-y-4">
@@ -277,6 +298,7 @@ export default function RecipeCostingPage() {
                         <div className="space-y-2">
                           <div className="flex justify-between py-2 border-b"><span className="text-slate-600">{locale === "gr" ? "Περιθώριο Κέρδους" : "Profit Margin"}</span><Badge color="green">{profitMargin}%</Badge></div>
                           <div className="flex justify-between py-2 border-b"><span className="text-slate-600">{t("fieldSellingPrice")}</span><span className="font-medium">{fmt(c.selling)}</span></div>
+                          <div className="flex justify-between py-2 border-b"><span className="text-slate-600">{locale === "gr" ? "Τιμή πώλησης ανά μερίδα (χωρίς ΦΠΑ)" : "Selling per portion (net)"}</span><span className="font-medium">{fmt(c.sellingPerPortion)}</span></div>
                           <div className="flex justify-between py-2 border-b"><span className="text-slate-600">{t("fieldMenuPriceVat")} ({vatPercent}%)</span><span className="font-medium">{fmt(c.menuVat)}</span></div>
                           <div className="flex justify-between py-2 border-b border-blue-300 bg-blue-50 -mx-2 px-2 rounded"><span className="font-bold text-blue-700">{t("fieldMenuPriceFinal")}</span><span className="text-xl font-bold text-blue-700">{fmt(c.finalPrice)}</span></div>
                         </div>
@@ -294,11 +316,11 @@ export default function RecipeCostingPage() {
                         <thead><tr><th>{t("fieldProduct")}</th><th>{t("fieldQuantity")}</th><th>{t("fieldUnit")}</th><th>{locale === "gr" ? "Τιμή Μονάδας" : "Unit Cost"}</th><th>{locale === "gr" ? "Σύνολο" : "Total"}</th></tr></thead>
                         <tbody>
                           {selectedRecipe.ingredients.map((ing, i) => (
-                            <tr key={i}>
-                              <td className="font-medium">{ing.ingredientName}</td>
+                            <tr key={i} className={Number(ing.totalCost) > 0 ? "" : "bg-amber-50"}>
+                              <td className="font-medium">{Number(ing.totalCost) > 0 ? "" : "⚠ "}{ing.ingredientName}</td>
                               <td>{Number(ing.quantity).toFixed(3)}</td>
                               <td>{ing.unit}</td>
-                              <td>{fmt(Number(ing.unitCost))}</td>
+                              <td>{Number(ing.unitCost) > 0 && Number(ing.unitCost) < 1 ? `€${Number(ing.unitCost).toFixed(4)}` : fmt(Number(ing.unitCost))}</td>
                               <td className="font-semibold">{fmt(Number(ing.totalCost))}</td>
                             </tr>
                           ))}
