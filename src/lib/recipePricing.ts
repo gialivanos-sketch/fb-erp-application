@@ -162,9 +162,20 @@ export const isPiecesKey = (u: string) => u.endsWith("#ΤΕΜ");
 /** Τεμάχια σε 1 συσκευασία από το όνομα («1*25», «100T», «Χ 35 ΤΜΧ») — ή null. */
 export function parsePackPieces(productName: string): number | null {
   const s = normKey(productName);
-  const m = s.match(/\b1\s*[*XΧ]\s*(\d+)\b/) ?? s.match(/\b(\d{1,4})\s*(?:T|Τ|ΤΕΜ|TEM|ΤΜΧ|TMX|PCS|ΤΕΜΑΧΙΑ)(?![A-ZΑ-Ω])/);
-  const n = m ? Number(m[1]) : NaN;
-  return n > 1 ? n : null;
+  const PCS = String.raw`(?:T|Τ|ΤΕΜ|TEM|ΤΜΧ|TMX|PCS|ΤΕΜΑΧΙΑ)(?![A-ZΑ-Ω])`;
+  // 1) «24Χ100ΤΕΜ», «10χ100τεμ» → 2400, 1000
+  const abT = s.match(new RegExp(String.raw`\b(\d{1,3})\s*[*XΧ]\s*(\d{1,4})\s*` + PCS));
+  if (abT) return Number(abT[1]) * Number(abT[2]);
+  // 2) «1*25», «1Χ25» → 25
+  const one = s.match(/\b1\s*[*XΧ]\s*(\d+)\b/);
+  if (one && Number(one[1]) > 1) return Number(one[1]);
+  // 3) «100T», «500TEM», «35 ΤΜΧ»
+  const t = s.match(new RegExp(String.raw`\b(\d{1,4})\s*` + PCS));
+  if (t && Number(t[1]) > 1) return Number(t[1]);
+  // 4) «5Χ100» χωρίς μονάδα — αγνοούνται διαστάσεις (33Χ33, 220Χ7, 45Χ45ΜΕΤΡΑ)
+  const ab = s.match(/\b(\d{1,2})\s*[*XΧ]\s*(\d{2,4})\b(?!\s*(?:[.,]\d|KG|ΚΙΛ|GR|ΓΡ|G\b|ML|LT|L\b|ΛΙΤ|ΜΕΤ|M\b|CM|ΕΚ|MM))/);
+  if (ab && ab[1] !== ab[2]) { const n = Number(ab[1]) * Number(ab[2]); if (n > 1) return n; }
+  return null;
 }
 
 // ── Προτάσεις ομάδας για υλικό χωρίς σύνδεση ──────────────────────────────
