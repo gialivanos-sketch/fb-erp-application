@@ -76,6 +76,27 @@ export function normalizeName(s: string): string {
     .toUpperCase().replace(/\s+/g, " ").trim();
 }
 
+// Κλειδί αντιστοίχισης προμηθευτή: αγνοεί τόνους, κεφαλαία, κενά, τελείες
+// και ορθογραφικές παραλλαγές ίδιου ήχου (ΠΙΠΕΡΗΣ = ΠΙΠΕΡΙΣ,
+// ΩΡΙΜΑΝΣΗΣ = ΟΡΙΜΑΝΣΙΣ, ΚΛΑΥΔΙΑΝΟΣ = ΚΛΑΒΔΙΑΝΟΣ κ.λπ.).
+export function supplierKey(s: string): string {
+  return normalizeName(s)
+    .replace(/[.,'"«»()\-_/]/g, " ")
+    // λατινικοί χαρακτήρες που μοιάζουν με ελληνικούς
+    .replace(/A/g, "Α").replace(/B/g, "Β").replace(/E/g, "Ε").replace(/H/g, "Η").replace(/I/g, "Ι")
+    .replace(/K/g, "Κ").replace(/M/g, "Μ").replace(/N/g, "Ν").replace(/O/g, "Ο").replace(/P/g, "Ρ")
+    .replace(/T/g, "Τ").replace(/X/g, "Χ").replace(/Y/g, "Υ").replace(/Z/g, "Ζ")
+    // απλή μεταγραφή λατινικών (METRO = ΜΕΤΡΟ, FLAVOREAT = ΦΛΑΒΟΡΕΑΤ)
+    .replace(/U/g, "ΟΥ").replace(/R/g, "Ρ").replace(/S/g, "Σ").replace(/L/g, "Λ").replace(/D/g, "Δ")
+    .replace(/G/g, "Γ").replace(/F/g, "Φ").replace(/V|W/g, "Β").replace(/C/g, "Κ")
+    .replace(/ΑΥ/g, "ΑΒ").replace(/ΕΥ/g, "ΕΒ")
+    .replace(/ΟΥ/g, "Ϙ")                 // προστασία του ΟΥ πριν τα ι-φωνήεντα
+    .replace(/ΟΙ|ΕΙ|ΥΙ/g, "Ι").replace(/[ΗΥ]/g, "Ι").replace(/Ω/g, "Ο").replace(/ΑΙ/g, "Ε")
+    .replace(/Ϙ/g, "ΟΥ")
+    .replace(/(.)\1+/g, "$1")           // διπλά σύμφωνα (ΛΛ → Λ)
+    .replace(/\s+/g, "");
+}
+
 export function vatRateFor(supplierName: string, productName: string): number {
   const sup = normalizeName(supplierName);
   if (SUPPLIERS_24.includes(sup)) return VAT_OTHER;
@@ -240,9 +261,9 @@ export function parseOrdersWorkbook(wb: WorkBook): ParsedWorkbook {
     } catch { /* φύλλο σε άλλη μορφή — αγνοείται */ }
   }
   // Προμηθευτές που εμφανίζονται μόνο στις παραγγελίες
-  const known = new Set(suppliers.map(s => normalizeName(s.name)));
+  const known = new Set(suppliers.map(s => supplierKey(s.name)));
   for (const o of orders) {
-    const k = normalizeName(o.supplierName);
+    const k = supplierKey(o.supplierName);
     if (!known.has(k)) { known.add(k); suppliers.push({ name: o.supplierName, email: null }); }
   }
 
@@ -260,6 +281,8 @@ export interface ImportPlan {
   skipped: { order: ParsedOrder; reason: SkipReason; match?: string }[];
   newSuppliers: ParsedSupplier[];
   emailUpdates: { supplier: Supplier; email: string }[];
+  // Excel όνομα → υπάρχων προμηθευτής με διαφορετική γραφή (π.χ. ΠΙΠΕΡΗΣ → ΠΙΠΕΡΙΣ)
+  nameMatches: { excelName: string; appName: string }[];
   // χρεώσεις που λείπουν για παραγγελίες XL- που υπάρχουν ήδη (π.χ. μισή προηγούμενη εισαγωγή)
   missingDebits: ParsedOrder[];
   supplierIdByName: Map<string, number>;
@@ -283,13 +306,19 @@ export function buildImportPlan(
   payments: SupplierPayment[],
 ): ImportPlan {
   const supByName = new Map<string, Supplier>();
-  for (const s of suppliers) supByName.set(normalizeName(s.name), s);
+  // αν δύο προμηθευτές της εφαρμογής δίνουν ίδιο κλειδί, κρατάμε τον παλαιότερο
+  for (const s of [...suppliers].sort((a, b) => a.id - b.id)) {
+    const k = supplierKey(s.name);
+    if (!supByName.has(k)) supByName.set(k, s);
+  }
 
   const newSuppliers: ParsedSupplier[] = [];
   const emailUpdates: { supplier: Supplier; email: string }[] = [];
+  const nameMatches: { excelName: string; appName: string }[] = [];
   for (const ps of parsed.suppliers) {
-    const ex = supByName.get(normalizeName(ps.name));
+    const ex = supByName.get(supplierKey(ps.name));
     if (!ex) newSuppliers.push(ps);
+    else if (normalizeName(ex.name) !== normalizeName(ps.name)) nameMatches.push({ excelName: ps.name, appName: ex.name });
     else if (ps.email && !ex.contactEmail) emailUpdates.push({ supplier: ex, email: ps.email });
   }
 
@@ -306,7 +335,7 @@ export function buildImportPlan(
       if (!debitRefs.has(String(o.excelOrderId))) missingDebits.push(o);
       continue;
     }
-    const sup = supByName.get(normalizeName(o.supplierName));
+    const sup = supByName.get(supplierKey(o.supplierName));
     if (sup) {
       const match = orders.find(x => {
         if (x.supplierId !== sup.id) return false;
@@ -323,6 +352,6 @@ export function buildImportPlan(
   const supplierIdByName = new Map<string, number>();
   for (const [k, s] of supByName) supplierIdByName.set(k, s.id);
 
-  return { fileName, newOrders, skipped, newSuppliers, emailUpdates, missingDebits, supplierIdByName, warnings: parsed.warnings };
+  return { fileName, newOrders, skipped, newSuppliers, emailUpdates, nameMatches, missingDebits, supplierIdByName, warnings: parsed.warnings };
 }
 

@@ -21,7 +21,7 @@ import { useLanguage } from "@/lib/context";
 import { PageHeader, KpiCard, Badge } from "@/components/shared";
 import * as db from "@/lib/supabaseData";
 import {
-  parseOrdersWorkbook, normalizeName, buildImportPlan, debitReference, debitNotes, type ImportPlan,
+  parseOrdersWorkbook, supplierKey, buildImportPlan, debitReference, debitNotes, type ImportPlan,
 } from "@/lib/excelOrderImport";
 
 const CHUNK = 50;
@@ -90,7 +90,7 @@ export default function ImportOrdersPage() {
       setStatus(gr ? "Προμηθευτές…" : "Suppliers…");
       for (const s of plan.newSuppliers) {
         const created = await db.createSupplier({ name: s.name, nameEn: null, contactEmail: s.email, contactPhone: null, address: null, category: null });
-        ids.set(normalizeName(s.name), created.id);
+        ids.set(supplierKey(s.name), created.id);
         suppliersDone++;
       }
       for (const u of plan.emailUpdates) {
@@ -100,7 +100,7 @@ export default function ImportOrdersPage() {
       // 2. Χρεώσεις που έλειπαν από προηγούμενη εισαγωγή
       if (plan.missingDebits.length) {
         await db.bulkInsertDebits(plan.missingDebits.map(o => ({
-          supplierId: ids.get(normalizeName(o.supplierName))!, transactionDate: o.orderDate,
+          supplierId: ids.get(supplierKey(o.supplierName))!, transactionDate: o.orderDate,
           amount: o.totalGross, reference: debitReference(o), notes: debitNotes(o),
         })));
         debitsDone += plan.missingDebits.length;
@@ -116,7 +116,7 @@ export default function ImportOrdersPage() {
         let created = new Map<string, number>();
         try {
           created = await db.bulkInsertOrders(chunk.map(o => ({
-            orderNumber: o.orderNumber, supplierId: ids.get(normalizeName(o.supplierName))!, orderDate: o.orderDate,
+            orderNumber: o.orderNumber, supplierId: ids.get(supplierKey(o.supplierName))!, orderDate: o.orderDate,
             invoiceNumber: o.invoiceNumber, notes: o.notes, totalNet: o.totalNet, totalVat: o.totalVat, totalGross: o.totalGross,
           })));
           const items = chunk.flatMap(o => o.items.map(it => ({
@@ -125,7 +125,7 @@ export default function ImportOrdersPage() {
           })));
           await db.bulkInsertOrderItems(items);
           await db.bulkInsertDebits(chunk.map(o => ({
-            supplierId: ids.get(normalizeName(o.supplierName))!, transactionDate: o.orderDate,
+            supplierId: ids.get(supplierKey(o.supplierName))!, transactionDate: o.orderDate,
             amount: o.totalGross, reference: debitReference(o), notes: debitNotes(o),
           })));
           ordersDone += chunk.length; itemsDone += items.length; debitsDone += chunk.length;
@@ -214,6 +214,11 @@ export default function ImportOrdersPage() {
             <div>🏢 {gr ? "Νέοι προμηθευτές" : "New suppliers"}: <b>{plan.newSuppliers.length}</b>
               {plan.newSuppliers.length > 0 && <span className="text-slate-500"> — {plan.newSuppliers.map(s => s.name).join(", ")}</span>}
             </div>
+            {plan.nameMatches.length > 0 && (
+              <div>🔗 {gr ? "Αντιστοίχιση με υπάρχοντες προμηθευτές (διαφορετική γραφή)" : "Matched to existing suppliers"}:
+                <ul className="ml-5 text-slate-600">{plan.nameMatches.map(m => <li key={m.excelName}>{m.excelName} → <b>{m.appName}</b></li>)}</ul>
+              </div>
+            )}
             {plan.emailUpdates.length > 0 && <div>✉️ {gr ? "Συμπλήρωση email" : "Email updates"}: <b>{plan.emailUpdates.length}</b> <span className="text-slate-500">— {plan.emailUpdates.map(u => u.supplier.name).join(", ")}</span></div>}
             {plan.warnings.length > 0 && (
               <details className="text-amber-700"><summary className="cursor-pointer">⚠️ {plan.warnings.length} {gr ? "προειδοποιήσεις" : "warnings"}</summary>
