@@ -25,7 +25,7 @@ const r6 = (n: number) => Math.round(n * 1e6) / 1e6;
 const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 
 const UNIT_HINT: Record<string, string> = {
-  ΤΕΜ: "π.χ. τενεκές 5L = 5000, συσκευασία 2,5 κιλ. = 2500, 30άδα αυγά = 1800",
+  ΤΕΜ: "μέσο βάρος 1 τεμαχίου αγοράς — π.χ. αγγούρι ≈ 300, τενεκές 5L = 5000, 30άδα αυγά = 1800",
   ΚΙΒ: "π.χ. κιβώτιο 6 × 1L = 6000",
   ΚΟΥΤΙ: "βάρος/όγκος περιεχομένου σε γρ./ml",
   ΠΑΚ: "βάρος/όγκος περιεχομένου σε γρ./ml",
@@ -101,15 +101,15 @@ export default function RecipePricingPanel() {
         p: priceIngredient(ing.ingredientName, ing.unit, lookup, prices, conversions) });
     }
     const unlinked = new Map<string, { name: string; uses: number }>();
-    const needConv = new Map<string, { sku: string; label: string; unit: string; examples: Set<string> }>();
+    const needConv = new Map<string, { sku: string; label: string; unit: string; examples: Set<string>; recipeUnits: Set<string>; uses: number }>();
     const noPurch = new Map<string, number>(), badUnit = new Map<string, number>();
     for (const r of rows) {
       const k = normKey(r.name);
       if (r.p.status === "no_group") { const e = unlinked.get(k) ?? { name: r.name.trim(), uses: 0 }; e.uses++; unlinked.set(k, e); }
       else if (r.p.status === "needs_conversion" && r.p.sku) {
         const key = `${r.p.sku}|${r.p.needUnit}`;
-        const e = needConv.get(key) ?? { sku: r.p.sku, label: r.p.groupLabel ?? "", unit: r.p.needUnit ?? "ΤΕΜ", examples: new Set<string>() };
-        e.examples.add(r.name.trim()); needConv.set(key, e);
+        const e = needConv.get(key) ?? { sku: r.p.sku, label: r.p.groupLabel ?? "", unit: r.p.needUnit ?? "ΤΕΜ", examples: new Set<string>(), recipeUnits: new Set<string>(), uses: 0 };
+        e.examples.add(r.name.trim()); e.recipeUnits.add(r.unit.toLowerCase()); e.uses++; needConv.set(key, e);
       }
       else if (r.p.status === "no_purchases") noPurch.set(r.name.trim(), (noPurch.get(r.name.trim()) ?? 0) + 1);
       else if (r.p.status === "unknown_unit") badUnit.set(`${r.name.trim()} (${r.unit})`, (badUnit.get(`${r.name.trim()} (${r.unit})`) ?? 0) + 1);
@@ -361,7 +361,12 @@ export default function RecipePricingPanel() {
                       <tr key={key}>
                         <td className="font-mono text-xs">{c.sku}</td>
                         <td className="font-medium">{c.label}</td>
-                        <td className="text-xs text-slate-500 max-w-[16rem]">{[...c.examples].slice(0, 4).join(", ")}</td>
+                        <td className="text-xs text-slate-500 max-w-[16rem]">
+                          {[...c.examples].slice(0, 4).join(", ")}
+                          <div className="text-[11px] text-amber-700 mt-0.5">
+                            {gr ? `στις συνταγές σε: ${[...c.recipeUnits].join(", ")} · ${c.uses} χρήσεις` : `recipes use: ${[...c.recipeUnits].join(", ")}`}
+                          </div>
+                        </td>
                         <td>
                           <div className="flex items-center gap-2 whitespace-nowrap">
                             <span>1 {c.unit === "ΤΕΜΑΧΙΟ" ? (gr ? "τεμάχιο συνταγής" : "recipe piece") : c.unit.replace("#ΤΕΜ", "")} =</span>
