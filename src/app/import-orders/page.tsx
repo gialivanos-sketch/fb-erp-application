@@ -21,7 +21,7 @@ import { useLanguage } from "@/lib/context";
 import { PageHeader, KpiCard, Badge } from "@/components/shared";
 import * as db from "@/lib/supabaseData";
 import {
-  parseOrdersWorkbook, supplierKey, buildImportPlan, debitReference, debitNotes, type ImportPlan,
+  parseOrdersWorkbook, supplierKey, buildImportPlan, buildReconciliation, type ReconRow, debitReference, debitNotes, type ImportPlan,
 } from "@/lib/excelOrderImport";
 
 const CHUNK = 50;
@@ -49,6 +49,9 @@ export default function ImportOrdersPage() {
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState(0);
   const [status, setStatus] = useState("");
+  const [recon, setRecon] = useState<ReconRow[]>([]);
+  const [fixDebits, setFixDebits] = useState(true);
+  const [fixResult, setFixResult] = useState<{ fixed: number; debits: number; failed: string[] } | null>(null);
   const [result, setResult] = useState<{ orders: number; items: number; debits: number; suppliers: number; failed: string[] } | null>(null);
 
   const fmt = (n: number) => "€" + n.toLocaleString("el-GR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -57,13 +60,16 @@ export default function ImportOrdersPage() {
   async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-    setError(null); setPlan(null); setResult(null); setLoading(true);
+    setError(null); setPlan(null); setResult(null); setFixResult(null); setRecon([]); setLoading(true);
     try {
       const buf = await file.arrayBuffer();
       const wb = XLSX.read(buf, { type: "array" });
       const parsed = parseOrdersWorkbook(wb);
-      const [suppliers, orders, payments, itemCounts] = await Promise.all([db.fetchSuppliers(), db.fetchOrders(), db.fetchPayments(), db.fetchOrderItemCounts()]);
-      setPlan(buildImportPlan(file.name, parsed, suppliers, orders, payments, itemCounts));
+      const [suppliers, orders, payments, itemStats] = await Promise.all([db.fetchSuppliers(), db.fetchOrders(), db.fetchPayments(), db.fetchOrderItemStats()]);
+      const itemCounts = new Map([...itemStats].map(([k, v]) => [k, v.count]));
+      const pl = buildImportPlan(file.name, parsed, suppliers, orders, payments, itemCounts);
+      setPlan(pl);
+      setRecon(buildReconciliation(pl, itemStats, payments));
     } catch (err) {
       setError(String(err instanceof Error ? err.message : err));
     } finally {
@@ -89,6 +95,66 @@ export default function ImportOrdersPage() {
     const exists = plan.skipped.filter(s => s.reason === "exists");
     return { net, vat, gross, items, rows, imported, exists };
   }, [plan]);
+
+  const reconSum = useMemo(() => {
+    if (!plan) return null;
+    const xlNet = r2(plan.newOrders.reduce((s, o) => s + o.totalNet, 0) + plan.skipped.reduce((s, x) => s + x.order.totalNet, 0));
+    const appNet = r2(recon.reduce((s, r) => s + Number(r.app.totalNet || 0), 0));
+    const xlMatchedNet = r2(recon.reduce((s, r) => s + r.order.totalNet, 0));
+    const toFix = recon.filter(r => r.needsFix);
+    const noDebit = recon.filter(r => !r.hasDebit);
+    const appOnlyNet = r2(plan.appOnly.reduce((s, o) => s + Number(o.totalNet || 0), 0));
+    return { xlNet, appNet, xlMatchedNet, diff: r2(appNet - xlMatchedNet), toFix, noDebit, appOnlyNet };
+  }, [plan, recon]);
+
+  async function runFix() {
+    if (!plan || !reconSum || running) return;
+    const nFix = reconSum.toFix.length, nDeb = fixDebits ? reconSum.noDebit.length : 0;
+    if (!confirm(gr ? `Διόρθωση ${nFix} παραγγελιών ώστε να ταυτίζονται με το Excel${nDeb ? ` και προσθήκη ${nDeb} χρεώσεων` : ""};` : `Fix ${nFix} orders${nDeb ? ` and add ${nDeb} debits` : ""}?`)) return;
+    setRunning(true); setProgress(0); setFixResult(null);
+    const failed: string[] = [];
+    let fixed = 0, debits = 0;
+    const total = nFix + nDeb;
+    let done = 0;
+    try {
+      for (const r of reconSum.toFix) {
+        const o = r.order;
+        setStatus(gr ? `Διόρθωση ${r.app.orderNumber}…` : `Fixing ${r.app.orderNumber}…`);
+        try {
+          await db.replaceOrderItemsDelete(r.app.id, r.appItemCount);
+          await db.bulkInsertOrderItems(o.items.map(it => ({
+            orderId: r.app.id, productName: it.productName, quantity: it.quantity, unit: it.unit,
+            basePrice: it.priceNet, vatPercent: it.vatPercent, netAmount: it.net, vatAmount: it.vat, grossAmount: it.gross,
+          })));
+          await db.updateOrderStatus(r.app.id, {
+            ...(r.app.invoiceNumber ? {} : o.invoiceNumber ? { invoiceNumber: o.invoiceNumber } : {}),
+            status: "delivered", totalNet: o.totalNet.toFixed(2), totalVat: o.totalVat.toFixed(2), totalGross: o.totalGross.toFixed(2),
+          });
+          fixed++;
+        } catch (err) {
+          failed.push(`${r.app.orderNumber} / ${o.orderNumber} (${o.orderDate}, ${o.supplierName}): ${errorText(err)}`);
+        }
+        setProgress(Math.round((++done / total) * 100));
+      }
+      if (fixDebits) {
+        for (const r of reconSum.noDebit) {
+          const o = r.order;
+          try {
+            await db.bulkInsertDebits([{ supplierId: r.app.supplierId, transactionDate: o.orderDate, amount: o.totalGross, reference: debitReference(o), notes: debitNotes(o) }]);
+            debits++;
+          } catch (err) {
+            failed.push(`${o.orderNumber} — χρέωση: ${errorText(err)}`);
+          }
+          setProgress(Math.round((++done / total) * 100));
+        }
+      }
+      setStatus(gr ? "Ανανέωση δεδομένων…" : "Refreshing…");
+      await refreshAll();
+    } finally {
+      setFixResult({ fixed, debits, failed });
+      setStatus(""); setRunning(false); setPlan(null); setRecon([]);
+    }
+  }
 
   async function runImport() {
     if (!plan || running) return;
@@ -231,6 +297,21 @@ export default function ImportOrdersPage() {
         </div>
       )}
 
+      {fixResult && (
+        <div className={`erp-card mb-6 p-6 ${fixResult.failed.length ? "border-amber-300" : "border-emerald-300"}`}>
+          <h3 className="font-semibold mb-2">{fixResult.failed.length ? "⚠️" : "✅"} {gr ? "Η συμφωνία με το Excel ολοκληρώθηκε" : "Reconciliation finished"}</h3>
+          <ul className="text-sm space-y-1">
+            <li>{gr ? "Παραγγελίες που διορθώθηκαν" : "Orders fixed"}: <b>{fixResult.fixed}</b></li>
+            <li>{gr ? "Χρεώσεις που προστέθηκαν" : "Debits added"}: <b>{fixResult.debits}</b></li>
+          </ul>
+          {fixResult.failed.length > 0 && (
+            <div className="mt-3 text-sm text-amber-800">{gr ? "Δεν πέρασαν:" : "Failed:"}
+              <ul className="list-disc ml-5">{fixResult.failed.map((f, i) => <li key={i}>{f}</li>)}</ul>
+            </div>
+          )}
+        </div>
+      )}
+
       {running && (
         <div className="erp-card mb-6 p-6">
           <div className="text-sm mb-2">{status}</div>
@@ -299,6 +380,55 @@ export default function ImportOrdersPage() {
                     <td className="text-right">{fmt(summary.net)}</td><td className="text-right">{fmt(summary.vat)}</td><td className="text-right">{fmt(summary.gross)}</td>
                   </tr></tfoot>
                 </table>
+              </div>
+            </div>
+          )}
+
+          {reconSum && recon.length > 0 && (
+            <div className="erp-card mb-6">
+              <div className="erp-card-header"><h3 className="font-semibold">⚖️ {gr ? "Συμφωνία με Excel (παραγγελίες που υπάρχουν ήδη)" : "Reconciliation with Excel"}</h3></div>
+              <div className="p-6 space-y-2 text-sm">
+                <div>{gr ? "Σύνολο χωρίς ΦΠΑ στο Excel (όλες οι παραγγελίες)" : "Excel net total"}: <b>{fmt(reconSum.xlNet)}</b></div>
+                <div>{gr ? `Για τις ${recon.length} παραγγελίες που υπάρχουν ήδη — Excel` : "Existing orders — Excel"}: <b>{fmt(reconSum.xlMatchedNet)}</b> · {gr ? "Εφαρμογή" : "App"}: <b>{fmt(reconSum.appNet)}</b> · {gr ? "Διαφορά" : "Diff"}: <b className={Math.abs(reconSum.diff) > 0.05 ? "text-red-600" : "text-emerald-600"}>{fmt(reconSum.diff)}</b></div>
+                <div>🔧 {gr ? "Παραγγελίες με διαφορετικά ποσά ή είδη από το Excel" : "Orders differing from Excel"}: <b>{reconSum.toFix.length}</b></div>
+                <div>💳 {gr ? "Παραγγελίες χωρίς χρέωση στην καρτέλα προμηθευτή" : "Orders without supplier debit"}: <b>{reconSum.noDebit.length}</b></div>
+                {plan.appOnly.length > 0 && (
+                  <div>ℹ️ {gr ? "Παραγγελίες της εφαρμογής στην ίδια περίοδο που ΔΕΝ υπάρχουν στο Excel" : "App-only orders in period"}: <b>{plan.appOnly.length}</b> ({fmt(reconSum.appOnlyNet)} {gr ? "χωρίς ΦΠΑ" : "net"}) — {gr ? "δεν αγγίζονται" : "untouched"}
+                    <details className="ml-5 text-xs text-slate-500"><summary className="cursor-pointer">{gr ? "Προβολή" : "Show"}</summary>
+                      {plan.appOnly.map(o => <div key={o.id}>{o.orderNumber} · {o.orderDate} · {o.supplierName} · {fmt(Number(o.totalNet || 0))} · {o.status}</div>)}
+                    </details>
+                  </div>
+                )}
+                {reconSum.toFix.length > 0 && (
+                  <details><summary className="cursor-pointer text-slate-600">{gr ? "Λίστα διαφορών" : "Differences"}</summary>
+                    <div className="overflow-x-auto mt-2">
+                      <table className="erp-table text-xs">
+                        <thead><tr>
+                          <th>Excel</th><th>{gr ? "Εφαρμογή" : "App"}</th><th>{gr ? "Ημ/νία" : "Date"}</th><th>{gr ? "Προμηθευτής" : "Supplier"}</th>
+                          <th className="text-right">{gr ? "Καθαρή Excel" : "Excel net"}</th><th className="text-right">{gr ? "Καθαρή εφαρμ." : "App net"}</th>
+                          <th className="text-right">{gr ? "Με ΦΠΑ εφαρμ." : "App gross"}</th><th className="text-right">{gr ? "Είδη Excel/εφαρμ." : "Items"}</th>
+                        </tr></thead>
+                        <tbody>{reconSum.toFix.map(r => (
+                          <tr key={r.order.orderNumber}>
+                            <td>{r.order.orderNumber}</td><td>{r.app.orderNumber}</td><td>{r.order.orderDate}</td><td>{r.order.supplierName}</td>
+                            <td className="text-right">{fmt(r.order.totalNet)}</td><td className="text-right">{fmt(Number(r.app.totalNet || 0))}</td>
+                            <td className="text-right">{fmt(Number(r.app.totalGross || 0))}</td><td className="text-right">{r.order.items.length}/{r.appItemCount}</td>
+                          </tr>))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </details>
+                )}
+                {(reconSum.toFix.length > 0 || reconSum.noDebit.length > 0) && (
+                  <div className="pt-3 border-t space-y-2">
+                    {reconSum.noDebit.length > 0 && (
+                      <label className="flex items-center gap-2"><input type="checkbox" checked={fixDebits} onChange={e => setFixDebits(e.target.checked)} />
+                        {gr ? `Πρόσθεσε και χρέωση (με ΦΠΑ) στις ${reconSum.noDebit.length} παραγγελίες χωρίς χρέωση` : "Also add missing debits"}</label>
+                    )}
+                    <button onClick={runFix} className="erp-btn-warning">🔧 {gr ? "Διόρθωση ώστε να ταυτίζεται με το Excel" : "Fix to match Excel"}</button>
+                    <p className="text-xs text-slate-500">{gr ? "Στις παραγγελίες με διαφορές αντικαθίστανται τα είδη και τα σύνολα με αυτά του Excel (χωρίς ΦΠΑ + ΦΠΑ). Ο αριθμός παραγγελίας της εφαρμογής κρατιέται." : "Items and totals are replaced with Excel values."}</p>
+                  </div>
+                )}
               </div>
             </div>
           )}

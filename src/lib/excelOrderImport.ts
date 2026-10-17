@@ -278,7 +278,9 @@ export type SkipReason = "imported" | "exists";
 export interface ImportPlan {
   fileName: string;
   newOrders: ParsedOrder[];
-  skipped: { order: ParsedOrder; reason: SkipReason; match?: string }[];
+  skipped: { order: ParsedOrder; reason: SkipReason; match?: string; app: Order }[];
+  // παραγγελίες της εφαρμογής στην περίοδο του Excel που δεν αντιστοιχούν σε καμία του Excel
+  appOnly: Order[];
   newSuppliers: ParsedSupplier[];
   emailUpdates: { supplier: Supplier; email: string }[];
   // Excel όνομα → υπάρχων προμηθευτής με διαφορετική γραφή (π.χ. ΠΙΠΕΡΗΣ → ΠΙΠΕΡΙΣ)
@@ -333,10 +335,11 @@ export function buildImportPlan(
   const missingDebits: ParsedOrder[] = [];
   const missingItems: { order: ParsedOrder; orderId: number }[] = [];
   const idByNumber = new Map(orders.map(o => [o.orderNumber, o.id]));
+  const usedApp = new Set<number>();   // κάθε παραγγελία της εφαρμογής ταιριάζει με μία μόνο του Excel
 
   for (const o of parsed.orders) {
     if (byNumber.has(o.orderNumber)) {
-      skipped.push({ order: o, reason: "imported" });
+      skipped.push({ order: o, reason: "imported", app: orders.find(x => x.orderNumber === o.orderNumber)! });
       if (!debitRefs.has(String(o.excelOrderId))) missingDebits.push(o);
       const oid = idByNumber.get(o.orderNumber)!;
       if (o.items.length > 0 && !(itemCounts.get(oid) ?? 0)) missingItems.push({ order: o, orderId: oid });
@@ -345,13 +348,17 @@ export function buildImportPlan(
     const sup = supByName.get(supplierKey(o.supplierName));
     if (sup) {
       const match = orders.find(x => {
-        if (x.supplierId !== sup.id) return false;
+        if (usedApp.has(x.id) || x.supplierId !== sup.id) return false;
         if (o.invoiceNumber && x.invoiceNumber && x.invoiceNumber.trim() === o.invoiceNumber) return true;
         if (x.orderDate !== o.orderDate) return false;
         const net = Number(x.totalNet), gross = Number(x.totalGross);
         return Math.abs(net - o.totalNet) < 0.02 || Math.abs(gross - o.totalNet) < 0.02 || Math.abs(gross - o.totalGross) < 0.02;
       });
-      if (match) { skipped.push({ order: o, reason: "exists", match: match.orderNumber }); continue; }
+      if (match && !usedApp.has(match.id)) {
+        usedApp.add(match.id);
+        skipped.push({ order: o, reason: "exists", match: match.orderNumber, app: match });
+        continue;
+      }
     }
     newOrders.push(o);
   }
@@ -359,6 +366,48 @@ export function buildImportPlan(
   const supplierIdByName = new Map<string, number>();
   for (const [k, s] of supByName) supplierIdByName.set(k, s.id);
 
-  return { fileName, newOrders, skipped, newSuppliers, emailUpdates, nameMatches, missingDebits, missingItems, supplierIdByName, warnings: parsed.warnings };
+  const xlDates = parsed.orders.map(o => o.orderDate).sort();
+  const matchedIds = new Set([...usedApp, ...orders.filter(o => byNumber.has(o.orderNumber) && o.orderNumber.startsWith("XL-")).map(o => o.id)]);
+  const appOnly = xlDates.length
+    ? orders.filter(o => !matchedIds.has(o.id) && !o.orderNumber.startsWith("XL-") && o.status !== "cancelled"
+        && o.orderDate >= xlDates[0] && o.orderDate <= xlDates[xlDates.length - 1])
+    : [];
+
+  return { fileName, newOrders, skipped, appOnly, newSuppliers, emailUpdates, nameMatches, missingDebits, missingItems, supplierIdByName, warnings: parsed.warnings };
 }
 
+
+// ─── Συμφωνία εφαρμογής ↔ Excel για παραγγελίες που υπάρχουν ήδη ────────────
+
+export interface ReconRow {
+  order: ParsedOrder;     // όπως στο Excel
+  app: Order;             // η αντίστοιχη παραγγελία της εφαρμογής
+  appItemCount: number;
+  appItemsNet: number;
+  amountDiff: number;     // καθαρή εφαρμογής − καθαρή Excel
+  needsFix: boolean;      // διαφορετικά ποσά ή είδη
+  hasDebit: boolean;      // υπάρχει χρέωση στην καρτέλα προμηθευτή
+}
+
+export function buildReconciliation(
+  plan: ImportPlan,
+  itemStats: Map<number, { count: number; net: number }>,
+  payments: SupplierPayment[],
+): ReconRow[] {
+  const debits = payments.filter(p => p.type === "debit");
+  const xlRefs = new Set(debits.map(p => p.reference?.match(/^XL-(\d+)\b/)?.[1]).filter(Boolean) as string[]);
+  return plan.skipped.filter(s => s.app).map(({ order, app }) => {
+    const st = itemStats.get(app.id) ?? { count: 0, net: 0 };
+    const appNet = Number(app.totalNet || 0);
+    const xlItemsNet = r2(order.items.reduce((s, i) => s + i.net, 0));
+    const amountDiff = r2(appNet - order.totalNet);
+    const needsFix = Math.abs(amountDiff) > 0.02 || st.count !== order.items.length || Math.abs(st.net - xlItemsNet) > 0.05
+      || Math.abs(Number(app.totalGross || 0) - order.totalGross) > 0.02;
+    const hasDebit = xlRefs.has(String(order.excelOrderId)) || debits.some(d =>
+      d.supplierId === app.supplierId && (
+        (order.invoiceNumber != null && (d.reference ?? "").includes(order.invoiceNumber)) ||
+        (d.transactionDate === order.orderDate && [order.totalGross, order.totalNet, Number(app.totalGross || 0)].some(a => Math.abs(Number(d.amount) - a) < 0.02))
+      ));
+    return { order, app, appItemCount: st.count, appItemsNet: r2(st.net), amountDiff, needsFix, hasDebit };
+  });
+}

@@ -500,14 +500,27 @@ export async function bulkInsertOrders(rows: BulkOrderInput[]): Promise<Map<stri
   return ids;
 }
 
-/** Πλήθος ειδών ανά παραγγελία (για έλεγχο παραγγελιών χωρίς είδη). */
-export async function fetchOrderItemCounts(): Promise<Map<number, number>> {
+/** Πλήθος & καθαρή αξία ειδών ανά παραγγελία (έλεγχοι εισαγωγής/συμφωνίας). */
+export async function fetchOrderItemStats(): Promise<Map<number, { count: number; net: number }>> {
   const client = requireClient();
-  const rows = await fetchAllPages<{ order_id: number }>((from, to) =>
-    client.from("order_items").select("order_id").order("id", { ascending: true }).range(from, to));
-  const m = new Map<number, number>();
-  for (const r of rows) m.set(r.order_id, (m.get(r.order_id) ?? 0) + 1);
+  const rows = await fetchAllPages<{ order_id: number; net_amount: number }>((from, to) =>
+    client.from("order_items").select("order_id, net_amount").order("id", { ascending: true }).range(from, to));
+  const m = new Map<number, { count: number; net: number }>();
+  for (const r of rows) {
+    const e = m.get(r.order_id) ?? { count: 0, net: 0 };
+    e.count++; e.net += Number(r.net_amount || 0);
+    m.set(r.order_id, e);
+  }
   return m;
+}
+
+/** Σβήνει όλα τα είδη μιας παραγγελίας και ελέγχει ότι πράγματι σβήστηκαν. */
+export async function replaceOrderItemsDelete(orderId: number, expected: number): Promise<void> {
+  const { data, error } = await requireClient().from("order_items").delete().eq("order_id", orderId).select("id");
+  if (error) throw error;
+  if (expected > 0 && (data ?? []).length === 0) {
+    throw new Error("Η βάση δεν επέτρεψε τη διαγραφή των παλιών ειδών (δικαιώματα RLS)");
+  }
 }
 
 export async function bulkInsertOrderItems(rows: BulkOrderItemInput[]): Promise<void> {
