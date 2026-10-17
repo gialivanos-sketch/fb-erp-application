@@ -174,6 +174,9 @@ export function parsePackPieces(productName: string): number | null {
   // 2) «1*25», «1Χ25» → 25
   const one = s.match(/\b1\s*[*XΧ]\s*(\d+)\b/);
   if (one && Number(one[1]) > 1) return Number(one[1]);
+  // 2β) «30ΑΔΑ», «12άδα» (αυγά κ.λπ.)
+  const ada = s.match(/(?<![0-9])(\d{1,3})\s*-?\s*ΑΔ(Α|ΕΣ)(?![Α-ΩA-Z])/);
+  if (ada && Number(ada[1]) > 1) return Number(ada[1]);
   // 3) «100T», «500TEM», «35 ΤΜΧ»
   const t = s.match(new RegExp(String.raw`\b(\d{1,4})\s*` + PCS));
   if (t && Number(t[1]) > 1) return Number(t[1]);
@@ -297,4 +300,49 @@ export function suggestPackGrams(products: { product: string; qty: number }[], p
     w += q; sum += g * q;
   }
   return parsed ? { grams: Math.round(sum / w), parsed, total: products.length } : null;
+}
+
+// ── Τυπικό βάρος 1 τεμαχίου (για συνταγές σε τεμάχια, αγορά σε κιλό) ──────
+// Ενδεικτικές τιμές κουζίνας — ο χρήστης τις ελέγχει/αλλάζει πριν τις αποθηκεύσει.
+const TYPICAL_PIECE_GRAMS: [RegExp, number][] = [
+  [/ΠΙΠΕΡΙ(Α|ΕΣ)? (ΚΟΚΚ|ΚΙΤΡ|ΠΡΑΣ|ΦΛΩΡ|ΧΟΝΤΡ)|ΠΙΠΕΡΙΑ|ΠΙΠΕΡΙΕΣ/, 180],
+  [/ΝΤΟΜΑΤΙΝΙ|ΤΟΜΑΤΙΝΙ|CHERRY/, 15],
+  [/ΝΤΟΜΑΤ/, 150],
+  [/ΑΓΓΟΥΡ/, 300],
+  [/ΛΕΜΟΝ/, 120],
+  [/ΛΑΙΜ|LIME/, 70],
+  [/ΠΟΡΤΟΚΑΛ/, 200],
+  [/ΜΗΛ(Α|Ο)/, 180],
+  [/ΑΧΛΑΔ/, 180],
+  [/ΜΠΑΝΑΝ/, 120],
+  [/ΑΒΟΚΑΝΤΟ/, 200],
+  [/ΑΥΓ(Α|Ο)/, 60],
+  [/ΣΚΟΡΔ/, 50],
+  [/ΚΡΕΜΜΥΔΑΚ/, 20],
+  [/ΚΡΕΜΜΥΔ/, 150],
+  [/ΓΛΥΚΟΠΑΤΑΤ/, 250],
+  [/ΠΑΤΑΤ/, 200],
+  [/ΚΑΡΟΤ/, 100],
+  [/ΜΕΛΙΤΖΑΝ/, 300],
+  [/ΚΟΛΟΚΥΘΑΚ|ΚΟΛΟΚΥΘΙ/, 250],
+  [/ΜΑΡΟΥΛ/, 400],
+  [/ΙCEBERG|ΑΙΣΜΠΕΡΓΚ|ICEBERG/, 500],
+  [/ΜΑΝΙΤΑΡ/, 20],
+  [/ΣΕΛΙΝΟ/, 400],
+  [/ΠΡΑΣΟ/, 250],
+  [/ΚΑΡΠΟΥΖ/, 5000],
+  [/ΠΕΠΟΝ/, 1500],
+  [/ΑΝΑΝΑ/, 1200],
+  [/ΜΑΝΓΚΟ|MANGO/, 300],
+  [/ΑΚΤΙΝΙΔ/, 90],
+  [/ΡΟΔΑΚΙΝ|ΝΕΚΤΑΡΙΝ/, 150],
+];
+
+/** Τυπικό βάρος ενός τεμαχίου για το όνομα (ομάδας ή υλικού) — ή null. */
+export function typicalPieceGrams(...names: string[]): number | null {
+  for (const n of names) {
+    const s = normKey(n);
+    for (const [re, g] of TYPICAL_PIECE_GRAMS) if (re.test(s)) return g;
+  }
+  return null;
 }

@@ -13,7 +13,7 @@ import { useApp } from "@/lib/context";
 import * as db from "@/lib/supabaseData";
 import { buildSkuLookup, groupLines, normKey, type PurchaseLine } from "@/lib/itemAnalysis";
 import {
-  buildGroupPrices, priceIngredient, suggestGroups, recipeTotals, PRICE_WINDOW_DAYS, suggestPackGrams, purchaseUnitKey, isPiecesKey, recipeUnitInfo, linkLooksWrong,
+  buildGroupPrices, priceIngredient, suggestGroups, recipeTotals, PRICE_WINDOW_DAYS, suggestPackGrams, purchaseUnitKey, isPiecesKey, recipeUnitInfo, linkLooksWrong, typicalPieceGrams,
   type GroupCandidate, type IngredientPrice, type ScoredCandidate,
 } from "@/lib/recipePricing";
 
@@ -144,7 +144,12 @@ export default function RecipePricingPanel() {
     }
     const out = new Map<string, { grams: number; parsed: number; total: number }>();
     for (const c of analysis?.needConv ?? []) {
-      if (c.unit === "ΤΕΜΑΧΙΟ") continue;
+      if (c.unit === "ΤΕΜΑΧΙΟ") {
+        // συνταγή σε τεμάχια, αγορά σε κιλό → τυπικό βάρος τεμαχίου (π.χ. πιπεριά ≈ 180 γρ.)
+        const g = typicalPieceGrams(c.label, ...c.examples);
+        if (g) out.set(`${c.sku}|${c.unit}`, { grams: g, parsed: 0, total: 0 });
+        continue;
+      }
       const k = `${c.sku}|${c.unit}`;
       const buyKey = `${c.sku}|${c.unit.replace("#ΤΕΜ", "")}`;
       const prods = [...(prodBy.get(buyKey) ?? new Map()).entries()].map(([product, qty]) => ({ product, qty }));
@@ -438,7 +443,7 @@ export default function RecipePricingPanel() {
                           const key = `${c.sku}|${c.unit}`;
                           const pieces = isPiecesKey(c.unit);
                           const purpose = c.unit === "ΤΕΜΑΧΙΟ"
-                            ? (gr ? "για συνταγές σε τεμάχια (βάρος 1 τεμαχίου)" : "for recipes in pieces")
+                            ? (gr ? "πόσο ζυγίζει 1 τεμάχιο (η αγορά είναι σε κιλό)" : "weight of 1 piece")
                             : pieces ? (gr ? "για συνταγές σε τεμάχια" : "for recipes in pieces")
                             : (gr ? "για συνταγές σε γρ./ml" : "for recipes in g/ml");
                           return (
@@ -453,7 +458,9 @@ export default function RecipePricingPanel() {
                                 {grp.items.length > 1 && <span className="text-[11px] text-slate-500">{purpose}</span>}
                               </div>
                               {packSuggest.get(key) && gramsIn[key] === undefined
-                                ? <div className="text-[11px] text-blue-600 mt-0.5">📏 {gr ? `πρόταση από το όνομα (${packSuggest.get(key)!.parsed}/${packSuggest.get(key)!.total} προϊόντα) — έλεγξε και ✓` : "suggested from name"}</div>
+                                ? <div className="text-[11px] text-blue-600 mt-0.5">📏 {c.unit === "ΤΕΜΑΧΙΟ"
+                                    ? (gr ? "τυπικό βάρος ενός τεμαχίου — άλλαξέ το αν τα δικά σου είναι μεγαλύτερα/μικρότερα, και ✓" : "typical piece weight")
+                                    : (gr ? `πρόταση από το όνομα (${packSuggest.get(key)!.parsed}/${packSuggest.get(key)!.total} προϊόντα) — έλεγξε και ✓` : "suggested from name")}</div>
                                 : <div className="text-[11px] text-slate-400 mt-0.5">{pieces ? (gr ? "πόσα τεμάχια/μερίδες έχει 1 συσκευασία (π.χ. brioche 1*25 = 25, κέτσαπ 100T = 100)" : "pieces per pack") : <>{gr ? "μέσο βάρος/όγκος · " : ""}{UNIT_HINT[c.unit] ?? ""}</>}</div>}
                             </div>
                           );
