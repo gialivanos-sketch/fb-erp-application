@@ -4,6 +4,7 @@ import { useLanguage } from "@/lib/context";
 import { PageHeader, KpiCard, Badge } from "@/components/shared";
 import * as db from "@/lib/supabaseData";
 import type { Menu, Recipe, Supplier } from "@/lib/types";
+import { useBusinessName } from "@/lib/useBusinessName";
 
 interface ConsumptionLine {
   name: string;
@@ -35,6 +36,7 @@ type SupplierOptionsMap = Record<string, {
 }[]>;
 
 export default function ConsumptionPage() {
+  const bizName = useBusinessName();
   const { t, locale } = useLanguage();
 
   const [menus, setMenus] = useState<Menu[]>([]);
@@ -173,9 +175,9 @@ export default function ConsumptionPage() {
       return `${i + 1}. ${item.name}  ${qtyStr} ${item.unit}${priceStr}`;
     }).join("\n");
 
-    const subject = `Παραγγελία Υλικών – NOE BEACH CLUB – ${today}`;
+    const subject = `Παραγγελία Υλικών – ${bizName} – ${today}`;
     const body = [
-      `NOE BEACH CLUB`,
+      `${bizName}`,
       `ΠΑΡΑΓΓΕΛΙΑ ΥΛΙΚΩΝ`,
       SEP,
       `Ημερομηνία : ${today}`,
@@ -192,7 +194,7 @@ export default function ConsumptionPage() {
       `ΣΥΝΟΛΟ: ${total > 0 ? total.toFixed(2) + " EUR" : "-"}`,
       ``,
       `Με εκτίμηση,`,
-      `NOE BEACH CLUB`,
+      `${bizName}`,
     ].join("\n");
 
     const subject_enc = encodeURIComponent(subject);

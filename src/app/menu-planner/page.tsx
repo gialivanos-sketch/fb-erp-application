@@ -4,8 +4,10 @@ import { useLanguage } from "@/lib/context";
 import { PageHeader, KpiCard, Badge, Modal } from "@/components/shared";
 import type { Recipe, Menu, MenuRecipe, Supplier } from "@/lib/types";
 import * as db from "@/lib/supabaseData";
+import { useBusinessName } from "@/lib/useBusinessName";
 
 export default function MenuPlannerPage() {
+  const bizName = useBusinessName();
   const { t, locale, data, refreshAll } = useLanguage();
   const menus = data.menus;
   const allRecipes = data.recipes;
@@ -203,9 +205,9 @@ export default function MenuPlannerPage() {
       }
     }).join("\n");
 
-    const subject = `Παραγγελία ${today} – NOE BEACH CLUB – ${supplierName}`;
+    const subject = `Παραγγελία ${today} – ${bizName} – ${supplierName}`;
     const body = [
-      `NOE BEACH CLUB — ΠΑΡΑΓΓΕΛΙΑ`,
+      `${bizName} — ΠΑΡΑΓΓΕΛΙΑ`,
       SEP,
       `Προμηθευτής   : ${supplierName}`,
       `Email         : ${toEmail}`,
@@ -227,7 +229,7 @@ export default function MenuPlannerPage() {
       SEP,
       ``,
       `Με εκτίμηση,`,
-      `NOE BEACH CLUB`,
+      `${bizName}`,
     ].filter(l => l !== undefined).join("\n");
 
     const subject_enc = encodeURIComponent(subject);
@@ -274,7 +276,7 @@ export default function MenuPlannerPage() {
     </head><body>
       <div>
         <div style="background:#1e40af;color:#fff;padding:10px 14px;font-size:15px;font-weight:700;letter-spacing:0.5px">
-          NOE BEACH CLUB &nbsp;–&nbsp; ORDER FORM
+          ${bizName} &nbsp;–&nbsp; ORDER FORM
         </div>
         <table style="width:100%;border-collapse:collapse;margin-bottom:14px">
           <tr>
@@ -327,7 +329,7 @@ export default function MenuPlannerPage() {
           </tr>
         </table>
         <div style="text-align:center;margin-top:30px;font-size:9px;color:#94a3b8">
-          NOE BEACH CLUB &nbsp;|&nbsp; ${supplierName} &nbsp;|&nbsp; ${today}
+          ${bizName} &nbsp;|&nbsp; ${supplierName} &nbsp;|&nbsp; ${today}
         </div>
       </div>
     </body></html>`;
@@ -503,7 +505,7 @@ export default function MenuPlannerPage() {
         {editing && (
           <div id="printable-recipe-area" className="hidden print:block text-[11pt] text-black">
             <div style={{ borderBottom: "2px solid #0f172a", paddingBottom: 8, marginBottom: 12 }}>
-              <div style={{ fontSize: "9pt", letterSpacing: 1, color: "#475569" }}>NOE BEACH CLUB — {locale === "gr" ? "ΚΟΣΤΟΛΟΓΗΣΗ ΜΕΝΟΥ" : "MENU COSTING"}</div>
+              <div style={{ fontSize: "9pt", letterSpacing: 1, color: "#475569" }}>{bizName} — {locale === "gr" ? "ΚΟΣΤΟΛΟΓΗΣΗ ΜΕΝΟΥ" : "MENU COSTING"}</div>
               <div style={{ fontSize: "18pt", fontWeight: 700 }}>{menuTitle || "—"}</div>
               {menuTitleEn && <div style={{ fontSize: "11pt", color: "#475569" }}>{menuTitleEn}</div>}
               <div style={{ fontSize: "9pt", color: "#475569", marginTop: 4 }}>{new Date().toLocaleDateString("el-GR")}</div>

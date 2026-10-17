@@ -4,8 +4,10 @@ import { useLanguage } from "@/lib/context";
 import { PageHeader, KpiCard, Badge, FilterBar } from "@/components/shared";
 import type { Recipe } from "@/lib/types";
 import * as XLSX from "xlsx";
+import { useBusinessName } from "@/lib/useBusinessName";
 
 export default function RecipeCostingPage() {
+  const bizName = useBusinessName();
   const { t, locale, data } = useLanguage();
   const recipes = data.recipes;
   const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(null);
@@ -57,7 +59,7 @@ export default function RecipeCostingPage() {
 
       <!-- Title bar -->
       <div style="background:#1e40af;color:#fff;padding:10px 14px;font-size:15px;font-weight:700;letter-spacing:0.5px;margin-bottom:0">
-        NOE BEACH CLUB &nbsp;–&nbsp; RECIPE COSTING
+        ${bizName} &nbsp;–&nbsp; RECIPE COSTING
       </div>
 
       <!-- Header info -->
@@ -145,7 +147,7 @@ export default function RecipeCostingPage() {
       ` : ""}
 
       <div style="text-align:center;margin-top:30px;font-size:9px;color:#94a3b8">
-        NOE BEACH CLUB &nbsp;|&nbsp; ${selectedRecipe.name} &nbsp;|&nbsp; ${today}
+        ${bizName} &nbsp;|&nbsp; ${selectedRecipe.name} &nbsp;|&nbsp; ${today}
       </div>
 
     </body></html>`;
@@ -163,7 +165,7 @@ export default function RecipeCostingPage() {
 
     const wb = XLSX.utils.book_new();
     const rows: (string | number)[][] = [
-      ["NOE BEACH CLUB — RECIPE COSTING"],
+      [`${bizName} — RECIPE COSTING`],
       [],
       ["Συνταγή:", selectedRecipe.name],
       ["Ημερομηνία:", today],

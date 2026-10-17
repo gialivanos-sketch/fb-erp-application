@@ -4,6 +4,7 @@ import { useApp } from "@/lib/context";
 import { PageHeader } from "@/components/shared";
 import { RoleGuard } from "@/components/RoleGuard";
 import * as db from "@/lib/supabaseData";
+import { setCachedBusinessName } from "@/lib/useBusinessName";
 import type { BusinessProfile } from "@/lib/types";
 
 // Uploaded logos are stored as a base64 data URL directly in the
@@ -97,6 +98,7 @@ export default function BusinessProfilePage() {
     setSavedMsg(null);
     try {
       await db.saveBusinessProfile(profile);
+      setCachedBusinessName(profile.name);
       setSavedMsg({ kind: "ok", text: locale === "gr" ? "✅ Τα στοιχεία αποθηκεύτηκαν!" : "✅ Saved!" });
       setTimeout(() => setSavedMsg(null), 2500);
     } catch (err) {

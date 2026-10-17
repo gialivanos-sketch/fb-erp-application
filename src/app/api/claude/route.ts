@@ -12,7 +12,7 @@ export async function POST(req: NextRequest) {
   try {
     const { messages, context } = await req.json();
 
-    const systemPrompt = `Είσαι ο AI βοηθός του F&B ERP συστήματος για το NOE BEACH CLUB.
+    const systemPrompt = `Είσαι ο AI βοηθός του F&B ERP συστήματος της επιχείρησης.
 Βοηθάς με: συνταγές, κοστολόγηση, υλικά, αναλύσεις κόστους, προμηθευτές, αποθέματα.
 Απαντάς πάντα στα Ελληνικά εκτός αν σου μιλήσουν Αγγλικά.
 Είσαι συνοπτικός και πρακτικός — δίνεις άμεσες, χρήσιμες απαντήσεις.

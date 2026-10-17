@@ -5,6 +5,7 @@ import { PageHeader, Badge, KpiCard } from "@/components/shared";
 import * as db from "@/lib/supabaseData";
 import type { SupplierProduct } from "@/lib/types";
 import * as XLSX from "xlsx";
+import { useBusinessName } from "@/lib/useBusinessName";
 
 interface OrderItemDraft {
   id?: number;
@@ -25,6 +26,7 @@ interface OrderItemDraft {
 }
 
 export default function DraftOrderPage() {
+  const bizName = useBusinessName();
   const { t, locale, data, refreshAll } = useApp();
   const suppliers = data.suppliers;
   const orders = data.orders;
@@ -290,7 +292,7 @@ export default function DraftOrderPage() {
       pagesHtml += `
       <div style="margin-bottom:40px">
         <div style="background:#1e40af;color:#fff;padding:10px 14px;font-size:15px;font-weight:700;letter-spacing:0.5px;margin-bottom:0">
-          NOE BEACH CLUB &nbsp;–&nbsp; ORDER FORM
+          ${bizName} &nbsp;–&nbsp; ORDER FORM
         </div>
         <table style="width:100%;border-collapse:collapse;margin-bottom:14px">
           <tr>
@@ -346,7 +348,7 @@ export default function DraftOrderPage() {
           </tr>
         </table>
         <div style="text-align:center;margin-top:30px;font-size:9px;color:#94a3b8">
-          NOE BEACH CLUB &nbsp;|&nbsp; Παραγγελία ${orderNum} &nbsp;|&nbsp; ${today}
+          ${bizName} &nbsp;|&nbsp; Παραγγελία ${orderNum} &nbsp;|&nbsp; ${today}
         </div>
       </div>`;
     }
@@ -415,7 +417,7 @@ export default function DraftOrderPage() {
         ["", "", "", "", "ΦΠΑ:", groupVat],
         ["", "", "", "", "ΣΥΝΟΛΟ:", groupGross],
         [],
-        ["NOE BEACH CLUB", "", "", "", "", ""],
+        [bizName, "", "", "", "", ""],
       ];
 
       const ws = XLSX.utils.aoa_to_sheet(rows);
@@ -691,7 +693,7 @@ export default function DraftOrderPage() {
                 }
                 const supplierName = locale === "gr" ? s.name : (s.nameEn || s.name);
                 const today = new Date(orderDate).toLocaleDateString("el-GR", { day: "2-digit", month: "2-digit", year: "numeric" });
-                const subject = `Παραγγελία ${orderNum} – NOE BEACH CLUB – ${today}`;
+                const subject = `Παραγγελία ${orderNum} – ${bizName} – ${today}`;
                 const SEP = "================================================";
                 // Build pipe-separated rows — readable in any email font
                 const tableRows = g.items.map((item, idx) => {
@@ -700,7 +702,7 @@ export default function DraftOrderPage() {
                   return `${String(idx + 1).padStart(2)}. ${name.padEnd(33)} | ${(qty + " " + item.unit).padEnd(9)} | ${(item.basePrice.toFixed(2) + " EUR").padStart(10)} | ${(item.grossAmount.toFixed(2) + " EUR").padStart(10)}`;
                 }).join("\n");
                 const body = [
-                  `NOE BEACH CLUB — ΠΑΡΑΓΓΕΛΙΑ`,
+                  `${bizName} — ΠΑΡΑΓΓΕΛΙΑ`,
                   SEP,
                   `Προμηθευτής   : ${supplierName}`,
                   `Email         : ${s.contactEmail}`,
@@ -724,7 +726,7 @@ export default function DraftOrderPage() {
                   notes ? `Σημειώσεις: ${notes}` : "",
                   ``,
                   `Με εκτίμηση,`,
-                  `NOE BEACH CLUB`,
+                  `${bizName}`,
                 ].filter(l => l !== undefined).join("\n");
                 const s_enc = encodeURIComponent(subject);
                 const b_enc = encodeURIComponent(body);
