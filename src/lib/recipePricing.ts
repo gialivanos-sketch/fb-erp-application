@@ -176,7 +176,10 @@ function stems(s: string): string[] {
     .map(w => w.slice(0, Math.max(4, Math.min(6, w.length - 2))));
 }
 
-export interface GroupCandidate { key: string; label: string; sku: string | null; text: string; weight: number }
+export interface GroupCandidate {
+  key: string; label: string; sku: string | null; text: string; weight: number;
+  norm?: string; normLabel?: string;   // προϋπολογισμένα (ταχύτητα)
+}
 export interface ScoredCandidate extends GroupCandidate { score: number; confidence: "high" | "medium" }
 
 /**
@@ -189,11 +192,11 @@ export function suggestGroups(ingredientName: string, candidates: GroupCandidate
   if (st.length === 0) return [];
   const scored: { c: GroupCandidate; score: number; all: boolean; first: boolean }[] = [];
   for (const c of candidates) {
-    const ct = normKey(c.text);
+    const ct = c.norm ?? normKey(c.text);
     let hits = 0;
     for (const s of st) if (ct.includes(s)) hits++;
     if (!hits) continue;
-    const first = normKey(c.label).startsWith(st[0]);
+    const first = (c.normLabel ?? normKey(c.label)).startsWith(st[0]);
     scored.push({ c, all: hits === st.length, first, score: hits / st.length + (first ? 0.5 : 0) + Math.log10(1 + c.weight) / 10 });
   }
   scored.sort((a, b) => b.score - a.score);

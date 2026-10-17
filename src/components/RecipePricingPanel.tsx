@@ -17,6 +17,9 @@ import {
   type GroupCandidate, type IngredientPrice, type ScoredCandidate,
 } from "@/lib/recipePricing";
 
+// Cache προτάσεων ανά λίστα υποψηφίων (υπολογίζονται μία φορά ανά υλικό)
+const SUGGEST_CACHE = new WeakMap<GroupCandidate[], Map<string, ScoredCandidate[]>>();
+
 const eur = (n: number, d = 2) => "€" + n.toLocaleString("el-GR", { minimumFractionDigits: d, maximumFractionDigits: d });
 const r6 = (n: number) => Math.round(n * 1e6) / 1e6;
 const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
@@ -46,10 +49,6 @@ export default function RecipePricingPanel() {
   const [linkFilter, setLinkFilter] = useState("");
   const [tier, setTier] = useState<"high" | "medium" | "none">("high");
 
-  async function reload() {
-    const [m, c] = await Promise.all([db.fetchProductSkuMap(), db.fetchSkuConversions()]);
-    setSkuMap(m); setConvs(c);
-  }
   useEffect(() => {
     let alive = true;
     Promise.all([db.fetchProductSkuMap(), db.fetchSkuConversions()])
@@ -69,14 +68,25 @@ export default function RecipePricingPanel() {
 
   const prices = useMemo(() => buildGroupPrices(purchases, lookup, conversions), [purchases, lookup, conversions]);
 
-  // Υποψήφιες ομάδες για προτάσεις / λίστα επιλογής (μόνο ομάδες με αγορές)
+  // Υποψήφιες ομάδες για προτάσεις / λίστα επιλογής (μόνο ομάδες με αγορές).
+  // Εξαρτώνται ΜΟΝΟ από το πώς ομαδοποιούνται τα αγορασμένα προϊόντα — όχι από
+  // τις συνδέσεις υλικών συνταγών — ώστε να μην ξαναϋπολογίζονται σε κάθε αποθήκευση.
+  const purchaseSig = useMemo(() => {
+    const seen = new Set<string>(); const parts: string[] = [];
+    for (const p of purchases) { const k = normKey(p.product); if (seen.has(k)) continue; seen.add(k); parts.push(k + "=" + (lookup.get(k)?.sku ?? "")); }
+    return parts.join("\n");
+  }, [purchases, lookup]);
   const candidates = useMemo<GroupCandidate[]>(() => {
     const lines: PurchaseLine[] = purchases.map((p, k) => ({ id: k, date: p.date, orderNumber: "", supplier: "", product: p.product, qty: p.qty, unit: p.unit, price: 0, vatPercent: 0, net: p.net, gross: 0 }));
     return [...groupLines(lines, lookup, "group").entries()]
       .filter(([, g]) => g.sku)
-      .map(([key, g]) => ({ key, label: g.label, sku: g.sku, text: g.label + " " + [...new Set(g.lines.map(l => l.product))].join(" "), weight: g.lines.reduce((s, l) => s + l.net, 0) }))
+      .map(([key, g]) => {
+        const text = g.label + " " + [...new Set(g.lines.map(l => l.product))].join(" ");
+        return { key, label: g.label, sku: g.sku, text, norm: normKey(text), normLabel: normKey(g.label), weight: g.lines.reduce((s, l) => s + l.net, 0) };
+      })
       .sort((a, b) => a.label.localeCompare(b.label, "el"));
-  }, [purchases, lookup]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [purchaseSig]);
   const optionValue = (c: { sku: string | null; label: string }) => `${c.sku} — ${c.label}`;
   const byOption = useMemo(() => new Map(candidates.map(c => [optionValue(c), c])), [candidates]);
 
@@ -150,17 +160,24 @@ export default function RecipePricingPanel() {
     setBusy(true); setMsg(null);
     try {
       await db.upsertSkuConversions(rows);
-      await reload();
+      const keys = new Set(rows.map(r => `${r.sku}|${r.unit}`));
+      setConvs(prev => [...(prev ?? []).filter(c => !keys.has(`${c.sku}|${c.unit}`)), ...rows]);
       setMsg({ ok: true, text: gr ? `✅ Αποθηκεύτηκαν ${rows.length} μετατροπές.` : `✅ Saved ${rows.length}.` });
     } catch (err) {
       setMsg({ ok: false, text: (gr ? "Αποτυχία: " : "Failed: ") + String((err as { message?: string })?.message ?? err) });
     } finally { setBusy(false); }
   }
 
-  // Αρχικές προτάσεις για υλικά χωρίς ομάδα
+  // Προτάσεις για υλικά χωρίς ομάδα — με cache: υπολογίζονται μία φορά ανά υλικό
   const suggestions = useMemo(() => {
+    let cache = SUGGEST_CACHE.get(candidates);
+    if (!cache) { cache = new Map(); SUGGEST_CACHE.set(candidates, cache); }
     const m = new Map<string, ScoredCandidate[]>();
-    for (const u of analysis?.unlinked ?? []) m.set(u.name, suggestGroups(u.name, candidates, 3));
+    for (const u of analysis?.unlinked ?? []) {
+      let sg = cache.get(u.name);
+      if (!sg) { sg = suggestGroups(u.name, candidates, 3); cache.set(u.name, sg); }
+      m.set(u.name, sg);
+    }
     return m;
   }, [analysis?.unlinked, candidates]);
 
@@ -176,8 +193,10 @@ export default function RecipePricingPanel() {
     if (rows.length === 0) { setMsg({ ok: false, text: gr ? "Δεν έχει επιλεγεί ομάδα." : "No group selected." }); return; }
     setBusy(true); setMsg(null);
     try {
-      await db.bulkCreateProductSkuMapEntries(rows.map(x => ({ productName: x.n, sku: x.c!.sku!, finalGroup: x.c!.label })));
-      await reload();
+      const entries = rows.map(x => ({ productName: x.n, sku: x.c!.sku!, finalGroup: x.c!.label }));
+      await db.bulkCreateProductSkuMapEntries(entries);
+      // τοπική ενημέρωση — χωρίς να ξαναφορτώνονται όλες οι αντιστοιχίσεις
+      setSkuMap(prev => [...(prev ?? []), ...entries.map((e, i) => ({ id: -(Date.now() + i), ...e }))]);
       setMsg({ ok: true, text: gr ? `✅ Συνδέθηκαν ${rows.length} υλικά.` : `✅ Linked ${rows.length} items.` });
     } catch (err) {
       setMsg({ ok: false, text: (gr ? "Αποτυχία: " : "Failed: ") + String((err as { message?: string })?.message ?? err) });
@@ -191,7 +210,7 @@ export default function RecipePricingPanel() {
     setBusy(true); setMsg(null);
     try {
       await db.upsertSkuConversion(sku, unit, g);
-      await reload();
+      setConvs(prev => [...(prev ?? []).filter(c => !(c.sku === sku && c.unit === unit)), { sku, unit, grams: g }]);
       setMsg({ ok: true, text: gr ? `✅ ${sku}: 1 ${unit} = ${g} γρ./ml` : `✅ Saved` });
     } catch (err) {
       setMsg({ ok: false, text: (gr ? "Αποτυχία: " : "Failed: ") + String((err as { message?: string })?.message ?? err) });
