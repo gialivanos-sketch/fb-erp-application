@@ -32,11 +32,22 @@ export default function SupplierCRMPage() {
     return getSupplierPayments(sId).filter(p => p.type === "payment").reduce((s, p) => s + Number(p.amount), 0);
   }
 
+  // Αγορές ανά προμηθευτή από τις παραγγελίες (εκτός ακυρωμένων)
+  const purchases = new Map<number, { net: number; gross: number }>();
+  for (const o of data.orders) {
+    if (!o || o.status === "cancelled") continue;
+    const e = purchases.get(o.supplierId) ?? { net: 0, gross: 0 };
+    e.net += Number(o.totalNet || 0); e.gross += Number(o.totalGross || 0);
+    purchases.set(o.supplierId, e);
+  }
+  const totalPurchNet = [...purchases.values()].reduce((s, p) => s + p.net, 0);
+  const totalPurchGross = [...purchases.values()].reduce((s, p) => s + p.gross, 0);
+
   const totalDebits = payments.filter(p => p?.type === "debit").reduce((s, p) => s + Number(p.amount), 0);
   const totalPayments = payments.filter(p => p?.type === "payment").reduce((s, p) => s + Number(p.amount), 0);
   const openBalance = totalDebits - totalPayments;
 
-  const fmt = (n: number) => `€${n.toFixed(2)}`;
+  const fmt = (n: number) => "€" + n.toLocaleString("el-GR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const categories = [...new Set(suppliers.map(s => s?.category).filter(Boolean))].sort();
 
   const filtered = suppliers.filter(s => {
@@ -83,6 +94,10 @@ export default function SupplierCRMPage() {
         <button onClick={() => setShowNew(true)} className="erp-btn-primary">➕ {t("btnNewSupplier")}</button>
       </PageHeader>
 
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+        <KpiCard label={locale === "gr" ? "Αγορές χωρίς ΦΠΑ" : "Purchases (net)"} value={fmt(totalPurchNet)} color="blue" icon="💶" />
+        <KpiCard label={locale === "gr" ? "Αγορές με ΦΠΑ" : "Purchases (gross)"} value={fmt(totalPurchGross)} color="purple" icon="💰" />
+      </div>
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
         <KpiCard label={t("kpiTotalDebits")} value={fmt(totalDebits)} color="red" icon="📊" />
         <KpiCard label={t("kpiTotalPayments")} value={fmt(totalPayments)} color="green" icon="✅" />
@@ -113,6 +128,8 @@ export default function SupplierCRMPage() {
                 <th>{t("fieldContactEmail")}</th>
                 <th>{t("fieldContactPhone")}</th>
                 <th>{t("fieldCategory")}</th>
+                <th className="text-right">{locale === "gr" ? "Σύνολο χωρίς ΦΠΑ" : "Net Purchases"}</th>
+                <th className="text-right">{locale === "gr" ? "Σύνολο με ΦΠΑ" : "Gross Purchases"}</th>
                 <th>{t("kpiTotalDebits")}</th>
                 <th>{t("kpiTotalPayments")}</th>
                 <th>{t("kpiOpenBalance")}</th>
@@ -121,11 +138,12 @@ export default function SupplierCRMPage() {
             </thead>
             <tbody>
               {filtered.length === 0 ? (
-                <tr><td colSpan={9} className="text-center py-8 text-slate-400">{t("noData")}</td></tr>
+                <tr><td colSpan={11} className="text-center py-8 text-slate-400">{t("noData")}</td></tr>
               ) : filtered.map((s, idx) => {
                 const debits = getDebits(s.id);
                 const pays = getPayments(s.id);
                 const balance = debits - pays;
+                const purch = purchases.get(s.id) ?? { net: 0, gross: 0 };
                 return (
                   <tr key={s?.id ?? `supplier-${idx}`}>
                     <td className="text-xs text-slate-400">{s?.id ?? "—"}</td>
@@ -136,6 +154,8 @@ export default function SupplierCRMPage() {
                     <td className="text-sm">{s?.contactEmail || "—"}</td>
                     <td className="text-sm">{s?.contactPhone || "—"}</td>
                     <td><Badge color="grey">{s?.category ?? "—"}</Badge></td>
+                    <td className="text-right">{fmt(purch.net)}</td>
+                    <td className="text-right font-medium">{fmt(purch.gross)}</td>
                     <td className="font-medium text-red-600">{fmt(debits)}</td>
                     <td className="font-medium text-emerald-600">{fmt(pays)}</td>
                     <td className={`font-bold ${balance > 0 ? "text-amber-600" : "text-emerald-600"}`}>{fmt(balance)}</td>

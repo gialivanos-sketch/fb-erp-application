@@ -12,6 +12,7 @@ const procurementLinks = [
   { key: "navPayments", href: "/payments", icon: "💳" },
   { key: "navOrdersArchive", href: "/orders-archive", icon: "📦" },
   { key: "navOrderHistory", href: "/order-history", icon: "📋" },
+  { key: "navImportOrders", href: "/import-orders", icon: "📥" },
   { key: "navInventory", href: "/inventory", icon: "📐" },
   { key: "navInventoryArchive", href: "/inventory-archive", icon: "🗄️" },
 ];
@@ -137,7 +138,7 @@ export default function Sidebar() {
           <div className="sidebar-section-title">{t("sectionProcurement")}</div>
           {procurementLinks.map((item) => {
             // Hide financial links from storekeeper
-            const isFinancial = item.href === "/supplier-crm" || item.href === "/payments";
+            const isFinancial = item.href === "/supplier-crm" || item.href === "/payments" || item.href === "/import-orders";
             if (isFinancial && !canAccessFinancials) return null;
             return (
               <div key={item.href} className="px-2 mb-0.5">

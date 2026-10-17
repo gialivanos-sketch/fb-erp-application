@@ -36,7 +36,14 @@ export default function DraftOrderPage() {
   const [notes, setNotes] = useState("");
   const [items, setItems] = useState<OrderItemDraft[]>([]);
   const [saving, setSaving] = useState(false);
-  const orderNum = "ORD-" + String(orders.length + 1).padStart(5, "0");
+  // Επόμενος αριθμός = μέγιστος υπάρχων ORD-xxxxx + 1 (όχι πλήθος παραγγελιών,
+  // γιατί οι εισηγμένες από Excel «XL-…» θα πήδαγαν/συγκρούονταν νούμερα).
+  const orderNum = "ORD-" + String(
+    orders.reduce((m, o) => {
+      const n = /^ORD-(\d+)$/.exec(o?.orderNumber ?? "")?.[1];
+      return n ? Math.max(m, Number(n)) : m;
+    }, 0) + 1
+  ).padStart(5, "0");
   // New item form
   const [newProductName, setNewProductName] = useState("");
   const [newQty, setNewQty] = useState(1);

@@ -28,6 +28,24 @@ function requireClient() {
 }
 
 const numToStr = (n: number | null | undefined): string => (n == null ? "0" : String(n));
+
+// Το Supabase επιστρέφει έως 1000 γραμμές ανά αίτημα. Για πίνακες που
+// μεγαλώνουν (παραγγελίες, είδη, κινήσεις προμηθευτών) φέρνουμε όλες
+// τις γραμμές σε σελίδες.
+const PAGE = 1000;
+async function fetchAllPages<T>(
+  page: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>
+): Promise<T[]> {
+  const all: T[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await page(from, from + PAGE - 1);
+    if (error) throw error;
+    const rows = data ?? [];
+    all.push(...rows);
+    if (rows.length < PAGE) break;
+  }
+  return all;
+}
 const strToNum = (s: string | null | undefined): number => (s == null || s === "" ? 0 : Number(s));
 
 // ------------------------------------------------------------
@@ -94,6 +112,11 @@ export async function createSupplier(input: Omit<Supplier, "id" | "createdAt">):
     .single();
   if (error) throw error;
   return mapSupplier(data);
+}
+
+export async function setSupplierEmail(id: number, email: string): Promise<void> {
+  const { error } = await requireClient().from("suppliers").update({ contact_email: email }).eq("id", id);
+  if (error) throw error;
 }
 
 export async function updateSupplier(id: number, input: Partial<Omit<Supplier, "id" | "createdAt">>): Promise<void> {
@@ -282,12 +305,14 @@ function mapOrder(row: OrderRow): Order {
 }
 
 export async function fetchOrders(): Promise<Order[]> {
-  const { data, error } = await requireClient()
+  const client = requireClient();
+  const data = await fetchAllPages<unknown>((from, to) => client
     .from("orders")
     .select("id, order_number, supplier_id, order_date, invoice_number, delivery_note_number, notes, status, total_net, total_vat, total_gross, created_at, suppliers(name, name_en)")
-    .order("order_date", { ascending: false });
-  if (error) throw error;
-  return (data ?? []).map((r) => mapOrder(r as unknown as OrderRow));
+    .order("order_date", { ascending: false })
+    .order("id", { ascending: false })
+    .range(from, to));
+  return data.map((r) => mapOrder(r as unknown as OrderRow));
 }
 
 export async function createOrderWithItems(
@@ -359,12 +384,13 @@ function mapOrderItem(row: OrderItemRow): OrderItem {
 }
 
 export async function fetchOrderItems(): Promise<OrderItem[]> {
-  const { data, error } = await requireClient()
+  const client = requireClient();
+  const data = await fetchAllPages<unknown>((from, to) => client
     .from("order_items")
     .select("id, order_id, supplier_product_id, product_name, ordered_quantity, delivered_quantity, unit, base_price, vat_percent, discount_percent, net_amount, vat_amount, gross_amount, created_at, orders(order_number, order_date, invoice_number, suppliers(name, name_en))")
-    .order("id", { ascending: false });
-  if (error) throw error;
-  return (data ?? []).map((r) => mapOrderItem(r as unknown as OrderItemRow));
+    .order("id", { ascending: false })
+    .range(from, to));
+  return data.map((r) => mapOrderItem(r as unknown as OrderItemRow));
 }
 
 /**
@@ -433,12 +459,69 @@ function mapPayment(row: PaymentRow): SupplierPayment {
 }
 
 export async function fetchPayments(): Promise<SupplierPayment[]> {
-  const { data, error } = await requireClient()
+  const client = requireClient();
+  const data = await fetchAllPages<unknown>((from, to) => client
     .from("supplier_payments")
     .select("id, supplier_id, transaction_date, amount, type, reference, notes, created_at, suppliers(name, name_en)")
-    .order("transaction_date", { ascending: false });
-  if (error) throw error;
-  return (data ?? []).map((r) => mapPayment(r as unknown as PaymentRow));
+    .order("transaction_date", { ascending: false })
+    .order("id", { ascending: false })
+    .range(from, to));
+  return data.map((r) => mapPayment(r as unknown as PaymentRow));
+}
+
+// ─── Μαζική εισαγωγή ιστορικού από Excel ─────────────────────────────────────
+
+export interface BulkOrderInput {
+  orderNumber: string; supplierId: number; orderDate: string; invoiceNumber: string | null;
+  notes: string | null; totalNet: number; totalVat: number; totalGross: number;
+}
+export interface BulkOrderItemInput {
+  orderId: number; productName: string; quantity: number; unit: string; basePrice: number;
+  vatPercent: number; netAmount: number; vatAmount: number; grossAmount: number;
+}
+export interface BulkDebitInput {
+  supplierId: number; transactionDate: string; amount: number; reference: string; notes: string | null;
+}
+
+/** Εισάγει παραγγελίες ως «Παραδόθηκε». Επιστρέφει order_number → id. */
+export async function bulkInsertOrders(rows: BulkOrderInput[]): Promise<Map<string, number>> {
+  const client = requireClient();
+  const ids = new Map<string, number>();
+  for (let i = 0; i < rows.length; i += 200) {
+    const chunk = rows.slice(i, i + 200);
+    const { data, error } = await client.from("orders").insert(chunk.map(o => ({
+      order_number: o.orderNumber, supplier_id: o.supplierId, order_date: o.orderDate,
+      invoice_number: o.invoiceNumber, delivery_note_number: null, notes: o.notes, status: "delivered" as const,
+      total_net: o.totalNet, total_vat: o.totalVat, total_gross: o.totalGross,
+    }))).select("id, order_number");
+    if (error) throw error;
+    for (const r of (data ?? []) as { id: number; order_number: string }[]) ids.set(r.order_number, r.id);
+  }
+  return ids;
+}
+
+export async function bulkInsertOrderItems(rows: BulkOrderItemInput[]): Promise<void> {
+  const client = requireClient();
+  for (let i = 0; i < rows.length; i += 500) {
+    const { error } = await client.from("order_items").insert(rows.slice(i, i + 500).map(it => ({
+      order_id: it.orderId, supplier_product_id: null, product_name: it.productName,
+      ordered_quantity: it.quantity, delivered_quantity: it.quantity, unit: it.unit, base_price: it.basePrice,
+      vat_percent: it.vatPercent, discount_percent: 0, net_amount: it.netAmount, vat_amount: it.vatAmount,
+      gross_amount: it.grossAmount,
+    })));
+    if (error) throw error;
+  }
+}
+
+export async function bulkInsertDebits(rows: BulkDebitInput[]): Promise<void> {
+  const client = requireClient();
+  for (let i = 0; i < rows.length; i += 500) {
+    const { error } = await client.from("supplier_payments").insert(rows.slice(i, i + 500).map(d => ({
+      supplier_id: d.supplierId, transaction_date: d.transactionDate, amount: d.amount, type: "debit" as const,
+      reference: d.reference, notes: d.notes,
+    })));
+    if (error) throw error;
+  }
 }
 
 export async function createPayment(input: { supplierId: number; transactionDate: string; amount: string; type: "debit" | "payment"; reference?: string | null; notes?: string | null }): Promise<void> {

@@ -49,6 +49,8 @@ export default function OrdersArchivePage() {
   });
 
   const masterTotal = filtered.reduce((s, o) => s + Number(o.totalGross || 0), 0);
+  const masterNet = filtered.reduce((s, o) => s + Number(o.totalNet || 0), 0);
+  const masterVat = filtered.reduce((s, o) => s + Number(o.totalVat || 0), 0);
   const fmt = (n: number) => "€" + n.toLocaleString("el-GR", { minimumFractionDigits: 2 });
 
   async function deleteOrder(id: number) {
@@ -145,8 +147,10 @@ export default function OrdersArchivePage() {
         <button onClick={() => window.print()} className="erp-btn-secondary">🖨️ {t("btnPrint")}</button>
       </PageHeader>
 
-      <div className="mb-6">
-        <KpiCard label={t("kpiMasterPurchaseValue")} value={fmt(masterTotal)} color="blue" icon="💰" subtitle={filtered.length + " " + (locale === "gr" ? "παραγγελίες" : "orders")} />
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+        <KpiCard label={locale === "gr" ? "Σύνολο χωρίς ΦΠΑ" : "Net Total"} value={fmt(masterNet)} color="blue" icon="💶" subtitle={filtered.length + " " + (locale === "gr" ? "παραγγελίες" : "orders")} />
+        <KpiCard label={locale === "gr" ? "ΦΠΑ" : "VAT"} value={fmt(masterVat)} color="amber" icon="🧾" />
+        <KpiCard label={locale === "gr" ? "Σύνολο με ΦΠΑ" : "Gross Total"} value={fmt(masterTotal)} color="green" icon="💰" />
       </div>
 
       <FilterBar onClear={() => { setSearch(""); setFilterStatus(""); setFilterDateFrom(""); setFilterDateTo(""); }} clearLabel={t("btnClearFilters")}>
@@ -178,21 +182,25 @@ export default function OrdersArchivePage() {
                 <th>{t("fieldOrderDate")}</th>
                 <th>{t("fieldSupplier")}</th>
                 <th>{t("fieldInvoiceNumber")}</th>
-                <th>{t("fieldGrossAmount")}</th>
+                <th className="text-right">{locale === "gr" ? "Σύνολο χωρίς ΦΠΑ" : "Net"}</th>
+                <th className="text-right">{locale === "gr" ? "ΦΠΑ" : "VAT"}</th>
+                <th className="text-right">{locale === "gr" ? "Σύνολο με ΦΠΑ" : "Gross"}</th>
                 <th>{t("fieldNotes")}</th>
                 <th>{t("fieldStatus")}</th>
                 <th colSpan={2}>{t("actions")}</th>
               </tr>
             </thead>
             <tbody>
-              {filtered.length === 0 ? <tr><td colSpan={9} className="text-center py-8 text-slate-400">{t("noData")}</td></tr> :
+              {filtered.length === 0 ? <tr><td colSpan={11} className="text-center py-8 text-slate-400">{t("noData")}</td></tr> :
                 filtered.map((o, idx) => (
                   <tr key={o?.id ?? `order-${idx}`} className="cursor-pointer hover:bg-blue-50/50" onClick={() => o && restoreOrder(o)}>
                     <td className="font-mono text-xs font-semibold">{o?.orderNumber ?? "—"}</td>
                     <td className="text-sm">{o?.orderDate ?? "—"}</td>
                     <td className="text-sm">{locale === "gr" ? o?.supplierName : (o?.supplierNameEn || o?.supplierName)}</td>
                     <td className="text-sm">{o?.invoiceNumber || <span className="text-slate-300">—</span>}</td>
-                    <td className="font-semibold">{fmt(Number(o?.totalGross ?? 0))}</td>
+                    <td className="text-right">{fmt(Number(o?.totalNet ?? 0))}</td>
+                    <td className="text-right text-slate-500">{fmt(Number(o?.totalVat ?? 0))}</td>
+                    <td className="text-right font-semibold">{fmt(Number(o?.totalGross ?? 0))}</td>
                     <td className="text-sm text-slate-500 max-w-[150px] truncate">{o?.notes || "—"}</td>
                     <td>
                       <Badge color={o?.status === "delivered" ? "green" : o?.status === "draft" ? "amber" : o?.status === "confirmed" ? "blue" : "grey"}>
