@@ -124,10 +124,11 @@ export default function RecipePricingPanel() {
     return m;
   }, [analysis?.unlinked, candidates]);
 
+  // Προσυμπλήρωση ΜΟΝΟ για βέβαιες προτάσεις — στις πιθανές διαλέγει ο χρήστης.
   function chosen(name: string): string {
     if (choice[name] !== undefined) return choice[name];
     const s = suggestions.get(name)?.[0];
-    return s ? optionValue(s) : "";
+    return s && s.confidence === "high" ? optionValue(s) : "";
   }
 
   async function saveLinks(names: string[]) {
@@ -233,7 +234,7 @@ export default function RecipePricingPanel() {
               </div>
               <p className="text-xs text-slate-500 mb-3">
                 {tier === "high" && (gr ? "Όλες οι λέξεις του υλικού ταιριάζουν και δεν υπάρχει άλλη εξίσου καλή ομάδα. Ρίξε μια ματιά και πάτα «Αποθήκευση όλων»." : "")}
-                {tier === "medium" && (gr ? "Μερικό ταίριασμα ή πολλές παρόμοιες ομάδες — έλεγξε μία-μία (π.χ. «κρεμμύδι» → ξερό ή φρέσκο;)." : "")}
+                {tier === "medium" && (gr ? "Κλικ στη σωστή από τις 3 προτάσεις (ή γράψε για αναζήτηση). Όσα δεν επιλέξεις μένουν ασύνδετα. Ξεκίνα από τα πάνω — είναι ταξινομημένα κατά χρήσεις. Στο τέλος «Αποθήκευση όλων»." : "")}
                 {tier === "none" && (gr ? "Δεν βρέθηκε ομάδα — πιθανώς δεν αγοράστηκε φέτος. Γράψε για αναζήτηση ή άφησέ τα κενά (κρατούν την τιμή που έχουν)." : "")}
               </p>
               <div className="flex flex-wrap items-center gap-2 mb-3 text-sm">
@@ -255,6 +256,20 @@ export default function RecipePricingPanel() {
                           <td className="font-medium">{u.name}</td>
                           <td className="text-right">{u.uses}</td>
                           <td className="min-w-[22rem]">
+                            {tier !== "high" && (suggestions.get(u.name) ?? []).length > 0 && (
+                              <div className="flex flex-wrap gap-1 mb-1">
+                                {(suggestions.get(u.name) ?? []).map(sg => {
+                                  const val = optionValue(sg);
+                                  const on = v === val;
+                                  return (
+                                    <button key={sg.key} type="button" onClick={() => setChoice(c => ({ ...c, [u.name]: on ? "" : val }))}
+                                      className={`text-xs px-2 py-0.5 rounded-full border ${on ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-700 border-slate-300 hover:bg-blue-50"}`}>
+                                      {sg.label}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            )}
                             <input list="sku-groups" className={`erp-input text-sm py-1 ${v && !valid ? "border-red-300" : ""}`} value={v}
                               placeholder={gr ? "γράψε για αναζήτηση…" : "type to search…"}
                               onChange={e => setChoice(c => ({ ...c, [u.name]: e.target.value }))} />
