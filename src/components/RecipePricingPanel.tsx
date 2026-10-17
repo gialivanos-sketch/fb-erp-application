@@ -44,7 +44,15 @@ export default function RecipePricingPanel() {
   const [tab, setTab] = useState<"link" | "review" | "conv" | "other">("link");
   const [onlySuspicious, setOnlySuspicious] = useState(true);
   const [reviewFilter, setReviewFilter] = useState("");
-  const [choice, setChoice] = useState<Record<string, string>>({});   // υλικό → "SKU|ομάδα"
+  // υλικό → "SKU — ομάδα" ("" = το έσβησε ο χρήστης). Κρατιέται και μετά από ανανέωση σελίδας.
+  const [choice, setChoiceRaw] = useState<Record<string, string>>(() => {
+    try { return typeof window !== "undefined" ? JSON.parse(localStorage.getItem("rp-link-choice") ?? "{}") : {}; } catch { return {}; }
+  });
+  const setChoice = (fn: (c: Record<string, string>) => Record<string, string>) => setChoiceRaw(prev => {
+    const next = fn(prev);
+    try { localStorage.setItem("rp-link-choice", JSON.stringify(next)); } catch { /* ignore */ }
+    return next;
+  });
   const [gramsIn, setGramsIn] = useState<Record<string, string>>({});  // "sku|unit" → γρ.
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
@@ -228,8 +236,19 @@ export default function RecipePricingPanel() {
     return s && s.confidence === "high" ? optionValue(s) : "";
   }
 
-  async function saveLinks(names: string[]) {
-    const rows = names.map(n => ({ n, c: byOption.get(chosen(n)) })).filter(x => x.c && x.c.sku);
+  // Ό,τι φαίνεται: η επιλογή του χρήστη, αλλιώς η 1η πρόταση (ακόμα και «πιθανή»)
+  function chosenOrTop(name: string): string {
+    if (choice[name] !== undefined) return choice[name];
+    const s = suggestions.get(name)?.[0];
+    return s ? optionValue(s) : "";
+  }
+
+  async function saveLinks(names: string[], useTop = false) {
+    const pick = useTop ? chosenOrTop : chosen;
+    const rows = names.map(n => ({ n, c: byOption.get(pick(n)) })).filter(x => x.c && x.c.sku);
+    if (useTop && rows.length > 1 && !confirm(gr
+      ? `Σύνδεση ${rows.length} υλικών με την ομάδα που φαίνεται (τη δική σου επιλογή ή, αλλιώς, την 1η πρόταση);\n\nΌσα έσβησες δεν συνδέονται. Μπορείς να τα διορθώσεις μετά από τον «Έλεγχο συνδέσεων».`
+      : `Link ${rows.length} items?`)) return;
     if (rows.length === 0) { setMsg({ ok: false, text: gr ? "Δεν έχει επιλεγεί ομάδα." : "No group selected." }); return; }
     setBusy(true); setMsg(null);
     try {
@@ -362,13 +381,13 @@ export default function RecipePricingPanel() {
               </div>
               <p className="text-xs text-slate-500 mb-3">
                 {tier === "high" && (gr ? "Όλες οι λέξεις του υλικού ταιριάζουν και δεν υπάρχει άλλη εξίσου καλή ομάδα. Ρίξε μια ματιά και πάτα «Αποθήκευση όλων»." : "")}
-                {tier === "medium" && (gr ? "Κλικ στη σωστή από τις 3 προτάσεις (ή γράψε για αναζήτηση). Όσα δεν επιλέξεις μένουν ασύνδετα. Ξεκίνα από τα πάνω — είναι ταξινομημένα κατά χρήσεις. Στο τέλος «Αποθήκευση όλων»." : "")}
+                {tier === "medium" && (gr ? "Η μπλε επιλογή είναι αυτή που θα αποθηκευτεί. Άλλαξε κλικάροντας άλλη πρόταση ή γράφοντας στο κουτάκι· για να ΜΗ συνδεθεί, κλικ στη μπλε (ξεβάφει) ή σβήσε το κουτάκι. Οι επιλογές σου κρατιούνται και μετά από ανανέωση. Στο τέλος «Αποθήκευση όλων όπως φαίνονται»." : "")}
                 {tier === "none" && (gr ? "Δεν βρέθηκε ομάδα — πιθανώς δεν αγοράστηκε φέτος. Γράψε για αναζήτηση ή άφησέ τα κενά (κρατούν την τιμή που έχουν)." : "")}
               </p>
               <div className="flex flex-wrap items-center gap-2 mb-3 text-sm">
                 <input className="erp-input max-w-xs" placeholder={gr ? "Φίλτρο υλικού…" : "Filter…"} value={linkFilter} onChange={e => setLinkFilter(e.target.value)} />
-                <button disabled={busy} onClick={() => saveLinks(filteredUnlinked.map(u => u.name))} className="erp-btn-success text-sm">
-                  ✓ {gr ? `Αποθήκευση όλων των επιλογών (${filteredUnlinked.filter(u => byOption.has(chosen(u.name))).length})` : "Save all"}
+                <button disabled={busy} onClick={() => saveLinks(filteredUnlinked.map(u => u.name), tier !== "high")} className="erp-btn-success text-sm">
+                  ✓ {gr ? `Αποθήκευση όλων όπως φαίνονται (${filteredUnlinked.filter(u => byOption.has(tier !== "high" ? chosenOrTop(u.name) : chosen(u.name))).length})` : "Save all"}
                 </button>
                 <span className="text-xs text-slate-500">{gr ? "Η πρόταση είναι προσυμπληρωμένη — άλλαξε ή σβήσε όσες δεν ταιριάζουν πριν αποθηκεύσεις." : "Suggestions are prefilled — fix any wrong ones first."}</span>
               </div>
@@ -377,7 +396,7 @@ export default function RecipePricingPanel() {
                   <thead><tr><th>{gr ? "Υλικό συνταγής" : "Ingredient"}</th><th className="text-right">{gr ? "Χρήσεις" : "Uses"}</th><th>{gr ? "Ομάδα SKU (αγορές)" : "SKU group"}</th><th></th></tr></thead>
                   <tbody>
                     {filteredUnlinked.slice(0, 300).map(u => {
-                      const v = chosen(u.name);
+                      const v = tier !== "high" ? chosenOrTop(u.name) : chosen(u.name);
                       const valid = byOption.has(v);
                       return (
                         <tr key={u.name}>
@@ -402,7 +421,7 @@ export default function RecipePricingPanel() {
                               placeholder={gr ? "γράψε για αναζήτηση…" : "type to search…"}
                               onChange={e => setChoice(c => ({ ...c, [u.name]: e.target.value }))} />
                           </td>
-                          <td><button disabled={busy || !valid} onClick={() => saveLinks([u.name])} className="erp-btn-secondary text-xs px-2 py-1">✓</button></td>
+                          <td><button disabled={busy || !valid} onClick={() => saveLinks([u.name], tier !== "high")} className="erp-btn-secondary text-xs px-2 py-1">✓</button></td>
                         </tr>
                       );
                     })}
