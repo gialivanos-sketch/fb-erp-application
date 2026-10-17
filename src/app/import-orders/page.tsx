@@ -62,8 +62,8 @@ export default function ImportOrdersPage() {
       const buf = await file.arrayBuffer();
       const wb = XLSX.read(buf, { type: "array" });
       const parsed = parseOrdersWorkbook(wb);
-      const [suppliers, orders, payments] = await Promise.all([db.fetchSuppliers(), db.fetchOrders(), db.fetchPayments()]);
-      setPlan(buildImportPlan(file.name, parsed, suppliers, orders, payments));
+      const [suppliers, orders, payments, itemCounts] = await Promise.all([db.fetchSuppliers(), db.fetchOrders(), db.fetchPayments(), db.fetchOrderItemCounts()]);
+      setPlan(buildImportPlan(file.name, parsed, suppliers, orders, payments, itemCounts));
     } catch (err) {
       setError(String(err instanceof Error ? err.message : err));
     } finally {
@@ -111,12 +111,29 @@ export default function ImportOrdersPage() {
       }
 
       // 2. Χρεώσεις που έλειπαν από προηγούμενη εισαγωγή
-      if (plan.missingDebits.length) {
-        await db.bulkInsertDebits(plan.missingDebits.map(o => ({
-          supplierId: ids.get(supplierKey(o.supplierName))!, transactionDate: o.orderDate,
-          amount: o.totalGross, reference: debitReference(o), notes: debitNotes(o),
-        })));
-        debitsDone += plan.missingDebits.length;
+      // 2α. Είδη που λείπουν από παραγγελίες προηγούμενης εισαγωγής
+      for (const { order: o, orderId } of plan.missingItems) {
+        try {
+          await db.bulkInsertOrderItems(o.items.map(it => ({
+            orderId, productName: it.productName, quantity: it.quantity, unit: it.unit,
+            basePrice: it.priceNet, vatPercent: it.vatPercent, netAmount: it.net, vatAmount: it.vat, grossAmount: it.gross,
+          })));
+          itemsDone += o.items.length;
+        } catch (err) {
+          failed.push(`${o.orderNumber} (${o.orderDate}, ${o.supplierName}) — είδη: ${errorText(err)}`);
+        }
+      }
+
+      for (const o of plan.missingDebits) {
+        try {
+          await db.bulkInsertDebits([{
+            supplierId: ids.get(supplierKey(o.supplierName))!, transactionDate: o.orderDate,
+            amount: o.totalGross, reference: debitReference(o), notes: debitNotes(o),
+          }]);
+          debitsDone++;
+        } catch (err) {
+          failed.push(`${o.orderNumber} (${o.orderDate}, ${o.supplierName}) — χρέωση: ${errorText(err)}`);
+        }
       }
 
       // 3. Παραγγελίες ανά πακέτα — κάθε πακέτο: παραγγελίες → είδη → χρεώσεις.
@@ -241,6 +258,7 @@ export default function ImportOrdersPage() {
                 </details>
               )}
             </div>
+            {plan.missingItems.length > 0 && <div>🧩 {gr ? "Παραγγελίες προηγούμενης εισαγωγής χωρίς είδη (θα συμπληρωθούν)" : "Imported orders missing items"}: <b>{plan.missingItems.length}</b></div>}
             {plan.missingDebits.length > 0 && <div>➕ {gr ? "Χρεώσεις που λείπουν από προηγούμενη εισαγωγή" : "Missing debits"}: <b>{plan.missingDebits.length}</b></div>}
             <div>🏢 {gr ? "Νέοι προμηθευτές" : "New suppliers"}: <b>{plan.newSuppliers.length}</b>
               {plan.newSuppliers.length > 0 && <span className="text-slate-500"> — {plan.newSuppliers.map(s => s.name).join(", ")}</span>}
@@ -286,7 +304,7 @@ export default function ImportOrdersPage() {
           )}
 
           <div className="flex gap-2">
-            <button onClick={runImport} disabled={plan.newOrders.length === 0 && plan.newSuppliers.length === 0 && plan.emailUpdates.length === 0 && plan.missingDebits.length === 0} className="erp-btn-primary">
+            <button onClick={runImport} disabled={plan.newOrders.length === 0 && plan.newSuppliers.length === 0 && plan.emailUpdates.length === 0 && plan.missingDebits.length === 0 && plan.missingItems.length === 0} className="erp-btn-primary">
               📥 {gr ? "Εισαγωγή" : "Import"}
             </button>
             <button onClick={() => setPlan(null)} className="erp-btn-ghost">{gr ? "Ακύρωση" : "Cancel"}</button>

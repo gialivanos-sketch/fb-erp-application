@@ -500,6 +500,16 @@ export async function bulkInsertOrders(rows: BulkOrderInput[]): Promise<Map<stri
   return ids;
 }
 
+/** Πλήθος ειδών ανά παραγγελία (για έλεγχο παραγγελιών χωρίς είδη). */
+export async function fetchOrderItemCounts(): Promise<Map<number, number>> {
+  const client = requireClient();
+  const rows = await fetchAllPages<{ order_id: number }>((from, to) =>
+    client.from("order_items").select("order_id").order("id", { ascending: true }).range(from, to));
+  const m = new Map<number, number>();
+  for (const r of rows) m.set(r.order_id, (m.get(r.order_id) ?? 0) + 1);
+  return m;
+}
+
 export async function bulkInsertOrderItems(rows: BulkOrderItemInput[]): Promise<void> {
   const client = requireClient();
   for (let i = 0; i < rows.length; i += 500) {

@@ -285,6 +285,8 @@ export interface ImportPlan {
   nameMatches: { excelName: string; appName: string }[];
   // χρεώσεις που λείπουν για παραγγελίες XL- που υπάρχουν ήδη (π.χ. μισή προηγούμενη εισαγωγή)
   missingDebits: ParsedOrder[];
+  // παραγγελίες XL- που υπάρχουν αλλά χωρίς είδη (μισή προηγούμενη εισαγωγή)
+  missingItems: { order: ParsedOrder; orderId: number }[];
   supplierIdByName: Map<string, number>;
   warnings: string[];
 }
@@ -304,6 +306,7 @@ export function buildImportPlan(
   suppliers: Supplier[],
   orders: Order[],
   payments: SupplierPayment[],
+  itemCounts: Map<number, number> = new Map(),
 ): ImportPlan {
   const supByName = new Map<string, Supplier>();
   // αν δύο προμηθευτές της εφαρμογής δίνουν ίδιο κλειδί, κρατάμε τον παλαιότερο
@@ -328,11 +331,15 @@ export function buildImportPlan(
   const newOrders: ParsedOrder[] = [];
   const skipped: ImportPlan["skipped"] = [];
   const missingDebits: ParsedOrder[] = [];
+  const missingItems: { order: ParsedOrder; orderId: number }[] = [];
+  const idByNumber = new Map(orders.map(o => [o.orderNumber, o.id]));
 
   for (const o of parsed.orders) {
     if (byNumber.has(o.orderNumber)) {
       skipped.push({ order: o, reason: "imported" });
       if (!debitRefs.has(String(o.excelOrderId))) missingDebits.push(o);
+      const oid = idByNumber.get(o.orderNumber)!;
+      if (o.items.length > 0 && !(itemCounts.get(oid) ?? 0)) missingItems.push({ order: o, orderId: oid });
       continue;
     }
     const sup = supByName.get(supplierKey(o.supplierName));
@@ -352,6 +359,6 @@ export function buildImportPlan(
   const supplierIdByName = new Map<string, number>();
   for (const [k, s] of supByName) supplierIdByName.set(k, s.id);
 
-  return { fileName, newOrders, skipped, newSuppliers, emailUpdates, nameMatches, missingDebits, supplierIdByName, warnings: parsed.warnings };
+  return { fileName, newOrders, skipped, newSuppliers, emailUpdates, nameMatches, missingDebits, missingItems, supplierIdByName, warnings: parsed.warnings };
 }
 
