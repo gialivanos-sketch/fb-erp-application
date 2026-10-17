@@ -252,6 +252,16 @@ export default function RecipePricingPanel() {
   }
   if (!analysis) return <div className="erp-card mb-6 p-4 text-sm text-slate-400 print:hidden">{gr ? "Φόρτωση τιμών από αγορές…" : "Loading…"}</div>;
 
+  // Μία γραμμή ανά SKU, με όσες μετατροπές χρειάζεται (π.χ. γρ. ΚΑΙ τεμάχια)
+  const convGroups = (() => {
+    const m = new Map<string, { sku: string; label: string; examples: Set<string>; recipeUnits: Set<string>; uses: number; items: typeof analysis.needConv }>();
+    for (const c of analysis.needConv) {
+      const g = m.get(c.sku) ?? { sku: c.sku, label: c.label, examples: new Set<string>(), recipeUnits: new Set<string>(), uses: 0, items: [] };
+      c.examples.forEach(x => g.examples.add(x)); c.recipeUnits.forEach(x => g.recipeUnits.add(x));
+      g.uses += c.uses; g.items.push(c); m.set(c.sku, g);
+    }
+    return [...m.values()].sort((a, b) => b.uses - a.uses);
+  })();
   const total = analysis.rows.length;
   const tierOf = (name: string): "high" | "medium" | "none" => suggestions.get(name)?.[0]?.confidence ?? "none";
   const tierCount = { high: 0, medium: 0, none: 0 };
@@ -279,7 +289,7 @@ export default function RecipePricingPanel() {
       {open && (
         <div className="border-t border-slate-100">
           <div className="flex gap-1 px-4 pt-3">
-            {([["link", gr ? `Σύνδεση με ομάδα (${analysis.unlinked.length})` : "Link"], ["conv", gr ? `Μετατροπές (${analysis.needConv.length})` : "Conversions"], ["other", gr ? "Λοιπά" : "Other"]] as const).map(([k, l]) => (
+            {([["link", gr ? `Σύνδεση με ομάδα (${analysis.unlinked.length})` : "Link"], ["conv", gr ? `Μετατροπές (${new Set(analysis.needConv.map(c => c.sku)).size})` : "Conversions"], ["other", gr ? "Λοιπά" : "Other"]] as const).map(([k, l]) => (
               <button key={k} onClick={() => setTab(k)} className={`px-3 py-1.5 rounded-t text-sm ${tab === k ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600"}`}>{l}</button>
             ))}
           </div>
@@ -355,34 +365,44 @@ export default function RecipePricingPanel() {
               <table className="erp-table text-sm">
                 <thead><tr><th>SKU</th><th>{gr ? "Ομάδα" : "Group"}</th><th>{gr ? "Υλικά συνταγών" : "Used as"}</th><th>{gr ? "Μετατροπή" : "Conversion"}</th></tr></thead>
                 <tbody>
-                  {analysis.needConv.map(c => {
-                    const key = `${c.sku}|${c.unit}`;
-                    return (
-                      <tr key={key}>
-                        <td className="font-mono text-xs">{c.sku}</td>
-                        <td className="font-medium">{c.label}</td>
-                        <td className="text-xs text-slate-500 max-w-[16rem]">
-                          {[...c.examples].slice(0, 4).join(", ")}
-                          <div className="text-[11px] text-amber-700 mt-0.5">
-                            {gr ? `στις συνταγές σε: ${[...c.recipeUnits].join(", ")} · ${c.uses} χρήσεις` : `recipes use: ${[...c.recipeUnits].join(", ")}`}
-                          </div>
-                        </td>
-                        <td>
-                          <div className="flex items-center gap-2 whitespace-nowrap">
-                            <span>1 {c.unit === "ΤΕΜΑΧΙΟ" ? (gr ? "τεμάχιο συνταγής" : "recipe piece") : c.unit.replace("#ΤΕΜ", "")} =</span>
-                            <input className="erp-input text-sm py-1 text-right" style={{ width: "6.5rem", minWidth: "6.5rem" }} inputMode="decimal"
-                              value={gramsIn[key] ?? (packSuggest.get(key) ? String(packSuggest.get(key)!.grams) : "")} onChange={e => setGramsIn(g => ({ ...g, [key]: e.target.value }))}
-                              onKeyDown={e => { if (e.key === "Enter") saveConversion(c.sku, c.unit); }} />
-                            <span>{isPiecesKey(c.unit) ? (gr ? "τεμάχια" : "pieces") : (gr ? "γρ./ml" : "g/ml")}</span>
-                            <button disabled={busy} onClick={() => saveConversion(c.sku, c.unit)} className="erp-btn-secondary text-xs px-2 py-1">✓</button>
-                          </div>
-                          {packSuggest.get(key) && gramsIn[key] === undefined
-                            ? <div className="text-[11px] text-blue-600 mt-0.5">📏 {gr ? `πρόταση από το όνομα (${packSuggest.get(key)!.parsed}/${packSuggest.get(key)!.total} προϊόντα) — έλεγξε και ✓` : "suggested from name"}</div>
-                            : <div className="text-[11px] text-slate-400 mt-0.5">{isPiecesKey(c.unit) ? (gr ? "πόσα τεμάχια/μερίδες έχει 1 συσκευασία (π.χ. brioche 1*25 = 25, κέτσαπ 100T = 100)" : "pieces per pack") : <>{gr ? "μέσο βάρος/όγκος · " : ""}{UNIT_HINT[c.unit] ?? ""}</>}</div>}
-                        </td>
-                      </tr>
-                    );
-                  })}
+                  {convGroups.map(grp => (
+                    <tr key={grp.sku}>
+                      <td className="font-mono text-xs align-top">{grp.sku}</td>
+                      <td className="font-medium align-top">{grp.label}</td>
+                      <td className="text-xs text-slate-500 max-w-[16rem] align-top">
+                        {[...grp.examples].slice(0, 4).join(", ")}
+                        <div className="text-[11px] text-amber-700 mt-0.5">
+                          {gr ? `στις συνταγές σε: ${[...grp.recipeUnits].join(", ")} · ${grp.uses} χρήσεις` : `recipes use: ${[...grp.recipeUnits].join(", ")}`}
+                        </div>
+                      </td>
+                      <td className="space-y-2">
+                        {grp.items.map(c => {
+                          const key = `${c.sku}|${c.unit}`;
+                          const pieces = isPiecesKey(c.unit);
+                          const purpose = c.unit === "ΤΕΜΑΧΙΟ"
+                            ? (gr ? "για συνταγές σε τεμάχια (βάρος 1 τεμαχίου)" : "for recipes in pieces")
+                            : pieces ? (gr ? "για συνταγές σε τεμάχια" : "for recipes in pieces")
+                            : (gr ? "για συνταγές σε γρ./ml" : "for recipes in g/ml");
+                          return (
+                            <div key={key}>
+                              <div className="flex items-center gap-2 whitespace-nowrap">
+                                <span>1 {c.unit === "ΤΕΜΑΧΙΟ" ? (gr ? "τεμάχιο συνταγής" : "recipe piece") : c.unit.replace("#ΤΕΜ", "")} =</span>
+                                <input className="erp-input text-sm py-1 text-right" style={{ width: "6.5rem", minWidth: "6.5rem" }} inputMode="decimal"
+                                  value={gramsIn[key] ?? (packSuggest.get(key) ? String(packSuggest.get(key)!.grams) : "")} onChange={e => setGramsIn(g => ({ ...g, [key]: e.target.value }))}
+                                  onKeyDown={e => { if (e.key === "Enter") saveConversion(c.sku, c.unit); }} />
+                                <span>{pieces ? (gr ? "τεμάχια" : "pieces") : (gr ? "γρ./ml" : "g/ml")}</span>
+                                <button disabled={busy} onClick={() => saveConversion(c.sku, c.unit)} className="erp-btn-secondary text-xs px-2 py-1">✓</button>
+                                {grp.items.length > 1 && <span className="text-[11px] text-slate-500">{purpose}</span>}
+                              </div>
+                              {packSuggest.get(key) && gramsIn[key] === undefined
+                                ? <div className="text-[11px] text-blue-600 mt-0.5">📏 {gr ? `πρόταση από το όνομα (${packSuggest.get(key)!.parsed}/${packSuggest.get(key)!.total} προϊόντα) — έλεγξε και ✓` : "suggested from name"}</div>
+                                : <div className="text-[11px] text-slate-400 mt-0.5">{pieces ? (gr ? "πόσα τεμάχια/μερίδες έχει 1 συσκευασία (π.χ. brioche 1*25 = 25, κέτσαπ 100T = 100)" : "pieces per pack") : <>{gr ? "μέσο βάρος/όγκος · " : ""}{UNIT_HINT[c.unit] ?? ""}</>}</div>}
+                            </div>
+                          );
+                        })}
+                      </td>
+                    </tr>
+                  ))}
                   {analysis.needConv.length === 0 && <tr><td colSpan={4} className="text-center py-6 text-slate-400">{gr ? "Δεν χρειάζεται καμία μετατροπή 👍" : "Nothing to convert 👍"}</td></tr>}
                 </tbody>
               </table>
