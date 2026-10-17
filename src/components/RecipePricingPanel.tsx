@@ -13,7 +13,7 @@ import { useApp } from "@/lib/context";
 import * as db from "@/lib/supabaseData";
 import { buildSkuLookup, groupLines, normKey, type PurchaseLine } from "@/lib/itemAnalysis";
 import {
-  buildGroupPrices, priceIngredient, suggestGroups, recipeTotals, PRICE_WINDOW_DAYS,
+  buildGroupPrices, priceIngredient, suggestGroups, recipeTotals, PRICE_WINDOW_DAYS, suggestPackGrams, purchaseUnitKey,
   type GroupCandidate, type IngredientPrice, type ScoredCandidate,
 } from "@/lib/recipePricing";
 
@@ -117,6 +117,45 @@ export default function RecipePricingPanel() {
     };
   }, [data.recipes, lookup, prices, conversions, skuMap]);
 
+  // Προτάσεις βάρους συσκευασίας από τα ονόματα των προϊόντων της ομάδας
+  const packSuggest = useMemo(() => {
+    const prodBy = new Map<string, Map<string, number>>();   // "sku|unit" → προϊόν → ποσότητα
+    for (const p of purchases) {
+      const sku = lookup.get(normKey(p.product))?.sku;
+      if (!sku) continue;
+      const k = `${sku}|${purchaseUnitKey(p.unit)}`;
+      const m = prodBy.get(k) ?? new Map<string, number>();
+      m.set(p.product, (m.get(p.product) ?? 0) + p.qty);
+      prodBy.set(k, m);
+    }
+    const out = new Map<string, { grams: number; parsed: number; total: number }>();
+    for (const c of analysis?.needConv ?? []) {
+      if (c.unit === "ΤΕΜΑΧΙΟ") continue;
+      const k = `${c.sku}|${c.unit}`;
+      const prods = [...(prodBy.get(k) ?? new Map()).entries()].map(([product, qty]) => ({ product, qty }));
+      const sg = suggestPackGrams(prods, c.unit);
+      if (sg) out.set(k, sg);
+    }
+    return out;
+  }, [purchases, lookup, analysis?.needConv]);
+
+  async function saveAllConversions() {
+    const rows = (analysis?.needConv ?? []).map(c => {
+      const k = `${c.sku}|${c.unit}`;
+      const raw = gramsIn[k] ?? (packSuggest.get(k) ? String(packSuggest.get(k)!.grams) : "");
+      return { sku: c.sku, unit: c.unit, grams: Number(String(raw).replace(",", ".")) };
+    }).filter(r => r.grams > 0);
+    if (rows.length === 0) { setMsg({ ok: false, text: gr ? "Δεν υπάρχει καμία τιμή για αποθήκευση." : "Nothing to save." }); return; }
+    setBusy(true); setMsg(null);
+    try {
+      await db.upsertSkuConversions(rows);
+      await reload();
+      setMsg({ ok: true, text: gr ? `✅ Αποθηκεύτηκαν ${rows.length} μετατροπές.` : `✅ Saved ${rows.length}.` });
+    } catch (err) {
+      setMsg({ ok: false, text: (gr ? "Αποτυχία: " : "Failed: ") + String((err as { message?: string })?.message ?? err) });
+    } finally { setBusy(false); }
+  }
+
   // Αρχικές προτάσεις για υλικά χωρίς ομάδα
   const suggestions = useMemo(() => {
     const m = new Map<string, ScoredCandidate[]>();
@@ -145,7 +184,8 @@ export default function RecipePricingPanel() {
   }
 
   async function saveConversion(sku: string, unit: string) {
-    const g = Number(String(gramsIn[`${sku}|${unit}`] ?? "").replace(",", "."));
+    const k = `${sku}|${unit}`;
+    const g = Number(String(gramsIn[k] ?? (packSuggest.get(k)?.grams ?? "")).replace(",", "."));
     if (!(g > 0)) { setMsg({ ok: false, text: gr ? "Γράψε θετικό αριθμό γραμμαρίων/ml." : "Enter a positive number." }); return; }
     setBusy(true); setMsg(null);
     try {
@@ -288,7 +328,10 @@ export default function RecipePricingPanel() {
 
           {tab === "conv" && (
             <div className="p-4 overflow-x-auto">
-              <p className="text-xs text-slate-500 mb-2">{gr ? "Πόσα γραμμάρια (ή ml) είναι 1 μονάδα αγοράς — μία φορά ανά ομάδα. Τα κιλά/λίτρα μετατρέπονται αυτόματα." : "Grams (or ml) per purchase unit — once per group."}</p>
+              <div className="flex flex-wrap items-center gap-3 mb-2">
+                <p className="text-xs text-slate-500">{gr ? "Πόσα γρ. (ή ml) είναι κατά μέσο όρο 1 μονάδα αγοράς — μία φορά ανά ομάδα. Όπου το όνομα έχει μέγεθος (5Lt, 2,5KG, 4x2.5Kg…) η τιμή είναι προσυμπληρωμένη (μπλε σημείωση). Για είδη με μεταβλητό βάρος (π.χ. παντζάρι βακούμ) γράψε το μέσο βάρος." : "Average grams/ml per purchase unit."}</p>
+                <button disabled={busy} onClick={saveAllConversions} className="erp-btn-success text-sm">✓ {gr ? `Αποθήκευση όλων όσων έχουν τιμή (${(analysis.needConv).filter(c => { const k = `${c.sku}|${c.unit}`; return Number(String(gramsIn[k] ?? packSuggest.get(k)?.grams ?? "").replace(",", ".")) > 0; }).length})` : "Save all"}</button>
+              </div>
               <table className="erp-table text-sm">
                 <thead><tr><th>SKU</th><th>{gr ? "Ομάδα" : "Group"}</th><th>{gr ? "Υλικά συνταγών" : "Used as"}</th><th>{gr ? "Μετατροπή" : "Conversion"}</th></tr></thead>
                 <tbody>
@@ -303,12 +346,14 @@ export default function RecipePricingPanel() {
                           <div className="flex items-center gap-2 whitespace-nowrap">
                             <span>1 {c.unit === "ΤΕΜΑΧΙΟ" ? (gr ? "τεμάχιο συνταγής" : "recipe piece") : c.unit} =</span>
                             <input className="erp-input text-sm py-1 text-right" style={{ width: "6.5rem", minWidth: "6.5rem" }} inputMode="decimal"
-                              value={gramsIn[key] ?? ""} onChange={e => setGramsIn(g => ({ ...g, [key]: e.target.value }))}
+                              value={gramsIn[key] ?? (packSuggest.get(key) ? String(packSuggest.get(key)!.grams) : "")} onChange={e => setGramsIn(g => ({ ...g, [key]: e.target.value }))}
                               onKeyDown={e => { if (e.key === "Enter") saveConversion(c.sku, c.unit); }} />
                             <span>{gr ? "γρ./ml" : "g/ml"}</span>
                             <button disabled={busy} onClick={() => saveConversion(c.sku, c.unit)} className="erp-btn-secondary text-xs px-2 py-1">✓</button>
                           </div>
-                          <div className="text-[11px] text-slate-400 mt-0.5">{UNIT_HINT[c.unit] ?? ""}</div>
+                          {packSuggest.get(key) && gramsIn[key] === undefined
+                            ? <div className="text-[11px] text-blue-600 mt-0.5">📏 {gr ? `πρόταση από το όνομα (${packSuggest.get(key)!.parsed}/${packSuggest.get(key)!.total} προϊόντα) — έλεγξε και ✓` : "suggested from name"}</div>
+                            : <div className="text-[11px] text-slate-400 mt-0.5">{gr ? "μέσο βάρος/όγκος · " : ""}{UNIT_HINT[c.unit] ?? ""}</div>}
                         </td>
                       </tr>
                     );

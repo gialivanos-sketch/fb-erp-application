@@ -193,3 +193,50 @@ export function recipeTotals(rawMaterial: number, labor: number, overhead: numbe
   const menuFinal = portions > 0 ? menuVat / portions : menuVat;
   return { rawMaterial, total, selling, menuVat, menuFinal };
 }
+
+// ── Αυτόματη πρόταση βάρους/όγκου συσκευασίας από το όνομα προϊόντος ──────
+// «ΜΑΓΙΟΝΕΖΑ COLONA 5Lt» → 5000 · «MC CAIN (4x2.5Kg)» → 10000 ·
+// «brioche 130γρμ 1*25» (ΚΙΒ) → 3250 · «ΚΕΤΣΑΠ 10ml 100T» (ΚΙΒ) → 1000.
+const SIZE_RE = /(\d+(?:[.,]\d+)?)\s*(KGR|KG|ΚΙΛΑ|ΚΙΛΟ|ΚΙΛ|K|ΚG|Κ|GR|ΓΡΜ|ΓΡ|G|LTR|LIT|LT|L|ΛΙΤ|ML|ΜΛ)(?![A-ZΑ-Ω])/;
+function toGrams(n: number, u: string): number {
+  if (/^(KGR|KG|ΚΙΛΑ|ΚΙΛΟ|ΚΙΛ|K|ΚG|Κ|LTR|LIT|LT|L|ΛΙΤ)$/.test(u)) return n * 1000;
+  return n; // γρ. ή ml
+}
+const num = (s: string) => Number(s.replace(",", "."));
+
+/** Γραμμάρια/ml σε 1 μονάδα αγοράς, όπως φαίνονται στο όνομα — ή null. */
+export function parsePackGrams(productName: string, purchaseUnit: string): number | null {
+  const s = normKey(productName).replace(/[()"«»]/g, " ");
+  const multi = ["ΚΙΒ", "ΚΟΥΤΙ", "ΠΑΚ", "ΚΑΡΤΕΛΑ"].includes(purchaseUnit);
+  // στραγγισμένο βάρος (κονσέρβες): αυτό μπαίνει στη συνταγή
+  const drained = s.match(new RegExp(String.raw`ΣΤΡ\.?\s*ΒΑΡ[Α-ΩA-Z]*\s*` + SIZE_RE.source));
+  if (drained) return toGrams(num(drained[1]), drained[2]);
+  // N x ΜΕΓΕΘΟΣ  (4x2.5Kg, 10 X 1kg, 6*1L)
+  const nx = s.match(new RegExp(String.raw`(\d+)\s*[XΧ*]\s*` + SIZE_RE.source.slice(0)));
+  if (nx) {
+    const g = toGrams(num(nx[2]), nx[3]) * Number(nx[1]);
+    return g > 0 ? g : null;
+  }
+  const m = s.match(SIZE_RE);
+  if (!m) return null;
+  let g = toGrams(num(m[1]), m[2]);
+  if (multi) {
+    // «130ΓΡΜ ... 1*25» ή «10ML 100T» → πλήθος τεμαχίων στο κιβώτιο
+    const pcs = s.match(/\b1\s*[*XΧ]\s*(\d+)\b/) ?? s.match(/\b(\d{2,4})\s*(?:T|Τ|ΤΕΜ|TEM|ΤΜΧ)(?![A-ZΑ-Ω])/);
+    if (pcs) g *= Number(pcs[1]);
+  }
+  return g > 0 ? g : null;
+}
+
+/** Μέσο βάρος σταθμισμένο με τις ποσότητες αγοράς (για ομάδα με πολλά μεγέθη). */
+export function suggestPackGrams(products: { product: string; qty: number }[], purchaseUnit: string): { grams: number; parsed: number; total: number } | null {
+  let w = 0, sum = 0, parsed = 0;
+  for (const p of products) {
+    const g = parsePackGrams(p.product, purchaseUnit);
+    if (g == null) continue;
+    parsed++;
+    const q = p.qty > 0 ? p.qty : 1;
+    w += q; sum += g * q;
+  }
+  return parsed ? { grams: Math.round(sum / w), parsed, total: products.length } : null;
+}

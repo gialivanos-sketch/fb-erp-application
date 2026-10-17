@@ -1788,6 +1788,16 @@ export async function upsertSkuConversion(sku: string, unit: string, grams: numb
   if (error) throw error;
 }
 
+export async function upsertSkuConversions(rows: { sku: string; unit: string; grams: number }[]): Promise<void> {
+  if (!supabase) throw new Error("Supabase not initialized");
+  const now = new Date().toISOString();
+  for (let i = 0; i < rows.length; i += 500) {
+    const { error } = await (supabase as any).from("sku_unit_conversions")
+      .upsert(rows.slice(i, i + 500).map(r => ({ ...r, updated_at: now })), { onConflict: "business_id,sku,unit" });
+    if (error) throw error;
+  }
+}
+
 export interface RecipePricePayload {
   ingredients: { id: number; unit_cost: number; total_cost: number }[];
   recipes: { id: number; raw: number; total: number; selling: number; menu_vat: number; menu_final: number }[];
