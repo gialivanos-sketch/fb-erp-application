@@ -13,7 +13,7 @@ import { useApp } from "@/lib/context";
 import * as db from "@/lib/supabaseData";
 import { buildSkuLookup, groupLines, normKey, type PurchaseLine } from "@/lib/itemAnalysis";
 import {
-  buildGroupPrices, priceIngredient, suggestGroups, recipeTotals, PRICE_WINDOW_DAYS, suggestPackGrams, purchaseUnitKey, isPiecesKey,
+  buildGroupPrices, priceIngredient, suggestGroups, recipeTotals, PRICE_WINDOW_DAYS, suggestPackGrams, purchaseUnitKey, isPiecesKey, recipeUnitInfo,
   type GroupCandidate, type IngredientPrice, type ScoredCandidate,
 } from "@/lib/recipePricing";
 
@@ -101,15 +101,17 @@ export default function RecipePricingPanel() {
         p: priceIngredient(ing.ingredientName, ing.unit, lookup, prices, conversions) });
     }
     const unlinked = new Map<string, { name: string; uses: number }>();
-    const needConv = new Map<string, { sku: string; label: string; unit: string; examples: Set<string>; recipeUnits: Set<string>; uses: number }>();
+    const needConv = new Map<string, { sku: string; label: string; unit: string; examples: Set<string>; recipeUnits: Set<string>; uses: number; massRows: { id: number; qty: number; unit: string }[] }>();
     const noPurch = new Map<string, number>(), badUnit = new Map<string, number>();
     for (const r of rows) {
       const k = normKey(r.name);
       if (r.p.status === "no_group") { const e = unlinked.get(k) ?? { name: r.name.trim(), uses: 0 }; e.uses++; unlinked.set(k, e); }
       else if (r.p.status === "needs_conversion" && r.p.sku) {
         const key = `${r.p.sku}|${r.p.needUnit}`;
-        const e = needConv.get(key) ?? { sku: r.p.sku, label: r.p.groupLabel ?? "", unit: r.p.needUnit ?? "ΤΕΜ", examples: new Set<string>(), recipeUnits: new Set<string>(), uses: 0 };
-        e.examples.add(r.name.trim()); e.recipeUnits.add(r.unit.toLowerCase()); e.uses++; needConv.set(key, e);
+        const e = needConv.get(key) ?? { sku: r.p.sku, label: r.p.groupLabel ?? "", unit: r.p.needUnit ?? "ΤΕΜ", examples: new Set<string>(), recipeUnits: new Set<string>(), uses: 0, massRows: [] };
+        e.examples.add(r.name.trim()); e.recipeUnits.add(r.unit.toLowerCase()); e.uses++;
+        if (recipeUnitInfo(r.unit)?.measure === "mass") e.massRows.push({ id: r.ingId, qty: r.qty, unit: r.unit });
+        needConv.set(key, e);
       }
       else if (r.p.status === "no_purchases") noPurch.set(r.name.trim(), (noPurch.get(r.name.trim()) ?? 0) + 1);
       else if (r.p.status === "unknown_unit") badUnit.set(`${r.name.trim()} (${r.unit})`, (badUnit.get(`${r.name.trim()} (${r.unit})`) ?? 0) + 1);
@@ -217,6 +219,23 @@ export default function RecipePricingPanel() {
     } finally { setBusy(false); }
   }
 
+  async function switchToPieces(label: string, rows: { id: number; qty: number; unit: string }[]) {
+    const qtys = new Map<string, number>();
+    for (const r of rows) { const k = `${r.qty} ${r.unit.toLowerCase()}`; qtys.set(k, (qtys.get(k) ?? 0) + 1); }
+    const list = [...qtys.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([k, n]) => `  • ${k} (${n})`).join("\n");
+    if (!confirm(gr
+      ? `«${label}»: αλλαγή μονάδας σε ΤΕΜΑΧΙΟ σε ${rows.length} γραμμές συνταγών.\n\nΟι ποσότητες μένουν ίδιες — έλεγξε ότι εννοούν τεμάχια:\n${list}\n\nΣυνέχεια;`
+      : `Change unit to piece in ${rows.length} recipe lines?`)) return;
+    setBusy(true); setMsg(null);
+    try {
+      await db.setRecipeIngredientsUnit(rows.map(r => r.id), "ΤΕΜΑΧΙΟ");
+      await refreshAll();
+      setMsg({ ok: true, text: gr ? `✅ «${label}»: ${rows.length} γραμμές μετρούν πλέον σε τεμάχια.` : "✅ Updated." });
+    } catch (err) {
+      setMsg({ ok: false, text: (gr ? "Αποτυχία: " : "Failed: ") + String((err as { message?: string })?.message ?? err) });
+    } finally { setBusy(false); }
+  }
+
   async function applyPrices() {
     if (!analysis) return;
     const okRows = analysis.rows.filter(r => r.p.status === "ok");
@@ -254,9 +273,10 @@ export default function RecipePricingPanel() {
 
   // Μία γραμμή ανά SKU, με όσες μετατροπές χρειάζεται (π.χ. γρ. ΚΑΙ τεμάχια)
   const convGroups = (() => {
-    const m = new Map<string, { sku: string; label: string; examples: Set<string>; recipeUnits: Set<string>; uses: number; items: typeof analysis.needConv }>();
+    const m = new Map<string, { sku: string; label: string; examples: Set<string>; recipeUnits: Set<string>; uses: number; items: typeof analysis.needConv; massRows: { id: number; qty: number; unit: string }[] }>();
     for (const c of analysis.needConv) {
-      const g = m.get(c.sku) ?? { sku: c.sku, label: c.label, examples: new Set<string>(), recipeUnits: new Set<string>(), uses: 0, items: [] };
+      const g = m.get(c.sku) ?? { sku: c.sku, label: c.label, examples: new Set<string>(), recipeUnits: new Set<string>(), uses: 0, items: [], massRows: [] };
+      g.massRows.push(...c.massRows);
       c.examples.forEach(x => g.examples.add(x)); c.recipeUnits.forEach(x => g.recipeUnits.add(x));
       g.uses += c.uses; g.items.push(c); m.set(c.sku, g);
     }
@@ -374,6 +394,11 @@ export default function RecipePricingPanel() {
                         <div className="text-[11px] text-amber-700 mt-0.5">
                           {gr ? `στις συνταγές σε: ${[...grp.recipeUnits].join(", ")} · ${grp.uses} χρήσεις` : `recipes use: ${[...grp.recipeUnits].join(", ")}`}
                         </div>
+                        {grp.massRows.length > 0 && (
+                          <button disabled={busy} onClick={() => switchToPieces(grp.label, grp.massRows)} className="mt-1 text-[11px] text-blue-700 hover:underline text-left">
+                            ↺ {gr ? `Είναι τεμαχιακό; Οι συνταγές να το μετράνε σε τεμάχια (${grp.massRows.length})` : "Count in pieces in recipes"}
+                          </button>
+                        )}
                       </td>
                       <td className="space-y-2">
                         {grp.items.map(c => {

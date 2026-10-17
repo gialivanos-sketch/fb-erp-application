@@ -61,6 +61,7 @@ export interface GroupPrice {
   perGram: number | null;                 // €/γρ. (από γραμμές που μετατρέπονται σε γρ.)
   perUnit: Record<string, number>;        // €/ΤΕΜ, €/ΜΑΤΣΟ … (γραμμές στη μονάδα αυτή)
   unconverted: Record<string, number>;    // μονάδες αγοράς χωρίς δηλωμένη μετατροπή → πλήθος γραμμών
+  multiPack: Record<string, boolean>;     // μονάδα αγοράς που (από το όνομα) περιέχει πολλά τεμάχια, π.χ. «5Χ100»
 }
 
 export function buildGroupPrices(rows: PurchaseRow[], lookup: Map<string, SkuInfo>, conversions: UnitConversion[]): Map<string, GroupPrice> {
@@ -92,11 +93,13 @@ export function buildGroupPrices(rows: PurchaseRow[], lookup: Map<string, SkuInf
       if (g1 && g1 > 0) { gNet += r.net; grams += r.qty * g1; }
       else unconverted[pu] = (unconverted[pu] ?? 0) + 1;
     }
+    const multiPack: Record<string, boolean> = {};
+    for (const r of win) { const pu = purchaseUnitKey(r.unit); if (!multiPack[pu] && (parsePackPieces(r.product) ?? 1) > 1) multiPack[pu] = true; }
     const perUnit: Record<string, number> = {};
     for (const u of Object.keys(unitNet)) if (unitQty[u] > 0 && u !== "ΚΙΛΟ" && u !== "ΛΙΤΡΟ") perUnit[u] = unitNet[u] / unitQty[u];
     out.set(key, {
       sku: g.sku, label: g.label, lastDate, windowFrom, lines: win.length,
-      perGram: grams > 0 ? gNet / grams : null, perUnit, unconverted,
+      perGram: grams > 0 ? gNet / grams : null, perUnit, unconverted, multiPack,
     });
   }
   return out;
@@ -140,14 +143,16 @@ export function priceIngredient(
   // 1) δηλωμένο βάρος τεμαχίου συνταγής (π.χ. 1 αυγό = 60 γρ., 1 λεμόνι = 120 γρ.)
   const g1 = conversions.find(c => c.sku === info.sku && c.unit === cu)?.grams;
   if (gp.perGram != null && g1) return { ...base, status: "ok", unitCost: gp.perGram * g1, detail: span };
-  // 2) αγορά στην ίδια μονάδα → 1 τεμάχιο αγοράς = 1 τεμάχιο συνταγής
-  if (gp.perUnit[buyUnit] != null) {
-    return { ...base, status: "ok", unitCost: gp.perUnit[buyUnit] * ru.factor, detail: `${span} · 1 ${buyUnit} αγοράς = 1 ${cu.toLowerCase()}` };
-  }
-  // 3) αγορά σε κιβώτια/κουτιά/πακέτα → «1 ΚΙΒ = Ν τεμάχια» (π.χ. brioche 1*25)
+  // 2) δηλωμένα «τεμάχια ανά συσκευασία» για οποιαδήποτε μονάδα αγοράς (1 ΚΙΒ = 25, 1 ΤΕΜ = 500…)
   for (const u of Object.keys(gp.perUnit)) {
     const n = conversions.find(c => c.sku === info.sku && c.unit === piecesKey(u))?.grams;
     if (n && n > 0) return { ...base, status: "ok", unitCost: (gp.perUnit[u] / n) * ru.factor, detail: `${span} · 1 ${u} = ${n} τεμ.` };
+  }
+  // 3) αγορά στην ίδια μονάδα → 1 τεμάχιο αγοράς = 1 τεμάχιο συνταγής
+  //    (εκτός αν το όνομα δείχνει συσκευασία πολλών τεμαχίων, π.χ. «5Χ100» → ρώτα)
+  if (gp.perUnit[buyUnit] != null) {
+    if (gp.multiPack[buyUnit]) return { ...base, status: "needs_conversion", unitCost: 0, needUnit: piecesKey(buyUnit) };
+    return { ...base, status: "ok", unitCost: gp.perUnit[buyUnit] * ru.factor, detail: `${span} · 1 ${buyUnit} αγοράς = 1 ${cu.toLowerCase()}` };
   }
   const packUnit = Object.keys(gp.perUnit).find(u => MULTI_UNITS.includes(u));
   if (packUnit) return { ...base, status: "needs_conversion", unitCost: 0, needUnit: piecesKey(packUnit) };

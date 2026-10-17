@@ -1798,6 +1798,15 @@ export async function upsertSkuConversions(rows: { sku: string; unit: string; gr
   }
 }
 
+/** Αλλαγή μονάδας σε γραμμές συνταγών (π.χ. ΓΡΑΜΜΑΡΙΑ → ΤΕΜΑΧΙΟ για τεμαχιακά είδη). */
+export async function setRecipeIngredientsUnit(ids: number[], unit: string): Promise<void> {
+  const client = requireClient();
+  for (let i = 0; i < ids.length; i += 300) {
+    const { error } = await client.from("recipe_ingredients").update({ unit }).in("id", ids.slice(i, i + 300));
+    if (error) throw error;
+  }
+}
+
 export interface RecipePricePayload {
   ingredients: { id: number; unit_cost: number; total_cost: number }[];
   recipes: { id: number; raw: number; total: number; selling: number; menu_vat: number; menu_final: number }[];
