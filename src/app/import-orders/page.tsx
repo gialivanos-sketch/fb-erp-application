@@ -25,6 +25,19 @@ import {
 } from "@/lib/excelOrderImport";
 
 const CHUNK = 50;
+
+// Τα λάθη του Supabase είναι απλά objects ({ message, details, hint, code }),
+// όχι Error — χωρίς αυτό εμφανίζονται ως «[object Object]».
+function errorText(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (err && typeof err === "object") {
+    const e = err as { message?: string; details?: string; hint?: string; code?: string };
+    const parts = [e.message, e.details, e.hint, e.code && `κωδ. ${e.code}`].filter(Boolean);
+    if (parts.length) return parts.join(" — ");
+    try { return JSON.stringify(err); } catch { /* ignore */ }
+  }
+  return String(err);
+}
 const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 
 export default function ImportOrdersPage() {
@@ -110,28 +123,46 @@ export default function ImportOrdersPage() {
       //    Αν αποτύχει κάτι, σβήνονται οι παραγγελίες του πακέτου (τα είδη
       //    φεύγουν μαζί), ώστε να μη μείνουν μισές εγγραφές.
       const total = plan.newOrders.length;
-      for (let i = 0; i < total; i += CHUNK) {
-        const chunk = plan.newOrders.slice(i, i + CHUNK);
-        setStatus(gr ? `Παραγγελίες ${i + 1}–${i + chunk.length} από ${total}…` : `Orders ${i + 1}–${i + chunk.length} of ${total}…`);
+      // Εισάγει ένα σύνολο παραγγελιών (παραγγελίες → είδη → χρεώσεις).
+      // Αν αποτύχει, σβήνει ό,τι πρόλαβε να γράψει και πετάει το λάθος.
+      const importBatch = async (batch: typeof plan.newOrders) => {
+        for (const o of batch) {
+          if (ids.get(supplierKey(o.supplierName)) == null) throw new Error(`Δεν βρέθηκε προμηθευτής «${o.supplierName}»`);
+        }
         let created = new Map<string, number>();
         try {
-          created = await db.bulkInsertOrders(chunk.map(o => ({
+          created = await db.bulkInsertOrders(batch.map(o => ({
             orderNumber: o.orderNumber, supplierId: ids.get(supplierKey(o.supplierName))!, orderDate: o.orderDate,
             invoiceNumber: o.invoiceNumber, notes: o.notes, totalNet: o.totalNet, totalVat: o.totalVat, totalGross: o.totalGross,
           })));
-          const items = chunk.flatMap(o => o.items.map(it => ({
+          const items = batch.flatMap(o => o.items.map(it => ({
             orderId: created.get(o.orderNumber)!, productName: it.productName, quantity: it.quantity, unit: it.unit,
             basePrice: it.priceNet, vatPercent: it.vatPercent, netAmount: it.net, vatAmount: it.vat, grossAmount: it.gross,
           })));
           await db.bulkInsertOrderItems(items);
-          await db.bulkInsertDebits(chunk.map(o => ({
+          await db.bulkInsertDebits(batch.map(o => ({
             supplierId: ids.get(supplierKey(o.supplierName))!, transactionDate: o.orderDate,
             amount: o.totalGross, reference: debitReference(o), notes: debitNotes(o),
           })));
-          ordersDone += chunk.length; itemsDone += items.length; debitsDone += chunk.length;
+          ordersDone += batch.length; itemsDone += items.length; debitsDone += batch.length;
         } catch (err) {
           for (const id of created.values()) { try { await db.deleteOrder(id); } catch { /* ignore */ } }
-          failed.push(`${chunk[0].orderNumber}…${chunk[chunk.length - 1].orderNumber}: ${err instanceof Error ? err.message : String(err)}`);
+          throw err;
+        }
+      };
+
+      for (let i = 0; i < total; i += CHUNK) {
+        const chunk = plan.newOrders.slice(i, i + CHUNK);
+        setStatus(gr ? `Παραγγελίες ${i + 1}–${i + chunk.length} από ${total}…` : `Orders ${i + 1}–${i + chunk.length} of ${total}…`);
+        try {
+          await importBatch(chunk);
+        } catch {
+          // Το πακέτο απέτυχε → μία-μία, ώστε να περάσουν οι σωστές και
+          // να φανεί ακριβώς ποια παραγγελία χαλάει και γιατί.
+          for (const o of chunk) {
+            try { await importBatch([o]); }
+            catch (err) { failed.push(`${o.orderNumber} (${o.orderDate}, ${o.supplierName}, τιμ. ${o.invoiceNumber ?? "—"}): ${errorText(err)}`); }
+          }
         }
         setProgress(Math.round(((i + chunk.length) / total) * 100));
       }
@@ -139,7 +170,7 @@ export default function ImportOrdersPage() {
       setStatus(gr ? "Ανανέωση δεδομένων…" : "Refreshing…");
       await refreshAll();
     } catch (err) {
-      failed.push(err instanceof Error ? err.message : String(err));
+      failed.push(errorText(err));
     } finally {
       setResult({ orders: ordersDone, items: itemsDone, debits: debitsDone, suppliers: suppliersDone, failed });
       setStatus("");
@@ -176,7 +207,7 @@ export default function ImportOrdersPage() {
           </ul>
           {result.failed.length > 0 && (
             <div className="mt-3 text-sm text-amber-800">
-              {gr ? "Απέτυχαν (δεν γράφτηκε τίποτα από αυτά — ξανατρέξε την εισαγωγή):" : "Failed (nothing written for these — run again):"}
+              {gr ? "Δεν πέρασαν (για αυτές δεν γράφτηκε τίποτα):" : "Failed (nothing written for these — run again):"}
               <ul className="list-disc ml-5">{result.failed.map((f, i) => <li key={i}>{f}</li>)}</ul>
             </div>
           )}
