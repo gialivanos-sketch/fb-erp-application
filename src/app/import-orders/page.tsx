@@ -20,8 +20,9 @@ import * as XLSX from "xlsx";
 import { useLanguage } from "@/lib/context";
 import { PageHeader, KpiCard, Badge } from "@/components/shared";
 import * as db from "@/lib/supabaseData";
+import { normKey } from "@/lib/itemAnalysis";
 import {
-  parseOrdersWorkbook, supplierKey, buildImportPlan, buildReconciliation, type ReconRow, debitReference, debitNotes, type ImportPlan,
+  parseOrdersWorkbook, parseSkuGroups, supplierKey, buildImportPlan, buildReconciliation, type ReconRow, debitReference, debitNotes, type ImportPlan,
 } from "@/lib/excelOrderImport";
 
 const CHUNK = 50;
@@ -71,9 +72,11 @@ export default function ImportOrdersPage() {
   const [progress, setProgress] = useState(0);
   const [status, setStatus] = useState("");
   const [recon, setRecon] = useState<ReconRow[]>([]);
+  // ομαδοποιήσεις SKU του Excel που λείπουν από την εφαρμογή
+  const [skuMissing, setSkuMissing] = useState<{ productName: string; sku: string; finalGroup: string }[]>([]);
   const [fixDebits, setFixDebits] = useState(true);
   const [fixResult, setFixResult] = useState<{ fixed: number; debits: number; failed: string[] } | null>(null);
-  const [result, setResult] = useState<{ orders: number; items: number; debits: number; suppliers: number; failed: string[] } | null>(null);
+  const [result, setResult] = useState<{ orders: number; items: number; debits: number; suppliers: number; sku: number; failed: string[] } | null>(null);
 
   const fmt = (n: number) => "€" + n.toLocaleString("el-GR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const gr = locale === "gr";
@@ -81,12 +84,19 @@ export default function ImportOrdersPage() {
   async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-    setError(null); setPlan(null); setResult(null); setFixResult(null); setRecon([]); setLoading(true);
+    setError(null); setPlan(null); setResult(null); setFixResult(null); setRecon([]); setSkuMissing([]); setLoading(true);
     try {
       const buf = await file.arrayBuffer();
       const wb = XLSX.read(buf, { type: "array" });
       const parsed = parseOrdersWorkbook(wb);
-      const [suppliers, orders, payments, itemStats] = await Promise.all([db.fetchSuppliers(), db.fetchOrders(), db.fetchPayments(), db.fetchOrderItemStats()]);
+      const [suppliers, orders, payments, itemStats, skuMap] = await Promise.all([db.fetchSuppliers(), db.fetchOrders(), db.fetchPayments(), db.fetchOrderItemStats(), db.fetchProductSkuMap()]);
+      const haveSku = new Set(skuMap.map(e => normKey(e.productName)));
+      const seen = new Set<string>();
+      setSkuMissing(parseSkuGroups(wb).filter(g => {
+        const k = normKey(g.productName);
+        if (haveSku.has(k) || seen.has(k)) return false;
+        seen.add(k); return true;
+      }));
       const itemCounts = new Map([...itemStats].map(([k, v]) => [k, v.count]));
       const pl = buildImportPlan(file.name, parsed, suppliers, orders, payments, itemCounts);
       setPlan(pl);
@@ -189,9 +199,16 @@ export default function ImportOrdersPage() {
     if (!confirm(gr ? `Εισαγωγή ${plan.newOrders.length} παραγγελιών; ` : `Import ${plan.newOrders.length} orders?`)) return;
     setRunning(true); setProgress(0); setResult(null);
     const failed: string[] = [];
-    let ordersDone = 0, itemsDone = 0, debitsDone = 0, suppliersDone = 0;
+    let ordersDone = 0, itemsDone = 0, debitsDone = 0, suppliersDone = 0, skuDone = 0;
     try {
       const ids = new Map(plan.supplierIdByName);
+
+      // 0. Ομαδοποιήσεις SKU που λείπουν (μόνο νέα προϊόντα — οι υπάρχουσες δεν αλλάζουν)
+      if (skuMissing.length) {
+        setStatus(gr ? "Ομαδοποίηση ειδών…" : "SKU groups…");
+        try { await withRetry(() => db.bulkCreateProductSkuMapEntries(skuMissing)); skuDone = skuMissing.length; }
+        catch (err) { failed.push((gr ? "Ομαδοποίηση SKU: " : "SKU groups: ") + errorText(err)); }
+      }
 
       // 1. Προμηθευτές
       setStatus(gr ? "Προμηθευτές…" : "Suppliers…");
@@ -283,7 +300,8 @@ export default function ImportOrdersPage() {
     } catch (err) {
       failed.push(errorText(err));
     } finally {
-      setResult({ orders: ordersDone, items: itemsDone, debits: debitsDone, suppliers: suppliersDone, failed });
+      setResult({ orders: ordersDone, items: itemsDone, debits: debitsDone, suppliers: suppliersDone, sku: skuDone, failed });
+      setSkuMissing([]);
       setStatus("");
       setRunning(false);
       setPlan(null);
@@ -315,6 +333,7 @@ export default function ImportOrdersPage() {
             <li>{gr ? "Είδη" : "Line items"}: <b>{result.items}</b></li>
             <li>{gr ? "Χρεώσεις προμηθευτών" : "Supplier debits"}: <b>{result.debits}</b></li>
             <li>{gr ? "Νέοι προμηθευτές" : "New suppliers"}: <b>{result.suppliers}</b></li>
+            {result.sku > 0 && <li>{gr ? "Ομαδοποιήσεις SKU" : "SKU groupings"}: <b>{result.sku}</b></li>}
           </ul>
           {result.failed.length > 0 && (
             <div className="mt-3 text-sm text-amber-800">
@@ -372,6 +391,7 @@ export default function ImportOrdersPage() {
             <div>🏢 {gr ? "Νέοι προμηθευτές" : "New suppliers"}: <b>{plan.newSuppliers.length}</b>
               {plan.newSuppliers.length > 0 && <span className="text-slate-500"> — {plan.newSuppliers.map(s => s.name).join(", ")}</span>}
             </div>
+            {skuMissing.length > 0 && <div>🏷️ {gr ? "Ομαδοποιήσεις ειδών (SKU) από το Excel που λείπουν" : "Missing SKU groupings"}: <b>{skuMissing.length}</b> <span className="text-slate-500">({gr ? "οι υπάρχουσες δεν αλλάζουν" : "existing ones untouched"})</span></div>}
             {plan.nameMatches.length > 0 && (
               <div>🔗 {gr ? "Αντιστοίχιση με υπάρχοντες προμηθευτές (διαφορετική γραφή)" : "Matched to existing suppliers"}:
                 <ul className="ml-5 text-slate-600">{plan.nameMatches.map(m => <li key={m.excelName}>{m.excelName} → <b>{m.appName}</b></li>)}</ul>
@@ -462,7 +482,7 @@ export default function ImportOrdersPage() {
           )}
 
           <div className="flex gap-2">
-            <button onClick={runImport} disabled={plan.newOrders.length === 0 && plan.newSuppliers.length === 0 && plan.emailUpdates.length === 0 && plan.missingDebits.length === 0 && plan.missingItems.length === 0} className="erp-btn-primary">
+            <button onClick={runImport} disabled={plan.newOrders.length === 0 && plan.newSuppliers.length === 0 && plan.emailUpdates.length === 0 && plan.missingDebits.length === 0 && plan.missingItems.length === 0 && skuMissing.length === 0} className="erp-btn-primary">
               📥 {gr ? "Εισαγωγή" : "Import"}
             </button>
             <button onClick={() => setPlan(null)} className="erp-btn-ghost">{gr ? "Ακύρωση" : "Cancel"}</button>

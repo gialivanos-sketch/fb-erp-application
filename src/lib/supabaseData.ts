@@ -1644,12 +1644,15 @@ export interface ProductSkuMapEntry {
 
 export async function fetchProductSkuMap(): Promise<ProductSkuMapEntry[]> {
   if (!supabase) throw new Error("Supabase not initialized");
-  const { data, error } = await (supabase as any)
+  const client = supabase;
+  // σε σελίδες — οι αντιστοιχίσεις ξεπερνούν το όριο των 1000 γραμμών
+  const data = await fetchAllPages<any>((from, to) => (client as any)
     .from("product_sku_map")
     .select("id, product_name, sku, final_group")
-    .order("sku");
-  if (error) throw error;
-  return (data ?? []).map((r: any) => ({
+    .order("sku")
+    .order("id")
+    .range(from, to));
+  return data.map((r: any) => ({
     id: r.id,
     productName: r.product_name,
     sku: r.sku,
@@ -1674,6 +1677,16 @@ export async function updateProductSkuMapEntry(id: number, input: { sku?: string
   if (input.finalGroup !== undefined) update.final_group = input.finalGroup;
   const { error } = await (supabase as any).from("product_sku_map").update(update).eq("id", id);
   if (error) throw error;
+}
+
+export async function bulkCreateProductSkuMapEntries(rows: { productName: string; sku: string; finalGroup: string }[]): Promise<void> {
+  if (!supabase) throw new Error("Supabase not initialized");
+  for (let i = 0; i < rows.length; i += 500) {
+    const { error } = await (supabase as any).from("product_sku_map").insert(rows.slice(i, i + 500).map(r => ({
+      product_name: r.productName, sku: r.sku, final_group: r.finalGroup,
+    })));
+    if (error) throw error;
+  }
 }
 
 export async function deleteProductSkuMapEntry(id: number): Promise<void> {

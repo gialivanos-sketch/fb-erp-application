@@ -411,3 +411,22 @@ export function buildReconciliation(
     return { order, app, appItemCount: st.count, appItemsNet: r2(st.net), amountDiff, needsFix, hasDebit };
   });
 }
+
+// ─── Ομαδοποίηση Ειδών (SKU) από το φύλλο «Ομαδοποίηση Ειδών» ────────────────
+
+export const SHEET_SKU = "Ομαδοποίηση Ειδών";
+
+export function parseSkuGroups(wb: WorkBook): { productName: string; sku: string; finalGroup: string }[] {
+  const ws = wb.Sheets[SHEET_SKU];
+  if (!ws) return [];
+  try {
+    const out: { productName: string; sku: string; finalGroup: string }[] = [];
+    for (const row of readTable(ws, "Προϊόν (από ιστορικό)")) {
+      const productName = cleanText(row["Προϊόν (από ιστορικό)"]);
+      const sku = cleanText(row["SKU Προϊόντος"]);
+      const finalGroup = cleanText(row["ΤΕΛΙΚΗ ΟΜΑΔΑ"]);
+      if (productName && sku && finalGroup) out.push({ productName, sku, finalGroup });
+    }
+    return out;
+  } catch { return []; }
+}
