@@ -38,6 +38,7 @@ const buffetLinks = [
 ];
 
 const adminLinks = [
+  { key: "navAdminPanel", href: "/admin", icon: "⚙️" },
   { key: "navUserManagement", href: "/user-management", icon: "👥" },
   { key: "navBusinessProfile", href: "/profile", icon: "🏬" },
 ];

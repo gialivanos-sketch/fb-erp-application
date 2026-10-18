@@ -1905,6 +1905,65 @@ export async function fetchDepartments(): Promise<Department[]> {
   }));
 }
 
+export async function fetchAllDepartments(): Promise<Department[]> {
+  const client = requireClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (client as any)
+    .from("departments")
+    .select("id, name, name_en, is_active, created_at")
+    .order("name", { ascending: true });
+  if (error) throw error;
+  return (data ?? []).map((row: { id: number; name: string; name_en: string | null; is_active: boolean; created_at: string }) => ({
+    id: row.id,
+    name: row.name,
+    nameEn: row.name_en,
+    isActive: row.is_active,
+    createdAt: row.created_at,
+  }));
+}
+
+export async function upsertDepartment(dept: { id?: number; name: string; nameEn?: string | null; isActive?: boolean }): Promise<void> {
+  const client = requireClient();
+  const payload = { name: dept.name, name_en: dept.nameEn ?? null, is_active: dept.isActive ?? true };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const q = dept.id
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ? (client as any).from("departments").update(payload).eq("id", dept.id)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    : (client as any).from("departments").insert(payload);
+  const { error } = await q;
+  if (error) throw error;
+}
+
+export async function deleteDepartment(id: number): Promise<void> {
+  const client = requireClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error } = await (client as any).from("departments").delete().eq("id", id);
+  if (error) throw error;
+}
+
+// Units CRUD
+export async function upsertUnit(unit: { id?: number; name: string; nameEn?: string | null; abbreviation: string; baseUnit?: string | null; conversionFactor?: string; description?: string | null }): Promise<void> {
+  const payload = {
+    name: unit.name,
+    name_en: unit.nameEn ?? null,
+    abbreviation: unit.abbreviation,
+    base_unit: unit.baseUnit ?? null,
+    conversion_factor: unit.conversionFactor ? Number(unit.conversionFactor) : 1,
+    description: unit.description ?? null,
+  };
+  const q = unit.id
+    ? requireClient().from("units").update(payload).eq("id", unit.id)
+    : requireClient().from("units").insert(payload);
+  const { error } = await q;
+  if (error) throw error;
+}
+
+export async function deleteUnit(id: number): Promise<void> {
+  const { error } = await requireClient().from("units").delete().eq("id", id);
+  if (error) throw error;
+}
+
 // ------------------------------------------------------------
 // INTERNAL TRANSFERS (Εσωτερική Διακίνηση)
 // ------------------------------------------------------------

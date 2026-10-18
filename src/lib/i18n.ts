@@ -235,6 +235,7 @@ export const translations: Record<string, { gr: string; en: string }> = {
   restoreAndEdit: { gr: "Επαναφορά & Επεξεργασία", en: "Restore & Edit" },
 
   // User Management & Access Control
+  navAdminPanel: { gr: "Admin Panel", en: "Admin Panel" },
   navUserManagement: { gr: "Διαχείριση Χρηστών", en: "User Management" },
   sectionAdmin: { gr: "ΔΙΑΧΕΙΡΙΣΗ", en: "ADMINISTRATION" },
   headerUserManagement: { gr: "Διαχείριση Χρηστών & Ρόλων", en: "User & Role Management" },
