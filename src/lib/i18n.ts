@@ -31,6 +31,7 @@ export const translations: Record<string, { gr: string; en: string }> = {
   navPrepList: { gr: "Εσωτερική Διακίνηση", en: "Internal Transfers" },
   navBuffetCycle: { gr: "Κύκλος Μενού", en: "Menu Cycle" },
   navReservations: { gr: "Κρατήσεις", en: "Reservations" },
+  navFoodCost: { gr: "Food Cost Report", en: "Food Cost Report" },
 
   // Sidebar sections
   sectionBuffet: { gr: "ΜΠΟΥΦΕΣ & ΚΡΑΤΗΣΕΙΣ", en: "BUFFET & RESERVATIONS" },

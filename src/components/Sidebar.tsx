@@ -35,6 +35,7 @@ const kitchenLinks = [
 const buffetLinks = [
   { key: "navBuffetCycle", href: "/buffet-cycle", icon: "🗓️" },
   { key: "navReservations", href: "/reservations", icon: "🏨" },
+  { key: "navFoodCost", href: "/food-cost", icon: "📊" },
 ];
 
 const adminLinks = [
