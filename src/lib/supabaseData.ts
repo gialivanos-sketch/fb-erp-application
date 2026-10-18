@@ -939,16 +939,52 @@ function mapRecipeIngredient(row: {
   };
 }
 
+let hasMyPriceColumn = false;
+export function recipesHaveMyPriceColumn() { return hasMyPriceColumn; }
+
+export interface RecipeCostingSave {
+  laborCost: number; overheadCost: number; profitMarginPercent: number; mySellingPrice: number;
+  rawMaterial: number; totalCost: number; sellingPrice: number; menuPriceVat: number; menuPriceFinal: number;
+}
+/** Αποθηκεύει την κοστολόγηση μιας συνταγής (ό,τι έβαλε ο χρήστης + τα σύνολα). */
+export async function saveRecipeCosting(id: number, v: RecipeCostingSave): Promise<{ savedMyPrice: boolean }> {
+  const client = requireClient();
+  const r2 = (n: number) => Math.round((Number.isFinite(n) ? n : 0) * 100) / 100;
+  const base: Record<string, number> = {
+    labor_cost: r2(v.laborCost), overhead_cost: r2(v.overheadCost), profit_margin_percent: r2(v.profitMarginPercent),
+    total_raw_material_cost: r2(v.rawMaterial), total_cost: r2(v.totalCost), selling_price: r2(v.sellingPrice),
+    menu_price_vat: r2(v.menuPriceVat), menu_price_final: r2(v.menuPriceFinal),
+  };
+  if (hasMyPriceColumn) {
+    const { error } = await client.from("recipes").update({ ...base, my_selling_price: r2(v.mySellingPrice) } as never).eq("id", id);
+    if (!error) return { savedMyPrice: true };
+    hasMyPriceColumn = false;
+  }
+  const { error } = await client.from("recipes").update(base as never).eq("id", id);
+  if (error) throw error;
+  return { savedMyPrice: false };
+}
+
 export async function fetchRecipes(): Promise<Recipe[]> {
   const client = requireClient();
 
   // Όλες οι συνταγές (χωρίς τα υλικά τους ακόμα), σε σελίδες
-  const recipes = await fetchAllPages<any>((from, to) => client
+  const RECIPE_COLS = "id, name, name_en, portion_yield, portion_unit, allergens, technical_guide, total_raw_material_cost, labor_cost, overhead_cost, total_cost, profit_margin_percent, selling_price, menu_price_vat, menu_price_final, is_active, created_at";
+  const loadRecipes = (cols: string) => fetchAllPages<any>((from, to) => client
     .from("recipes")
-    .select("id, name, name_en, portion_yield, portion_unit, allergens, technical_guide, total_raw_material_cost, labor_cost, overhead_cost, total_cost, profit_margin_percent, selling_price, menu_price_vat, menu_price_final, is_active, created_at")
+    .select(cols)
     .order("name", { ascending: true })
     .order("id", { ascending: true })
     .range(from, to));
+  // my_selling_price: νέα στήλη (migration_recipe_my_price.sql). Αν δεν έχει τρέξει ακόμα, φορτώνει χωρίς αυτήν.
+  let recipes: any[];
+  try {
+    recipes = await loadRecipes(RECIPE_COLS + ", my_selling_price");
+    hasMyPriceColumn = true;
+  } catch {
+    recipes = await loadRecipes(RECIPE_COLS);
+    hasMyPriceColumn = false;
+  }
 
   // Όλες οι γραμμές recipe_ingredients σε σελίδες των 1000 (όριο Supabase).
   const allIngredients = await fetchAllPages<{
@@ -980,6 +1016,7 @@ export async function fetchRecipes(): Promise<Recipe[]> {
       overheadCost: numToStr(r.overhead_cost), totalCost: numToStr(r.total_cost),
       profitMarginPercent: numToStr(r.profit_margin_percent), sellingPrice: numToStr(r.selling_price),
       menuPriceVat: numToStr(r.menu_price_vat), menuPriceFinal: numToStr(r.menu_price_final), isActive: r.is_active,
+      mySellingPrice: numToStr(r.my_selling_price ?? 0),
       createdAt: r.created_at, ingredients: ingredients.map(mapRecipeIngredient),
     });
   }

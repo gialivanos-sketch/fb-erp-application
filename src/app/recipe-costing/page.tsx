@@ -1,5 +1,6 @@
 "use client";
-import { useState } from "react";
+import { useRef, useState } from "react";
+import * as db from "@/lib/supabaseData";
 import { useLanguage } from "@/lib/context";
 import { PageHeader, KpiCard, Badge, FilterBar } from "@/components/shared";
 import type { Recipe } from "@/lib/types";
@@ -12,27 +13,66 @@ export default function RecipeCostingPage() {
   const { t, locale, data } = useLanguage();
   const recipes = data.recipes;
   const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(null);
-  // Εργατικά, γενικά, περιθώριο, ΦΠΑ: τα βάζει ο χρήστης και ΜΕΝΟΥΝ όπως τα έβαλε.
+  // Εργατικά, γενικά, περιθώριο, «η τιμή μου»: τα βάζει ο χρήστης και
+  // ΑΠΟΘΗΚΕΥΟΝΤΑΙ στη συνταγή. Ό,τι σβήσει = 0.
   const [laborCost, setLaborCost] = useState(4.00);
   const [overheadCost, setOverheadCost] = useState(2.00);
   const [profitMargin, setProfitMargin] = useState(60);
   const [vatPercent, setVatPercent] = useState(24);
-  // Τιμή που θέλει ο χρήστης να πουλήσει το πιάτο (ανά μερίδα, με ΦΠΑ)
-  const [targetPrice, setTargetPrice] = useState<number | "">("");
+  // Τιμή που θέλει ο χρήστης να πουλήσει το πιάτο (ανά μερίδα, με ΦΠΑ). 0 = καμία.
+  const [targetPrice, setTargetPrice] = useState(0);
+  // τιμές που αποθηκεύτηκαν σε αυτή τη συνεδρία (μέχρι να έρθουν τα νέα δεδομένα)
+  const [savedVals, setSavedVals] = useState<Record<number, { labor: number; overhead: number; margin: number; price: number }>>({});
+  const [saveState, setSaveState] = useState<"" | "saving" | "saved" | "error" | "nocol">("");
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   function selectRecipe(r: Recipe) {
+    if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null; }
     setSelectedRecipe(r);
-    setTargetPrice("");
+    const sv = savedVals[r.id];
+    setLaborCost(sv ? sv.labor : Number(r.laborCost) || 0);
+    setOverheadCost(sv ? sv.overhead : Number(r.overheadCost) || 0);
+    setProfitMargin(sv ? sv.margin : Number(r.profitMarginPercent) || 0);
+    setTargetPrice(sv ? sv.price : Number(r.mySellingPrice) || 0);
+    setSaveState("");
   }
 
+  // Αποθήκευση λίγο μετά την τελευταία αλλαγή
+  function scheduleSave(next: Partial<{ labor: number; overhead: number; margin: number; price: number; vat: number }>) {
+    const r = selectedRecipe;
+    if (!r) return;
+    const v = { labor: laborCost, overhead: overheadCost, margin: profitMargin, price: targetPrice, vat: vatPercent, ...next };
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    setSaveState("saving");
+    saveTimer.current = setTimeout(async () => {
+      saveTimer.current = null;
+      const c = costingFor(r, v.labor, v.overhead, v.margin, v.vat, v.price);
+      try {
+        const res = await db.saveRecipeCosting(r.id, {
+          laborCost: v.labor, overheadCost: v.overhead, profitMarginPercent: v.margin, mySellingPrice: v.price,
+          rawMaterial: c.rawMaterial, totalCost: c.total, sellingPrice: c.selling, menuPriceVat: c.menuVat, menuPriceFinal: c.finalPrice,
+        });
+        setSavedVals(prev => ({ ...prev, [r.id]: { labor: v.labor, overhead: v.overhead, margin: v.margin, price: v.price } }));
+        setSaveState(res.savedMyPrice ? "saved" : "nocol");
+      } catch {
+        setSaveState("error");
+      }
+    }, 900);
+  }
+  const num = (s: string) => (s === "" ? 0 : Number(s) || 0);
+
   function calcCosting(r: Recipe) {
+    return costingFor(r, laborCost, overheadCost, profitMargin, vatPercent, targetPrice);
+  }
+
+  function costingFor(r: Recipe, laborCost: number, overheadCost: number, profitMargin: number, vatPercent: number, targetPrice: number) {
     // πρώτη ύλη = Σ (ποσότητα × τιμή μονάδας)
     const ings = r.ingredients ?? [];
     const rawMaterial = ings.length ? ings.reduce((s, i) => s + lineCost(i), 0) : Number(r.totalRawMaterialCost);
     const labor = laborCost;
     const overhead = overheadCost;
     const total = rawMaterial + labor + overhead;
-    const selling = total / (1 - profitMargin / 100);
+    const selling = profitMargin < 100 ? total / (1 - profitMargin / 100) : 0;
     const menuVat = selling * (1 + vatPercent / 100);
     const portionYield = Number(r.portionYield) || 1;
     const finalPrice = menuVat / portionYield;
@@ -42,10 +82,11 @@ export default function RecipeCostingPage() {
     // Κέρδος με βάση το ποσοστό (ανά μερίδα, χωρίς ΦΠΑ)
     const profitByPct = sellingPerPortion - costPerPortion;
     // Κέρδος με βάση την τιμή που θέλω να πουλήσω (ανά μερίδα, με ΦΠΑ → χωρίς ΦΠΑ)
-    const tp = targetPrice === "" ? null : Number(targetPrice);
-    const targetNet = tp != null ? tp / (1 + vatPercent / 100) : null;
-    const profitByTarget = targetNet != null ? targetNet - costPerPortion : null;
-    const marginByTarget = targetNet ? (profitByTarget! / targetNet) * 100 : null;
+    // τιμή 0 = δεν έχει μπει → όλα 0
+    const tp = Number(targetPrice) || 0;
+    const targetNet = tp > 0 ? tp / (1 + vatPercent / 100) : 0;
+    const profitByTarget = tp > 0 ? targetNet - costPerPortion : 0;
+    const marginByTarget = tp > 0 && targetNet ? (profitByTarget / targetNet) * 100 : 0;
     return { rawMaterial, labor, overhead, total, selling, menuVat, finalPrice, portionYield,
       costPerPortion, sellingPerPortion, profitByPct, targetNet, profitByTarget, marginByTarget, unpriced, ingCount: ings.length };
   }
@@ -246,10 +287,18 @@ export default function RecipeCostingPage() {
         <div className="erp-card-header"><h3 className="font-semibold">⚙️ {locale === "gr" ? "Παράμετροι Κοστολόγησης" : "Costing Parameters"}</h3></div>
         <div className="p-6">
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <div><label className="erp-label">{t("fieldLaborCost")}</label><input type="number" value={laborCost} onChange={e => setLaborCost(Number(e.target.value))} className="erp-input" step="0.01" /></div>
-            <div><label className="erp-label">{t("fieldOverheadCost")}</label><input type="number" value={overheadCost} onChange={e => setOverheadCost(Number(e.target.value))} className="erp-input" step="0.01" /></div>
-            <div><label className="erp-label">{t("fieldProfitMargin")}</label><input type="number" value={profitMargin} onChange={e => setProfitMargin(Number(e.target.value))} className="erp-input" step="1" max="100" /></div>
-            <div><label className="erp-label">{t("fieldVatPercent")}</label><input type="number" value={vatPercent} onChange={e => setVatPercent(Number(e.target.value))} className="erp-input" step="1" /></div>
+            <div><label className="erp-label">{t("fieldLaborCost")}</label><input type="number" value={laborCost} onChange={e => { const n = num(e.target.value); setLaborCost(n); scheduleSave({ labor: n }); }} className="erp-input" step="0.01" /></div>
+            <div><label className="erp-label">{t("fieldOverheadCost")}</label><input type="number" value={overheadCost} onChange={e => { const n = num(e.target.value); setOverheadCost(n); scheduleSave({ overhead: n }); }} className="erp-input" step="0.01" /></div>
+            <div><label className="erp-label">{t("fieldProfitMargin")}</label><input type="number" value={profitMargin} onChange={e => { const n = num(e.target.value); setProfitMargin(n); scheduleSave({ margin: n }); }} className="erp-input" step="1" max="100" /></div>
+            <div><label className="erp-label">{t("fieldVatPercent")}</label><input type="number" value={vatPercent} onChange={e => { const n = num(e.target.value); setVatPercent(n); scheduleSave({ vat: n }); }} className="erp-input" step="1" /></div>
+          </div>
+          <div className="mt-3 text-sm">
+            {!selectedRecipe ? <span className="text-slate-400">{locale === "gr" ? "Διάλεξε συνταγή — ό,τι αλλάζεις αποθηκεύεται αυτόματα στη συνταγή." : "Pick a recipe — changes save automatically."}</span>
+              : saveState === "saving" ? <span className="text-slate-500">⏳ {locale === "gr" ? "Αποθήκευση…" : "Saving…"}</span>
+              : saveState === "saved" ? <span className="text-green-700">✓ {locale === "gr" ? `Αποθηκεύτηκε στη συνταγή «${selectedRecipe.name}»` : "Saved"}</span>
+              : saveState === "nocol" ? <span className="text-amber-700">⚠ {locale === "gr" ? "Αποθηκεύτηκαν εργατικά/γενικά/ποσοστό, ΟΧΙ «η τιμή μου»: τρέξε στο Supabase το supabase/migration_recipe_my_price.sql." : "Run migration_recipe_my_price.sql to save your price."}</span>
+              : saveState === "error" ? <span className="text-red-600">✖ {locale === "gr" ? "Η αποθήκευση απέτυχε — άλλαξε ξανά μια τιμή για νέα προσπάθεια." : "Save failed."}</span>
+              : null}
           </div>
         </div>
       </div>
@@ -322,7 +371,7 @@ export default function RecipeCostingPage() {
                         <div>
                           <label className="erp-label">{locale === "gr" ? `Τιμή που θέλω να πουλήσω (ανά μερίδα, με ΦΠΑ ${vatPercent}%)` : `My selling price (per portion, incl. VAT ${vatPercent}%)`}</label>
                           <input type="number" step="0.10" min="0" value={targetPrice}
-                            onChange={e => setTargetPrice(e.target.value === "" ? "" : Number(e.target.value))}
+                            onChange={e => { const n = num(e.target.value); setTargetPrice(n); scheduleSave({ price: n }); }}
                             className="erp-input w-40" placeholder="π.χ. 12.50" />
                         </div>
                       </div>
@@ -334,15 +383,15 @@ export default function RecipeCostingPage() {
                             <th>{locale === "gr" ? "Με βάση την τιμή μου" : "By my price"}</th>
                           </tr></thead>
                           <tbody>
-                            <tr><td className="text-slate-600">{locale === "gr" ? "Τιμή μερίδας με ΦΠΑ" : "Portion price incl. VAT"}</td><td>{fmt(c.finalPrice)}</td><td>{targetPrice === "" ? "—" : fmt(Number(targetPrice))}</td></tr>
-                            <tr><td className="text-slate-600">{locale === "gr" ? "Τιμή μερίδας χωρίς ΦΠΑ" : "Portion price net"}</td><td>{fmt(c.sellingPerPortion)}</td><td>{c.targetNet == null ? "—" : fmt(c.targetNet)}</td></tr>
-                            <tr><td className="text-slate-600">{locale === "gr" ? "Κόστος μερίδας" : "Portion cost"}</td><td>{fmt(c.costPerPortion)}</td><td>{fmt(c.costPerPortion)}</td></tr>
+                            <tr><td className="text-slate-600">{locale === "gr" ? "Τιμή μερίδας με ΦΠΑ" : "Portion price incl. VAT"}</td><td>{fmt(c.finalPrice)}</td><td>{fmt(targetPrice)}</td></tr>
+                            <tr><td className="text-slate-600">{locale === "gr" ? "Τιμή μερίδας χωρίς ΦΠΑ" : "Portion price net"}</td><td>{fmt(c.sellingPerPortion)}</td><td>{fmt(c.targetNet)}</td></tr>
+                            <tr><td className="text-slate-600">{locale === "gr" ? "Κόστος μερίδας" : "Portion cost"}</td><td>{fmt(c.costPerPortion)}</td><td>{targetPrice > 0 ? fmt(c.costPerPortion) : fmt(0)}</td></tr>
                             <tr className="font-bold"><td>{locale === "gr" ? "Κέρδος ανά μερίδα (€)" : "Profit per portion (€)"}</td>
                               <td className="text-green-700">{fmt(c.profitByPct)}</td>
-                              <td className={c.profitByTarget == null ? "" : c.profitByTarget >= 0 ? "text-green-700" : "text-red-600"}>{c.profitByTarget == null ? "—" : fmt(c.profitByTarget)}</td></tr>
+                              <td className={c.profitByTarget >= 0 ? "text-green-700" : "text-red-600"}>{fmt(c.profitByTarget)}</td></tr>
                             <tr className="font-bold"><td>{locale === "gr" ? "Περιθώριο κέρδους (%)" : "Profit margin (%)"}</td>
                               <td>{profitMargin}%</td>
-                              <td className={c.marginByTarget == null ? "" : c.marginByTarget >= 0 ? "text-green-700" : "text-red-600"}>{c.marginByTarget == null ? "—" : `${c.marginByTarget.toFixed(1)}%`}</td></tr>
+                              <td className={c.marginByTarget >= 0 ? "text-green-700" : "text-red-600"}>{`${c.marginByTarget.toFixed(1)}%`}</td></tr>
                           </tbody>
                         </table>
                       </div>

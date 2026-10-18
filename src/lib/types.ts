@@ -188,6 +188,8 @@ export interface Recipe {
   sellingPrice: string;
   menuPriceVat: string;
   menuPriceFinal: string;
+  /** Τιμή που θέλει ο χρήστης να πουλήσει (ανά μερίδα, με ΦΠΑ). 0 = καμία. */
+  mySellingPrice?: string;
   isActive: boolean | null;
   createdAt?: string;
   ingredients: RecipeIngredient[];
