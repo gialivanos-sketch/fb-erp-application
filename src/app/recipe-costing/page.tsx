@@ -12,24 +12,23 @@ export default function RecipeCostingPage() {
   const { t, locale, data } = useLanguage();
   const recipes = data.recipes;
   const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(null);
-  // Οι παράμετροι παίρνουν τις τιμές ΤΗΣ ΣΥΝΤΑΓΗΣ όταν την επιλέγεις
-  // (πριν ήταν σταθερά 4€ + 2€ + 60% για όλες τις συνταγές).
-  const [laborCost, setLaborCost] = useState(0);
-  const [overheadCost, setOverheadCost] = useState(0);
+  // Εργατικά, γενικά, περιθώριο, ΦΠΑ: τα βάζει ο χρήστης και ΜΕΝΟΥΝ όπως τα έβαλε.
+  const [laborCost, setLaborCost] = useState(4.00);
+  const [overheadCost, setOverheadCost] = useState(2.00);
   const [profitMargin, setProfitMargin] = useState(60);
-  const [vatPercent, setVatPercent] = useState(13); // εστίαση: φαγητό συνήθως 13%
+  const [vatPercent, setVatPercent] = useState(24);
+  // Τιμή που θέλει ο χρήστης να πουλήσει το πιάτο (ανά μερίδα, με ΦΠΑ)
+  const [targetPrice, setTargetPrice] = useState<number | "">("");
 
   function selectRecipe(r: Recipe) {
     setSelectedRecipe(r);
-    setLaborCost(Number(r.laborCost) || 0);
-    setOverheadCost(Number(r.overheadCost) || 0);
-    setProfitMargin(Number(r.profitMarginPercent) || 60);
+    setTargetPrice("");
   }
 
   function calcCosting(r: Recipe) {
-    // πρώτη ύλη = άθροισμα υλικών (πάντα ενημερωμένο), αλλιώς η αποθηκευμένη τιμή
+    // πρώτη ύλη = Σ (ποσότητα × τιμή μονάδας)
     const ings = r.ingredients ?? [];
-    const rawMaterial = ings.length ? ings.reduce((s, i) => s + (Number(i.totalCost) || 0), 0) : Number(r.totalRawMaterialCost);
+    const rawMaterial = ings.length ? ings.reduce((s, i) => s + lineCost(i), 0) : Number(r.totalRawMaterialCost);
     const labor = laborCost;
     const overhead = overheadCost;
     const total = rawMaterial + labor + overhead;
@@ -37,12 +36,24 @@ export default function RecipeCostingPage() {
     const menuVat = selling * (1 + vatPercent / 100);
     const portionYield = Number(r.portionYield) || 1;
     const finalPrice = menuVat / portionYield;
-    const unpriced = ings.filter(i => !(Number(i.totalCost) > 0)).length;
+    const unpriced = ings.filter(i => !(lineCost(i) > 0)).length;
+    const costPerPortion = total / portionYield;
+    const sellingPerPortion = selling / portionYield;
+    // Κέρδος με βάση το ποσοστό (ανά μερίδα, χωρίς ΦΠΑ)
+    const profitByPct = sellingPerPortion - costPerPortion;
+    // Κέρδος με βάση την τιμή που θέλω να πουλήσω (ανά μερίδα, με ΦΠΑ → χωρίς ΦΠΑ)
+    const tp = targetPrice === "" ? null : Number(targetPrice);
+    const targetNet = tp != null ? tp / (1 + vatPercent / 100) : null;
+    const profitByTarget = targetNet != null ? targetNet - costPerPortion : null;
+    const marginByTarget = targetNet ? (profitByTarget! / targetNet) * 100 : null;
     return { rawMaterial, labor, overhead, total, selling, menuVat, finalPrice, portionYield,
-      costPerPortion: total / portionYield, sellingPerPortion: selling / portionYield, unpriced, ingCount: ings.length };
+      costPerPortion, sellingPerPortion, profitByPct, targetNet, profitByTarget, marginByTarget, unpriced, ingCount: ings.length };
   }
 
   const fmt = (n: number) => `€${n.toFixed(2)}`;
+  function lineCost(i: { quantity?: unknown; unitCost?: unknown }) {
+    return (Number(i.quantity) || 0) * (Number(i.unitCost) || 0);
+  }
   const avgMargin = recipes.length > 0 ? recipes.reduce((s, r) => s + Number(r.profitMarginPercent || 0), 0) / recipes.length : 0;
   const avgCost = recipes.length > 0 ? recipes.reduce((s, r) => s + Number(r.totalCost || 0), 0) / recipes.length : 0;
 
@@ -58,7 +69,7 @@ export default function RecipeCostingPage() {
         <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb;text-align:center">${Number(ing.quantity).toFixed(3)}</td>
         <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb;text-align:center">${ing.unit}</td>
         <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb;text-align:right">${Number(ing.unitCost).toFixed(2)} €</td>
-        <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb;text-align:right">${Number(ing.totalCost).toFixed(2)} €</td>
+        <td style="padding:5px 8px;border-bottom:1px solid #e5e7eb;text-align:right">${lineCost(ing).toFixed(2)} €</td>
       </tr>`;
     }).join("");
 
@@ -204,7 +215,7 @@ export default function RecipeCostingPage() {
 
     if (selectedRecipe.ingredients) {
       for (const ing of selectedRecipe.ingredients) {
-        rows.push([ing.ingredientName, Number(ing.quantity), ing.unit, Number(ing.unitCost), Number(ing.totalCost)]);
+        rows.push([ing.ingredientName, Number(ing.quantity), ing.unit, Number(ing.unitCost), lineCost(ing)]);
       }
     }
 
@@ -304,6 +315,38 @@ export default function RecipeCostingPage() {
                         </div>
                       </div>
                     </div>
+
+                    {/* Κέρδος: με βάση το ποσοστό ↔ με βάση την τιμή που θέλω να πουλήσω */}
+                    <div className="mt-6 pt-4 border-t">
+                      <div className="flex flex-wrap items-end gap-3 mb-3">
+                        <div>
+                          <label className="erp-label">{locale === "gr" ? `Τιμή που θέλω να πουλήσω (ανά μερίδα, με ΦΠΑ ${vatPercent}%)` : `My selling price (per portion, incl. VAT ${vatPercent}%)`}</label>
+                          <input type="number" step="0.10" min="0" value={targetPrice}
+                            onChange={e => setTargetPrice(e.target.value === "" ? "" : Number(e.target.value))}
+                            className="erp-input w-40" placeholder="π.χ. 12.50" />
+                        </div>
+                      </div>
+                      <div className="overflow-x-auto">
+                        <table className="erp-table">
+                          <thead><tr>
+                            <th></th>
+                            <th>{locale === "gr" ? `Με βάση το ποσοστό (${profitMargin}%)` : `By margin % (${profitMargin}%)`}</th>
+                            <th>{locale === "gr" ? "Με βάση την τιμή μου" : "By my price"}</th>
+                          </tr></thead>
+                          <tbody>
+                            <tr><td className="text-slate-600">{locale === "gr" ? "Τιμή μερίδας με ΦΠΑ" : "Portion price incl. VAT"}</td><td>{fmt(c.finalPrice)}</td><td>{targetPrice === "" ? "—" : fmt(Number(targetPrice))}</td></tr>
+                            <tr><td className="text-slate-600">{locale === "gr" ? "Τιμή μερίδας χωρίς ΦΠΑ" : "Portion price net"}</td><td>{fmt(c.sellingPerPortion)}</td><td>{c.targetNet == null ? "—" : fmt(c.targetNet)}</td></tr>
+                            <tr><td className="text-slate-600">{locale === "gr" ? "Κόστος μερίδας" : "Portion cost"}</td><td>{fmt(c.costPerPortion)}</td><td>{fmt(c.costPerPortion)}</td></tr>
+                            <tr className="font-bold"><td>{locale === "gr" ? "Κέρδος ανά μερίδα (€)" : "Profit per portion (€)"}</td>
+                              <td className="text-green-700">{fmt(c.profitByPct)}</td>
+                              <td className={c.profitByTarget == null ? "" : c.profitByTarget >= 0 ? "text-green-700" : "text-red-600"}>{c.profitByTarget == null ? "—" : fmt(c.profitByTarget)}</td></tr>
+                            <tr className="font-bold"><td>{locale === "gr" ? "Περιθώριο κέρδους (%)" : "Profit margin (%)"}</td>
+                              <td>{profitMargin}%</td>
+                              <td className={c.marginByTarget == null ? "" : c.marginByTarget >= 0 ? "text-green-700" : "text-red-600"}>{c.marginByTarget == null ? "—" : `${c.marginByTarget.toFixed(1)}%`}</td></tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
                   </div>
                 </div>
 
@@ -316,12 +359,12 @@ export default function RecipeCostingPage() {
                         <thead><tr><th>{t("fieldProduct")}</th><th>{t("fieldQuantity")}</th><th>{t("fieldUnit")}</th><th>{locale === "gr" ? "Τιμή Μονάδας" : "Unit Cost"}</th><th>{locale === "gr" ? "Σύνολο" : "Total"}</th></tr></thead>
                         <tbody>
                           {selectedRecipe.ingredients.map((ing, i) => (
-                            <tr key={i} className={Number(ing.totalCost) > 0 ? "" : "bg-amber-50"}>
-                              <td className="font-medium">{Number(ing.totalCost) > 0 ? "" : "⚠ "}{ing.ingredientName}</td>
+                            <tr key={i} className={lineCost(ing) > 0 ? "" : "bg-amber-50"}>
+                              <td className="font-medium">{lineCost(ing) > 0 ? "" : "⚠ "}{ing.ingredientName}</td>
                               <td>{Number(ing.quantity).toFixed(3)}</td>
                               <td>{ing.unit}</td>
                               <td>{Number(ing.unitCost) > 0 && Number(ing.unitCost) < 1 ? `€${Number(ing.unitCost).toFixed(4)}` : fmt(Number(ing.unitCost))}</td>
-                              <td className="font-semibold">{fmt(Number(ing.totalCost))}</td>
+                              <td className="font-semibold">{fmt(lineCost(ing))}</td>
                             </tr>
                           ))}
                         </tbody>
