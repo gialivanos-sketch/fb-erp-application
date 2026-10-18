@@ -19,7 +19,7 @@ import type {
   AppUser, Supplier, SupplierProduct, Order, OrderItem, SupplierPayment,
   StockTaking, StockTakingItem, InventorySnapshot, Ingredient, Recipe,
   RecipeIngredient, Menu, MenuRecipe, PrepListItem, Unit, IngestionLog, UserRole,
-  InternalTransfer, InternalTransferItem,
+  InternalTransfer, InternalTransferItem, Department,
 } from "./types";
 
 function requireClient() {
@@ -1882,6 +1882,27 @@ export async function renameSkuGroup(oldSku: string, newSku: string): Promise<vo
     .update({ sku: newSku })
     .eq("sku", oldSku);
   if (error) throw error;
+}
+
+// ------------------------------------------------------------
+// DEPARTMENTS (Τμήματα)
+// ------------------------------------------------------------
+export async function fetchDepartments(): Promise<Department[]> {
+  const client = requireClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (client as any)
+    .from("departments")
+    .select("id, name, name_en, is_active, created_at")
+    .eq("is_active", true)
+    .order("name", { ascending: true });
+  if (error) throw error;
+  return (data ?? []).map((row: { id: number; name: string; name_en: string | null; is_active: boolean; created_at: string }) => ({
+    id: row.id,
+    name: row.name,
+    nameEn: row.name_en,
+    isActive: row.is_active,
+    createdAt: row.created_at,
+  }));
 }
 
 // ------------------------------------------------------------

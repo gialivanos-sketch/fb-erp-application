@@ -4,16 +4,6 @@ import { useApp } from "@/lib/context";
 import { createInternalTransfer, deleteInternalTransfer } from "@/lib/supabaseData";
 import type { InternalTransfer, InternalTransferItem } from "@/lib/types";
 
-const DEPARTMENTS = [
-  "ΚΟΥΖΙΝΑ",
-  "ΖΑΧΑΡΟΠΛΑΣΤΕΙΟ",
-  "POOL BAR",
-  "ROOF GARDEN",
-  "ΚΑΝΤΙΝΑ",
-  "ΕΣΤΙΑΤΟΡΙΟ",
-  "BAR",
-];
-
 const today = () => new Date().toISOString().split("T")[0];
 
 function nextTransferNumber(existing: { transferNumber: string }[]): string {
@@ -32,7 +22,8 @@ type DraftItem = { ingredientId: number | null; ingredientName: string; quantity
 export default function InternalTransfersPage() {
   const { data, refreshAll } = useApp();
   const transfers = data.internalTransfers ?? [];
-  const ingredients = data.ingredients ?? [];
+  const supplierProducts = data.supplierProducts ?? [];
+  const departments = data.departments ?? [];
 
   // Form state
   const [showForm, setShowForm] = useState(false);
@@ -77,12 +68,12 @@ export default function InternalTransfersPage() {
       prev.map((item: DraftItem, i: number) => {
         if (i !== idx) return item;
         if (field === "ingredientId") {
-          const ing = ingredients.find((g: { id: number; name: string; unit: string }) => g.id === value);
+          const sp = supplierProducts.find((g: { id: number; productName: string; unit: string }) => g.id === value);
           return {
             ...item,
             ingredientId: value as number | null,
-            ingredientName: ing?.name ?? "",
-            unit: ing?.unit ?? item.unit,
+            ingredientName: sp?.productName ?? "",
+            unit: sp?.unit ?? item.unit,
           };
         }
         return { ...item, [field]: value };
@@ -192,7 +183,7 @@ export default function InternalTransfersPage() {
                     className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 dark:text-white"
                   >
                     <option value="">— Επιλογή —</option>
-                    {DEPARTMENTS.map((d) => <option key={d} value={d}>{d}</option>)}
+                    {departments.map((d) => <option key={d.id} value={d.name}>{d.name}</option>)}
                   </select>
                 </div>
                 <div>
@@ -233,8 +224,8 @@ export default function InternalTransfersPage() {
                           className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-2 py-2 text-sm bg-white dark:bg-gray-700 dark:text-white"
                         >
                           <option value="">— Υλικό —</option>
-                          {ingredients.filter(g => g.isActive !== false).map((g) => (
-                            <option key={g.id} value={g.id}>{g.name}</option>
+                          {supplierProducts.filter(g => g.isActive !== false).map((g) => (
+                            <option key={g.id} value={g.id}>{g.productName}</option>
                           ))}
                         </select>
                       </div>
@@ -323,7 +314,7 @@ export default function InternalTransfersPage() {
               className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 dark:text-white"
             >
               <option value="">Όλα τα τμήματα</option>
-              {DEPARTMENTS.map((d) => <option key={d} value={d}>{d}</option>)}
+              {departments.map((d) => <option key={d.id} value={d.name}>{d.name}</option>)}
             </select>
           </div>
           <div>

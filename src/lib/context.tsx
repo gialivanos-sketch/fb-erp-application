@@ -27,6 +27,7 @@ const EMPTY_DB: AppDatabase = {
   recipes: [],
   menus: [],
   prepLists: [],
+  departments: [],
   internalTransfers: [],
   units: [],
   ingestionLogs: [],
@@ -124,18 +125,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const [
         users, suppliers, supplierProducts, orders, orderItems, supplierPayments,
         stockTakings, inventorySnapshots, ingredients, recipes, menus, prepLists,
-        internalTransfers, units, ingestionLogs, buffetCycleEntries, reservations,
+        departments, internalTransfers, units, ingestionLogs, buffetCycleEntries, reservations,
       ] = await Promise.all([
         db.fetchUsers(), db.fetchSuppliers(), db.fetchSupplierProducts(), db.fetchOrders(),
         db.fetchOrderItems(), db.fetchPayments(), db.fetchStockTakings(), db.fetchInventorySnapshots(),
         db.fetchIngredients(), db.fetchRecipes(), db.fetchMenus(), db.fetchPrepLists(),
-        db.fetchInternalTransfers(), db.fetchUnits(), db.fetchIngestionLogs(),
+        db.fetchDepartments(), db.fetchInternalTransfers(), db.fetchUnits(), db.fetchIngestionLogs(),
         db.fetchBuffetCycleEntries(), db.fetchReservations(),
       ]);
       setData({
         version: 1, users, suppliers, supplierProducts, orders, orderItems, supplierPayments,
         stockTakings, inventorySnapshots, ingredients, recipes, menus, prepLists,
-        internalTransfers, units, ingestionLogs, buffetCycleEntries, reservations,
+        departments, internalTransfers, units, ingestionLogs, buffetCycleEntries, reservations,
         nextIds: {},
       });
       setDataStatus("ready");

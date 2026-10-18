@@ -268,6 +268,14 @@ export interface IngredientSupplierOption {
   unit: string;
 }
 
+export interface Department {
+  id: number;
+  name: string;
+  nameEn: string | null;
+  isActive: boolean;
+  createdAt?: string;
+}
+
 export interface InternalTransferItem {
   id?: number;
   transferId?: number;
@@ -364,6 +372,7 @@ export interface AppDatabase {
   recipes: Recipe[];
   menus: Menu[];
   prepLists: PrepListItem[];
+  departments: Department[];
   internalTransfers: InternalTransfer[];
   units: Unit[];
   ingestionLogs: IngestionLog[];
