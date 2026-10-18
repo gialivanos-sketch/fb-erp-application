@@ -1,12 +1,95 @@
 "use client";
-import { createContext, useContext, useState, useCallback, useEffect, useMemo, type ReactNode } from "react";
+import { createContext, useContext, useState, useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { t as translate, type Locale } from "./i18n";
-import type { AppDatabase, AppUser, UserRole, BuffetCycleEntry, Reservation } from "./types";
+import type { AppDatabase, AppUser, UserRole, BuffetCycleEntry, Reservation, Recipe } from "./types";
 import { supabase, isSupabaseConfigured } from "./supabaseClient";
 import { useAuthSession, signOut as authSignOut } from "./auth";
 import * as db from "./supabaseData";
 
 export type { UserRole };
+
+// ── Οικονομία κίνησης δεδομένων (Supabase Egress) ──────────────────
+// Κάθε αλλαγή σε πίνακα ξαναφορτώνει ΜΟΝΟ τα δεδομένα που επηρεάζει,
+// μαζεμένα (μία φόρτωση για χιλιάδες αλλαγές στη σειρά), και όχι όσο η
+// καρτέλα είναι κρυφή. Οι αλλαγές σε συνταγές/υλικά συνταγών περνάνε
+// τοπικά χωρίς καμία φόρτωση.
+type Slice = Exclude<keyof AppDatabase, "version" | "nextIds">;
+const TABLE_SLICES: Record<string, Slice[]> = {
+  users: ["users"],
+  suppliers: ["suppliers", "supplierProducts", "orders", "orderItems", "supplierPayments"],
+  supplier_products: ["supplierProducts"],
+  orders: ["orders", "orderItems"],
+  order_items: ["orderItems"],
+  supplier_payments: ["supplierPayments"],
+  stock_takings: ["stockTakings"],
+  stock_taking_items: ["stockTakings"],
+  inventory_snapshots: ["inventorySnapshots"],
+  ingredients: ["ingredients"],
+  recipes: ["recipes"],
+  recipe_ingredients: ["recipes"],
+  menus: ["menus"],
+  menu_recipes: ["menus"],
+  prep_lists: ["prepLists"],
+  ingestion_logs: ["ingestionLogs"],
+  buffet_cycle_entries: ["buffetCycleEntries"],
+  buffet_dishes: ["buffetCycleEntries"],
+  reservations: ["reservations"],
+};
+// χωρίς ειδοποιήσεις realtime: ξαναφορτώνονται (είναι μικρά) σε κάθε ρητή ανανέωση
+const NON_REALTIME_SLICES: Slice[] = ["internalTransfers", "units"];
+const SLICE_LOADERS: Record<Slice, () => Promise<unknown>> = {
+  users: db.fetchUsers, suppliers: db.fetchSuppliers, supplierProducts: db.fetchSupplierProducts,
+  orders: db.fetchOrders, orderItems: db.fetchOrderItems, supplierPayments: db.fetchPayments,
+  stockTakings: db.fetchStockTakings, inventorySnapshots: db.fetchInventorySnapshots,
+  ingredients: db.fetchIngredients, recipes: db.fetchRecipes, menus: db.fetchMenus, prepLists: db.fetchPrepLists,
+  internalTransfers: db.fetchInternalTransfers, units: db.fetchUnits, ingestionLogs: db.fetchIngestionLogs,
+  buffetCycleEntries: db.fetchBuffetCycleEntries, reservations: db.fetchReservations,
+};
+type RtEvent = { table: string; eventType: string; new: Record<string, unknown>; old: Record<string, unknown> };
+/** Εφαρμόζει αλλαγές συνταγών τοπικά. Επιστρέφει null αν χρειάζεται πλήρης φόρτωση. */
+export function patchRecipes(recipes: Recipe[], events: RtEvent[]): Recipe[] | null {
+  const byId = new Map(recipes.map(r => [r.id, { ...r, ingredients: [...(r.ingredients ?? [])] }]));
+  // υλικό συνταγής → συνταγή (για γρήγορη εύρεση)
+  const owner = new Map<number, number>();
+  for (const r of byId.values()) for (const x of r.ingredients) if (x.id != null) owner.set(x.id, r.id);
+  const removeIng = (id: number) => {
+    const rid = owner.get(id);
+    if (rid == null) return;
+    const r = byId.get(rid);
+    if (r) { const i = r.ingredients.findIndex(x => x.id === id); if (i >= 0) r.ingredients.splice(i, 1); }
+    owner.delete(id);
+  };
+  for (const e of events) {
+    if (e.table === "recipes") {
+      if (e.eventType === "DELETE") { byId.delete(Number(e.old?.id)); continue; }
+      if (!e.new || e.new.id == null) return null;
+      const prev = byId.get(Number(e.new.id));
+      byId.set(Number(e.new.id), db.mapRecipeRow(e.new, prev?.ingredients ?? []));
+    } else if (e.table === "recipe_ingredients") {
+      if (e.eventType === "DELETE") {
+        const id = Number(e.old?.id);
+        if (!id) return null;
+        removeIng(id);
+        continue;
+      }
+      const row = e.new as Parameters<typeof db.mapRecipeIngredient>[0];
+      if (!row || row.id == null || row.ingredient_name === undefined) return null;
+      const ing = db.mapRecipeIngredient(row);
+      const rid = Number(ing.recipeId);
+      const rec = byId.get(rid);
+      if (!rec) return null;
+      if (owner.get(ing.id!) === rid) {
+        const i = rec.ingredients.findIndex(x => x.id === ing.id);
+        rec.ingredients[i] = ing;
+      } else {
+        removeIng(ing.id!);
+        rec.ingredients.push(ing);
+        owner.set(ing.id!, rid);
+      }
+    }
+  }
+  return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name, "el") || a.id - b.id);
+}
 
 // A safe, structurally-valid empty database. Used before the first
 // successful load completes (or if it fails), so `data` is NEVER
@@ -111,7 +194,52 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const tFn = useCallback((key: string) => translate(locale, key), [locale]);
 
-  const refreshAll = useCallback(async () => {
+  const dataRef = useRef<AppDatabase>(EMPTY_DB);
+  useEffect(() => { dataRef.current = data; }, [data]);
+  const rtReady = useRef(false);
+  const rtCount = useRef(0);
+  // εκκρεμείς αλλαγές από realtime, μαζεμένες
+  const pendingRef = useRef<{ slices: Set<Slice>; recipeEvents: RtEvent[] }>({ slices: new Set(), recipeEvents: [] });
+  const flushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const firstPendingAt = useRef<number>(0);
+
+  const flushPending = useCallback(async () => {
+    flushTimer.current = null;
+    firstPendingAt.current = 0;
+    if (typeof document !== "undefined" && document.hidden) return; // περιμένει να ξαναφανεί η καρτέλα
+    const { slices, recipeEvents } = pendingRef.current;
+    pendingRef.current = { slices: new Set(), recipeEvents: [] };
+    if (!slices.size && !recipeEvents.length) return;
+    try {
+      if (recipeEvents.length && !slices.has("recipes")) {
+        const patched = patchRecipes(dataRef.current.recipes, recipeEvents);
+        if (patched) setData(prev => ({ ...prev, recipes: patched }));
+        else slices.add("recipes");
+      }
+      const list = [...slices];
+      if (!list.length) return;
+      const values = await Promise.all(list.map(k => SLICE_LOADERS[k]()));
+      setData(prev => {
+        const next = { ...prev } as Record<string, unknown>;
+        list.forEach((k, i) => { next[k] = values[i]; });
+        return next as unknown as AppDatabase;
+      });
+    } catch {
+      // αποτυχία: ξανά στην επόμενη αλλαγή
+      for (const k of slices) pendingRef.current.slices.add(k);
+    }
+  }, []);
+
+  const scheduleFlush = useCallback(() => {
+    const now = Date.now();
+    if (!firstPendingAt.current) firstPendingAt.current = now;
+    if (flushTimer.current) clearTimeout(flushTimer.current);
+    // 1,5 δευτ. ησυχίας, αλλά το πολύ κάθε 8 δευτ. όσο έρχονται αλλαγές
+    const wait = Math.max(0, Math.min(1500, firstPendingAt.current + 8000 - now));
+    flushTimer.current = setTimeout(() => { void flushPending(); }, wait);
+  }, [flushPending]);
+
+  const loadAll = useCallback(async () => {
     if (!isSupabaseConfigured) {
       setDataStatus("error");
       setDataError(
@@ -121,6 +249,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       );
       return;
     }
+    pendingRef.current = { slices: new Set(), recipeEvents: [] };
     try {
       const [
         users, suppliers, supplierProducts, orders, orderItems, supplierPayments,
@@ -147,6 +276,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, [locale]);
 
+  // Μετά από αποθήκευση: οι αλλαγές έρχονται μέσω realtime και φορτώνεται
+  // ΜΟΝΟ ό,τι άλλαξε. Πλήρης φόρτωση μόνο αν δεν ήρθε καμία ειδοποίηση.
+  const refreshAll = useCallback(async () => {
+    if (!rtReady.current) return loadAll();
+    const before = rtCount.current;
+    await new Promise(r => setTimeout(r, 800));
+    if (rtCount.current === before) return loadAll();
+    if (flushTimer.current) { clearTimeout(flushTimer.current); flushTimer.current = null; }
+    for (const k of NON_REALTIME_SLICES) pendingRef.current.slices.add(k);
+    await flushPending();
+  }, [loadAll, flushPending]);
+
   // Initial load, once signed in. Signing out clears local data (it
   // belongs to whoever was signed in) rather than leaving stale rows
   // visible after logout.
@@ -159,7 +300,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // before any `await`, but that's a config-error path, not state
       // derived from props/state that belongs in render.
       // eslint-disable-next-line react-hooks/set-state-in-effect
-      refreshAll();
+      loadAll();
     } else if (authStatus === "signed-out") {
       setData(EMPTY_DB);
       setDataStatus("loading");
@@ -181,20 +322,33 @@ export function AppProvider({ children }: { children: ReactNode }) {
       "users", "suppliers", "supplier_products", "orders", "order_items",
       "supplier_payments", "stock_takings", "stock_taking_items", "inventory_snapshots",
       "ingredients", "recipes", "recipe_ingredients", "menus", "menu_recipes",
-      "prep_lists", "ingestion_logs",
+      "prep_lists", "ingestion_logs", "buffet_cycle_entries", "buffet_dishes", "reservations",
     ];
     const channel = client.channel("app-data-changes");
     for (const table of tables) {
       channel.on(
         "postgres_changes",
         { event: "*", schema: "public", table },
-        () => {
-          refreshAll();
+        (payload) => {
+          const p = payload as unknown as RtEvent;
+          rtCount.current++;
+          if (table === "recipes" || table === "recipe_ingredients") {
+            pendingRef.current.recipeEvents.push({ table, eventType: p.eventType, new: p.new, old: p.old });
+          } else {
+            for (const k of TABLE_SLICES[table] ?? []) pendingRef.current.slices.add(k);
+          }
+          scheduleFlush();
         }
       );
     }
-    channel.subscribe();
+    channel.subscribe((status) => { rtReady.current = status === "SUBSCRIBED"; });
+    // κρυφή καρτέλα → καμία φόρτωση· μόλις ξαναφανεί, φορτώνει ό,τι άλλαξε
+    const onVisible = () => { if (!document.hidden) void flushPending(); };
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      if (flushTimer.current) clearTimeout(flushTimer.current);
+      rtReady.current = false;
       client.removeChannel(channel);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -928,7 +928,7 @@ export async function deleteIngredient(id: number): Promise<void> {
 // ------------------------------------------------------------
 // RECIPES + RECIPE INGREDIENTS
 // ------------------------------------------------------------
-function mapRecipeIngredient(row: {
+export function mapRecipeIngredient(row: {
   id: number; recipe_id: number; ingredient_id: number | null; ingredient_name: string; quantity: number;
   unit: string; unit_cost: number; total_cost: number; wastage_factor: number; requires_prep: boolean; prep_notes: string | null;
 }): RecipeIngredient {
@@ -1009,18 +1009,24 @@ export async function fetchRecipes(): Promise<Recipe[]> {
   const result: Recipe[] = [];
   for (const r of recipes ?? []) {
     const ingredients = ingredientsByRecipeId.get(r.id) ?? [];
-    result.push({
-      id: r.id, name: r.name, nameEn: r.name_en, portionYield: numToStr(r.portion_yield), portionUnit: r.portion_unit,
-      allergens: JSON.stringify(r.allergens ?? []), technicalGuide: r.technical_guide,
-      totalRawMaterialCost: numToStr(r.total_raw_material_cost), laborCost: numToStr(r.labor_cost),
-      overheadCost: numToStr(r.overhead_cost), totalCost: numToStr(r.total_cost),
-      profitMarginPercent: numToStr(r.profit_margin_percent), sellingPrice: numToStr(r.selling_price),
-      menuPriceVat: numToStr(r.menu_price_vat), menuPriceFinal: numToStr(r.menu_price_final), isActive: r.is_active,
-      mySellingPrice: numToStr(r.my_selling_price ?? 0),
-      createdAt: r.created_at, ingredients: ingredients.map(mapRecipeIngredient),
-    });
+    result.push(mapRecipeRow(r, ingredients.map(mapRecipeIngredient)));
   }
   return result;
+}
+
+/** Γραμμή του πίνακα recipes → Recipe (χωρίς να φορτώνει υλικά). */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function mapRecipeRow(r: any, ingredients: RecipeIngredient[]): Recipe {
+  return {
+    id: r.id, name: r.name, nameEn: r.name_en, portionYield: numToStr(r.portion_yield), portionUnit: r.portion_unit,
+    allergens: JSON.stringify(r.allergens ?? []), technicalGuide: r.technical_guide,
+    totalRawMaterialCost: numToStr(r.total_raw_material_cost), laborCost: numToStr(r.labor_cost),
+    overheadCost: numToStr(r.overhead_cost), totalCost: numToStr(r.total_cost),
+    profitMarginPercent: numToStr(r.profit_margin_percent), sellingPrice: numToStr(r.selling_price),
+    menuPriceVat: numToStr(r.menu_price_vat), menuPriceFinal: numToStr(r.menu_price_final), isActive: r.is_active,
+    mySellingPrice: numToStr(r.my_selling_price ?? 0),
+    createdAt: r.created_at, ingredients,
+  };
 }
 
 // Ενημερώνει ΜΟΝΟ τα δικά της πεδία μιας συνταγής (όνομα, μερίδες,
