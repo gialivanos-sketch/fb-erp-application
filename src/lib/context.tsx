@@ -36,13 +36,13 @@ const TABLE_SLICES: Record<string, Slice[]> = {
   reservations: ["reservations"],
 };
 // χωρίς ειδοποιήσεις realtime: ξαναφορτώνονται (είναι μικρά) σε κάθε ρητή ανανέωση
-const NON_REALTIME_SLICES: Slice[] = ["internalTransfers", "units"];
+const NON_REALTIME_SLICES: Slice[] = ["departments", "internalTransfers", "units"];
 const SLICE_LOADERS: Record<Slice, () => Promise<unknown>> = {
   users: db.fetchUsers, suppliers: db.fetchSuppliers, supplierProducts: db.fetchSupplierProducts,
   orders: db.fetchOrders, orderItems: db.fetchOrderItems, supplierPayments: db.fetchPayments,
   stockTakings: db.fetchStockTakings, inventorySnapshots: db.fetchInventorySnapshots,
   ingredients: db.fetchIngredients, recipes: db.fetchRecipes, menus: db.fetchMenus, prepLists: db.fetchPrepLists,
-  internalTransfers: db.fetchInternalTransfers, units: db.fetchUnits, ingestionLogs: db.fetchIngestionLogs,
+  departments: db.fetchDepartments, internalTransfers: db.fetchInternalTransfers, units: db.fetchUnits, ingestionLogs: db.fetchIngestionLogs,
   buffetCycleEntries: db.fetchBuffetCycleEntries, reservations: db.fetchReservations,
 };
 type RtEvent = { table: string; eventType: string; new: Record<string, unknown>; old: Record<string, unknown> };
