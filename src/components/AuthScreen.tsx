@@ -39,8 +39,8 @@ export default function AuthScreen() {
         } else {
           setMessage(
             locale === "gr"
-              ? "✅ Ελέγξτε το email σας για να επιβεβαιώσετε τον λογαριασμό σας πριν συνδεθείτε."
-              : "✅ Check your email to confirm your account before signing in."
+              ? "✅ Ελέγξτε το email σας για να επιβεβαιώσετε τον λογαριασμό σας. Μετά ο διαχειριστής πρέπει να εγκρίνει τον λογαριασμό πριν δείτε δεδομένα."
+              : "✅ Check your email to confirm your account. An administrator must then approve it before you can see any data."
           );
         }
       } else {

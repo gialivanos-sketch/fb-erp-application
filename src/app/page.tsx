@@ -2,9 +2,11 @@
 import { useMemo } from "react";
 import { useLanguage } from "@/lib/context";
 import { PageHeader, KpiCard } from "@/components/shared";
+import Link from "next/link";
+import { APP_TABS, SECTION_LABELS, SECTION_ORDER, tabLabel } from "@/lib/appTabs";
 
 export default function DashboardPage() {
-  const { t, currentUser, isAdmin, isChef, isStorekeeper, data, dataStatus, dataError, refreshAll } = useLanguage();
+  const { t, locale, currentUser, isAdmin, isChef, isStorekeeper, data, dataStatus, dataError, refreshAll, can, canAccessFinancials } = useLanguage();
 
   const stats = useMemo(() => {
     const totalPurchases = data.orders.reduce((s, o) => s + Number(o.totalGross || 0), 0);
@@ -98,62 +100,38 @@ export default function DashboardPage() {
         <KpiCard label={t("kpiTotalMenus")} value={stats.menus} color="purple" icon="🍽️" />
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+      {canAccessFinancials && <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <KpiCard label={t("kpiMasterPurchaseValue")} value={fmt(stats.totalPurchases)} color="amber" icon="💳" />
         <KpiCard label={t("kpiTotalInventoryValue")} value={fmt(stats.inventoryValue)} color="red" icon="📐" />
         <KpiCard label={t("kpiTotalDebits")} value={fmt(stats.totalDebits)} color="amber" icon="📊" />
         <KpiCard label={t("kpiTotalPayments")} value={fmt(stats.totalPayments)} color="green" icon="✅" />
-      </div>
+      </div>}
 
-      {/* Quick Navigation */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="erp-card">
-          <div className="erp-card-header">
-            <h3 className="font-semibold text-slate-700">🛒 {t("sectionProcurement")}</h3>
-          </div>
-          <div className="p-4 grid grid-cols-2 gap-2">
-            {[
-              { href: "/supplier-quotes", label: t("navSupplierQuotes"), icon: "📊" },
-              { href: "/draft-order", label: t("navDraftOrder"), icon: "📝" },
-              { href: "/supplier-crm", label: t("navSupplierCRM"), icon: "🏢" },
-              { href: "/payments", label: t("navPayments"), icon: "💳" },
-              { href: "/orders-archive", label: t("navOrdersArchive"), icon: "📦" },
-              { href: "/inventory", label: t("navInventory"), icon: "📐" },
-            ].map((item) => (
-              <a
-                key={item.href}
-                href={item.href}
-                className="flex items-center gap-2 p-3 rounded-lg hover:bg-blue-50 text-sm text-slate-700 transition-colors"
-              >
-                <span>{item.icon}</span> {item.label}
-              </a>
-            ))}
-          </div>
-        </div>
-
-        <div className="erp-card">
-          <div className="erp-card-header">
-            <h3 className="font-semibold text-slate-700">👨‍🍳 {t("sectionKitchen")}</h3>
-          </div>
-          <div className="p-4 grid grid-cols-2 gap-2">
-            {[
-              { href: "/ingredients", label: t("navIngredients"), icon: "🥘" },
-              { href: "/recipe", label: t("navRecipe"), icon: "📋" },
-              { href: "/recipe-costing", label: t("navRecipeCosting"), icon: "💰" },
-              { href: "/consumption", label: t("navConsumption"), icon: "📈" },
-              { href: "/menu-planner", label: t("navMenuPlanner"), icon: "🍽️" },
-              { href: "/prep-list", label: t("navPrepList"), icon: "🔪" },
-            ].map((item) => (
-              <a
-                key={item.href}
-                href={item.href}
-                className="flex items-center gap-2 p-3 rounded-lg hover:bg-emerald-50 text-sm text-slate-700 transition-colors"
-              >
-                <span>{item.icon}</span> {item.label}
-              </a>
-            ))}
-          </div>
-        </div>
+      {/* Όλες οι καρτέλες της εφαρμογής (όσες επιτρέπονται στον χρήστη) */}
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+        {SECTION_ORDER.map((section) => {
+          const items = APP_TABS.filter((tab) => tab.section === section && can(tab.href));
+          if (!items.length) return null;
+          const lbl = SECTION_LABELS[section];
+          return (
+            <div key={section} className="erp-card">
+              <div className="erp-card-header">
+                <h3 className="font-semibold text-slate-700">{lbl.icon} {locale === "gr" ? lbl.gr : lbl.en}</h3>
+              </div>
+              <div className="p-4 grid grid-cols-2 gap-2">
+                {items.map((item) => (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className="flex items-center gap-2 p-3 rounded-lg hover:bg-blue-50 text-sm text-slate-700 transition-colors"
+                  >
+                    <span>{item.icon}</span> {tabLabel(item, locale, t)}
+                  </Link>
+                ))}
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

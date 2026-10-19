@@ -53,7 +53,7 @@ const strToNum = (s: string | null | undefined): number => (s == null || s === "
 // ------------------------------------------------------------
 function mapUser(row: {
   id: string; name: string; email: string; role: string; is_active: boolean;
-  last_login_at: string | null; created_at: string;
+  last_login_at: string | null; created_at: string; permissions?: unknown;
 }): AppUser {
   return {
     id: row.id,
@@ -61,15 +61,33 @@ function mapUser(row: {
     email: row.email,
     role: row.role as UserRole,
     isActive: row.is_active,
+    permissions: Array.isArray(row.permissions) ? (row.permissions as string[]) : null,
     lastLoginAt: row.last_login_at,
     createdAt: row.created_at,
   };
 }
 
 export async function fetchUsers(): Promise<AppUser[]> {
-  const { data, error } = await requireClient().from("users").select("id, name, email, role, is_active, last_login_at, created_at").order("created_at", { ascending: true });
+  const client = requireClient();
+  const cols = "id, name, email, role, is_active, last_login_at, created_at";
+  // permissions: νέα στήλη (migration_security.sql) — αν λείπει, φορτώνει χωρίς αυτήν
+  const withPerms = await client.from("users").select(cols + ", permissions").order("created_at", { ascending: true });
+  if (!withPerms.error) return (withPerms.data ?? []).map(r => mapUser(r as never));
+  const { data, error } = await client.from("users").select(cols).order("created_at", { ascending: true });
   if (error) throw error;
   return (data ?? []).map(mapUser);
+}
+
+/** Άδειες χρήστη (null = προεπιλογές ρόλου). Μόνο ο διαχειριστής. */
+export async function updateUserPermissions(id: string, permissions: string[] | null): Promise<void> {
+  const { error } = await requireClient().from("users").update({ permissions } as never).eq("id", id);
+  if (error) throw error;
+}
+
+/** Ενεργοποίηση/απενεργοποίηση χρήστη (έγκριση νέου λογαριασμού). Μόνο ο διαχειριστής. */
+export async function setUserActive(id: string, isActive: boolean): Promise<void> {
+  const { error } = await requireClient().from("users").update({ is_active: isActive }).eq("id", id);
+  if (error) throw error;
 }
 
 export async function updateUserRole(id: string, role: UserRole): Promise<void> {

@@ -6,6 +6,7 @@ import { RoleGuard } from "@/components/RoleGuard";
 import * as db from "@/lib/supabaseData";
 import { setCachedBusinessName } from "@/lib/useBusinessName";
 import type { BusinessProfile } from "@/lib/types";
+import { downloadFullBackup, type BackupResult } from "@/lib/backup";
 
 // Uploaded logos are stored as a base64 data URL directly in the
 // business_profile.logo_data_url column (simplest option — no Supabase
@@ -31,6 +32,17 @@ export default function BusinessProfilePage() {
   const [saving, setSaving] = useState(false);
   const [savedMsg, setSavedMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [logoError, setLogoError] = useState("");
+
+  // ── Αντίγραφο ασφαλείας ──
+  const [bkBusy, setBkBusy] = useState<string | null>(null);
+  const [bkResult, setBkResult] = useState<BackupResult | null>(null);
+  const [bkError, setBkError] = useState<string | null>(null);
+  async function runBackup() {
+    setBkBusy("…"); setBkResult(null); setBkError(null);
+    try { setBkResult(await downloadFullBackup(m => setBkBusy(m))); }
+    catch (err) { setBkError(String((err as { message?: string })?.message ?? err)); }
+    finally { setBkBusy(null); }
+  }
 
   // ── Επιχειρήσεις (μία ενεργή κάθε φορά) ──
   const [businesses, setBusinesses] = useState<db.BusinessRow[] | null | undefined>(undefined);
@@ -383,6 +395,29 @@ export default function BusinessProfilePage() {
           </div>
         </div>
       )}
+
+      {/* ── Αντίγραφο ασφαλείας ── */}
+      <div className="erp-card max-w-2xl mt-6">
+        <div className="erp-card-header">📦 {locale === "gr" ? "Αντίγραφο ασφαλείας" : "Backup"}</div>
+        <div className="p-4 space-y-3 text-sm">
+          <p className="text-slate-600">
+            {locale === "gr"
+              ? "Κατεβάζει ΟΛΑ τα δεδομένα της εφαρμογής σε ένα αρχείο Excel (ένα φύλλο ανά πίνακα). Κράτα το στον υπολογιστή σου — προτείνεται μία φορά τον μήνα."
+              : "Downloads ALL app data into one Excel file (one sheet per table). Keep it on your computer — once a month is recommended."}
+          </p>
+          <button onClick={runBackup} disabled={!!bkBusy} className="erp-btn-primary">
+            {bkBusy ? `⏳ ${bkBusy}` : `📦 ${locale === "gr" ? "Λήψη αντιγράφου όλων των δεδομένων (Excel)" : "Download full backup (Excel)"}`}
+          </button>
+          {bkResult && (
+            <div className="p-3 rounded-lg bg-emerald-50 border border-emerald-300 text-emerald-800">
+              ✅ {locale === "gr" ? "Κατέβηκε:" : "Downloaded:"} <b>{bkResult.fileName}</b> — {bkResult.tables.length} {locale === "gr" ? "πίνακες" : "tables"}, {bkResult.tables.reduce((s, t) => s + t.rows, 0).toLocaleString("el-GR")} {locale === "gr" ? "γραμμές" : "rows"}.
+              {!bkResult.full && <div className="mt-1 text-amber-800">⚠ {locale === "gr" ? "Περιέχει μόνο την ενεργή επιχείρηση. Για πλήρες αντίγραφο (και παλιές επιχειρήσεις) τρέξε το supabase/migration_security.sql." : "Active business only — run migration_security.sql for a full backup."}</div>}
+              {bkResult.missing.length > 0 && <div className="mt-1 text-xs text-slate-500">{locale === "gr" ? "Δεν υπάρχουν/δεν διαβάστηκαν:" : "Not found:"} {bkResult.missing.join(", ")}</div>}
+            </div>
+          )}
+          {bkError && <div className="p-3 rounded-lg bg-red-50 border border-red-300 text-red-700">✖ {bkError}</div>}
+        </div>
+      </div>
     </RoleGuard>
   );
 }

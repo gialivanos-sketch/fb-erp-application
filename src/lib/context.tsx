@@ -5,6 +5,7 @@ import type { AppDatabase, AppUser, UserRole, BuffetCycleEntry, Reservation, Rec
 import { supabase, isSupabaseConfigured } from "./supabaseClient";
 import { useAuthSession, signOut as authSignOut } from "./auth";
 import * as db from "./supabaseData";
+import { effectivePermissions, PERM_FINANCIALS } from "./appTabs";
 
 export type { UserRole };
 
@@ -156,6 +157,8 @@ interface AppContextType {
   canAccessRecipes: boolean;
   canAccessInventory: boolean;
   canAccessAdmin: boolean;
+  /** Βλέπει ο χρήστης αυτή την καρτέλα; */
+  can: (href: string) => boolean;
 }
 
 const AppContext = createContext<AppContextType>({
@@ -178,6 +181,7 @@ const AppContext = createContext<AppContextType>({
   canAccessRecipes: false,
   canAccessInventory: false,
   canAccessAdmin: false,
+  can: () => false,
 });
 
 export function AppProvider({ children }: { children: ReactNode }) {
@@ -375,7 +379,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const isChef = role === "chef";
   const isStorekeeper = role === "storekeeper";
 
-  const canAccessFinancials = isAdmin;
+  // Άδειες ανά καρτέλα (ορίζονται από τον διαχειριστή στη Διαχείριση Χρηστών)
+  const permissions = useMemo(() => effectivePermissions(currentUser), [currentUser]);
+  const can = useCallback((href: string) => isAdmin || permissions.has(href), [isAdmin, permissions]);
+  const canAccessFinancials = isAdmin || permissions.has(PERM_FINANCIALS);
   const canAccessRecipes = isAdmin || isChef;
   const canAccessInventory = isAdmin || isStorekeeper;
   const canAccessAdmin = isAdmin;
@@ -402,6 +409,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         canAccessRecipes,
         canAccessInventory,
         canAccessAdmin,
+        can,
       }}
     >
       {children}

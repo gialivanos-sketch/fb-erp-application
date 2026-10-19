@@ -3,53 +3,13 @@ import { useState } from "react";
 import { useApp } from "@/lib/context";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
-import { RoleGuard } from "./RoleGuard";
-
-const procurementLinks = [
-  { key: "navSupplierQuotes", href: "/supplier-quotes", icon: "📊" },
-  { key: "navDraftOrder", href: "/draft-order", icon: "📝" },
-  { key: "navSupplierCRM", href: "/supplier-crm", icon: "🏢" },
-  { key: "navPayments", href: "/payments", icon: "💳" },
-  { key: "navOrdersArchive", href: "/orders-archive", icon: "📦" },
-  { key: "navOrderHistory", href: "/order-history", icon: "📋" },
-  { key: "navImportOrders", href: "/import-orders", icon: "📥" },
-  { key: "navItemAnalysis", href: "/item-analysis", icon: "🔎" },
-  { key: "navSkuMapping", href: "/sku-mapping", icon: "🏷️" },
-  { key: "navInventory", href: "/inventory", icon: "📐" },
-  { key: "navInventoryArchive", href: "/inventory-archive", icon: "🗄️" },
-];
-
-const kitchenLinks = [
-  { key: "navIngredients", href: "/ingredients", icon: "🥘" },
-  { key: "navRecipe", href: "/recipe", icon: "👨‍🍳" },
-  { key: "navImportRecipes", href: "/import-recipes", icon: "📥" },
-  { key: "navRecipeIngredients", href: "/recipe-ingredients", icon: "🧂" },
-  { key: "navRecipeCosting", href: "/recipe-costing", icon: "💰" },
-  { key: "navConsumption", href: "/consumption", icon: "📈" },
-  { key: "navMenuPlanner", href: "/menu-planner", icon: "🍽️" },
-  { key: "navMenuArchive", href: "/menu-archive", icon: "📚" },
-  { key: "navUnits", href: "/units", icon: "⚖️" },
-  { key: "navPrepList", href: "/prep-list", icon: "🔄" },
-];
-
-const buffetLinks = [
-  { key: "navBuffetCycle", href: "/buffet-cycle", icon: "🗓️" },
-  { key: "navReservations", href: "/reservations", icon: "🏨" },
-  { key: "navFoodCost", href: "/food-cost", icon: "📊" },
-];
-
-const adminLinks = [
-  { key: "navAdminPanel", href: "/admin", icon: "⚙️" },
-  { key: "navUserManagement", href: "/user-management", icon: "👥" },
-  { key: "navBusinessProfile", href: "/profile", icon: "🏬" },
-];
+import { APP_TABS, SECTION_LABELS, SECTION_ORDER, tabLabel } from "@/lib/appTabs";
 
 export default function Sidebar() {
   const {
     t, locale, toggleLocale,
-    currentUser, isAdmin, isChef, isStorekeeper,
-    canAccessFinancials, canAccessRecipes, canAccessInventory,
-    signOut,
+    currentUser, isAdmin, isChef,
+    can, signOut,
   } = useApp();
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -138,83 +98,28 @@ export default function Sidebar() {
           </Link>
         </div>
 
-        {/* Procurement Section — Admin + Storekeeper */}
-        <RoleGuard roles={["admin", "storekeeper"]}>
-          <div className="sidebar-section-title">{t("sectionProcurement")}</div>
-          {procurementLinks.map((item) => {
-            // Hide financial links from storekeeper
-            const isFinancial = item.href === "/supplier-crm" || item.href === "/payments" || item.href === "/import-orders" || item.href === "/item-analysis";
-            if (isFinancial && !canAccessFinancials) return null;
-            return (
-              <div key={item.href} className="px-2 mb-0.5">
-                <Link
-                  href={item.href}
-                  className={`sidebar-item ${isActive(item.href) ? "sidebar-item-active" : ""}`}
-                  onClick={() => setMobileOpen(false)}
-                >
-                  <span className="text-lg">{item.icon}</span>
-                  <span>{t(item.key)}</span>
-                </Link>
-              </div>
-            );
-          })}
-        </RoleGuard>
-
-        {/* Kitchen Section — Admin + Chef */}
-        <RoleGuard roles={["admin", "chef"]}>
-          <div className="sidebar-section-title">{t("sectionKitchen")}</div>
-          {kitchenLinks.map((item) => {
-            // Hide financial/costing links from chef
-            const isCosting = item.href === "/recipe-costing" || item.href === "/consumption";
-            if (isCosting && !canAccessFinancials) return null;
-            return (
-              <div key={item.href} className="px-2 mb-0.5">
-                <Link
-                  href={item.href}
-                  className={`sidebar-item ${isActive(item.href) ? "sidebar-item-active" : ""}`}
-                  onClick={() => setMobileOpen(false)}
-                >
-                  <span className="text-lg">{item.icon}</span>
-                  <span>{t(item.key)}</span>
-                </Link>
-              </div>
-            );
-          })}
-        </RoleGuard>
-
-        {/* Buffet Section — Admin + Chef */}
-        <RoleGuard roles={["admin", "chef"]}>
-          <div className="sidebar-section-title">{t("sectionBuffet")}</div>
-          {buffetLinks.map((item) => (
-            <div key={item.href} className="px-2 mb-0.5">
-              <Link
-                href={item.href}
-                className={`sidebar-item ${isActive(item.href) ? "sidebar-item-active" : ""}`}
-                onClick={() => setMobileOpen(false)}
-              >
-                <span className="text-lg">{item.icon}</span>
-                <span>{t(item.key)}</span>
-              </Link>
+        {/* Όλες οι καρτέλες, ανά ενότητα — ό,τι επιτρέπουν οι άδειες του χρήστη */}
+        {SECTION_ORDER.map((section) => {
+          const items = APP_TABS.filter((tab) => tab.section === section && can(tab.href));
+          if (!items.length) return null;
+          return (
+            <div key={section}>
+              <div className="sidebar-section-title">{locale === "gr" ? SECTION_LABELS[section].gr : SECTION_LABELS[section].en}</div>
+              {items.map((item) => (
+                <div key={item.href} className="px-2 mb-0.5">
+                  <Link
+                    href={item.href}
+                    className={`sidebar-item ${isActive(item.href) ? "sidebar-item-active" : ""}`}
+                    onClick={() => setMobileOpen(false)}
+                  >
+                    <span className="text-lg">{item.icon}</span>
+                    <span>{tabLabel(item, locale, t)}</span>
+                  </Link>
+                </div>
+              ))}
             </div>
-          ))}
-        </RoleGuard>
-
-        {/* Admin Section — Admin Only */}
-        <RoleGuard adminOnly>
-          <div className="sidebar-section-title">{t("sectionAdmin")}</div>
-          {adminLinks.map((item) => (
-            <div key={item.href} className="px-2 mb-0.5">
-              <Link
-                href={item.href}
-                className={`sidebar-item ${isActive(item.href) ? "sidebar-item-active" : ""}`}
-                onClick={() => setMobileOpen(false)}
-              >
-                <span className="text-lg">{item.icon}</span>
-                <span>{t(item.key)}</span>
-              </Link>
-            </div>
-          ))}
-        </RoleGuard>
+          );
+        })}
       </div>
 
       {/* Footer */}

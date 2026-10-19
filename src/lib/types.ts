@@ -13,6 +13,8 @@ export interface AppUser {
   email: string;
   role: UserRole;
   isActive: boolean;
+  /** Καρτέλες/άδειες που έδωσε ο διαχειριστής. null = προεπιλογές ρόλου. */
+  permissions?: string[] | null;
   lastLoginAt?: string | null;
   createdAt?: string;
 }

@@ -6,6 +6,7 @@ import { RoleGuard } from "@/components/RoleGuard";
 import type { AppUser, UserRole } from "@/lib/types";
 import { parseSpreadsheetFile, rowsToObjects, pick, parsePrice } from "@/lib/csv";
 import * as db from "@/lib/supabaseData";
+import { APP_TABS, SECTION_LABELS, SECTION_ORDER, PERM_FINANCIALS, effectivePermissions, tabLabel } from "@/lib/appTabs";
 
 const ROLE_OPTIONS: { value: UserRole; label: string; labelEn: string }[] = [
   { value: "admin", label: "Διαχειριστής", labelEn: "Administrator" },
@@ -26,6 +27,56 @@ export default function UserManagementPage() {
   const [uploading, setUploading] = useState<string | null>(null);
 
   const usersSafe: AppUser[] = Array.isArray(users) ? users : [];
+
+  // ── Άδειες ανά χρήστη (πίνακας με όλες τις καρτέλες) ──
+  const [permEdits, setPermEdits] = useState<Record<string, string[] | null>>({});
+  const [permBusy, setPermBusy] = useState<string | null>(null);
+  const [permMsg, setPermMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const permsOf = (u: AppUser): Set<string> =>
+    effectivePermissions({ role: u.role, permissions: u.id in permEdits ? permEdits[u.id] : u.permissions });
+  const isCustom = (u: AppUser) => (u.id in permEdits ? permEdits[u.id] : u.permissions) != null;
+
+  async function savePerms(u: AppUser, next: string[] | null) {
+    const prev = u.id in permEdits ? permEdits[u.id] : (u.permissions ?? null);
+    setPermEdits(p => ({ ...p, [u.id]: next }));
+    setPermBusy(u.id); setPermMsg(null);
+    try {
+      await db.updateUserPermissions(u.id, next);
+      setPermMsg({ ok: true, text: locale === "gr" ? `✓ Αποθηκεύτηκαν οι άδειες του/της ${u.name}` : `✓ Saved ${u.name}` });
+    } catch (err) {
+      setPermEdits(p => ({ ...p, [u.id]: prev }));
+      const m = String((err as { message?: string })?.message ?? err);
+      setPermMsg({ ok: false, text: /permissions/.test(m)
+        ? (locale === "gr" ? "Δεν αποθηκεύτηκε: τρέξε πρώτα στο Supabase το supabase/migration_security.sql." : "Run supabase/migration_security.sql first.")
+        : (locale === "gr" ? "Αποτυχία: " : "Failed: ") + m });
+    } finally { setPermBusy(null); }
+  }
+  function togglePerm(u: AppUser, key: string) {
+    const cur = permsOf(u);
+    if (cur.has(key)) cur.delete(key); else cur.add(key);
+    void savePerms(u, [...cur]);
+  }
+  function toggleSection(u: AppUser, hrefs: string[]) {
+    const cur = permsOf(u);
+    const allOn = hrefs.every(h => cur.has(h));
+    for (const h of hrefs) { if (allOn) cur.delete(h); else cur.add(h); }
+    void savePerms(u, [...cur]);
+  }
+
+  // ── Έγκριση / απενεργοποίηση λογαριασμού ──
+  const [activeBusy, setActiveBusy] = useState<string | null>(null);
+  async function toggleActive(u: AppUser) {
+    const next = !u.isActive;
+    if (!confirm(locale === "gr"
+      ? (next ? `Έγκριση και ενεργοποίηση του ${u.email};` : `Απενεργοποίηση του ${u.email}; Δεν θα μπορεί να δει τίποτα.`)
+      : (next ? `Activate ${u.email}?` : `Deactivate ${u.email}?`))) return;
+    setActiveBusy(u.id);
+    try { await db.setUserActive(u.id, next); await refreshAll(); }
+    catch (err) { alert((locale === "gr" ? "Αποτυχία: " : "Failed: ") + String((err as { message?: string })?.message ?? err)); }
+    finally { setActiveBusy(null); }
+  }
+  const pendingUsers = usersSafe.filter(u => !u.isActive);
+  const matrixUsers = usersSafe.filter(u => u.role !== "admin");
 
   async function changeRole(user: AppUser, role: UserRole) {
     if (!confirm(t("confirmRoleChange"))) return;
@@ -396,8 +447,14 @@ export default function UserManagementPage() {
             automatically the moment they sign up. */}
         <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-xl text-sm text-blue-800">
           {locale === "gr"
-            ? "💡 Οι νέοι χρήστες δημιουργούν λογαριασμό μόνοι τους από την οθόνη σύνδεσης (Εγγραφή). Μόλις εγγραφούν, εμφανίζονται εδώ με προεπιλεγμένο ρόλο «Σεφ» — αλλάξτε τον ρόλο τους παρακάτω όπως χρειάζεται."
-            : "💡 New users create their own account from the sign-in screen (Sign Up). Once they do, they appear here with a default \"Chef\" role — change their role below as needed."}
+            ? "💡 Οι νέοι χρήστες κάνουν «Εγγραφή» από την οθόνη σύνδεσης, αλλά ΔΕΝ βλέπουν τίποτα μέχρι να τους εγκρίνεις εδώ (κουμπί «✓ Έγκριση»). Μετά διαλέγεις ρόλο και, στον «Πίνακα Αδειών» πιο κάτω, ποιες καρτέλες θα βλέπουν."
+            : "💡 New users sign up from the sign-in screen but see nothing until you approve them here. Then pick their role and, in the Permissions table below, which tabs they can see."}
+          {pendingUsers.length > 0 && (
+            <div className="mt-2 font-semibold text-amber-800">
+              ⏳ {locale === "gr" ? `${pendingUsers.length} λογαριασμ${pendingUsers.length === 1 ? "ός περιμένει" : "οί περιμένουν"} έγκριση: ` : `${pendingUsers.length} awaiting approval: `}
+              {pendingUsers.map(u => u.email).join(", ")}
+            </div>
+          )}
         </div>
 
         {/* Bulk File Ingestion Utility Row */}
@@ -515,7 +572,17 @@ export default function UserManagementPage() {
                           <Badge color={roleBadgeColor(user?.role ?? "chef")}>{roleLabel(user?.role ?? "chef")}</Badge>
                         )}
                       </td>
-                      <td>{user?.isActive ? <Badge color="green">✓</Badge> : <Badge color="red">✕</Badge>}</td>
+                      <td>
+                        <div className="flex items-center gap-2">
+                          {user?.isActive ? <Badge color="green">✓</Badge> : <Badge color="amber">⏳ {locale === "gr" ? "Αναμονή" : "Pending"}</Badge>}
+                          {user && user.id !== currentUser?.id && (
+                            <button onClick={() => toggleActive(user)} disabled={activeBusy === user.id}
+                              className={`${user.isActive ? "erp-btn-ghost" : "erp-btn-success"} text-xs px-2 py-1`}>
+                              {activeBusy === user.id ? "…" : user.isActive ? (locale === "gr" ? "Απενεργοποίηση" : "Deactivate") : (locale === "gr" ? "✓ Έγκριση" : "✓ Approve")}
+                            </button>
+                          )}
+                        </div>
+                      </td>
                       <td>
                         <div className="flex gap-1 flex-wrap">
                           {editingUser?.id === user?.id ? (
@@ -548,41 +615,88 @@ export default function UserManagementPage() {
           </div>
         </div>
 
-        {/* Access Rights Matrix */}
+        {/* Πίνακας Αδειών: όλες οι καρτέλες × χρήστες */}
         <div className="erp-card mb-6">
           <div className="erp-card-header">
-            <h3 className="font-semibold">🔐 {locale === "gr" ? "Πίνακας Δικαιωμάτων Πρόσβασης" : "Access Rights Matrix"}</h3>
+            <h3 className="font-semibold">🔐 {locale === "gr" ? "Πίνακας Αδειών — τι βλέπει κάθε χρήστης" : "Permissions — what each user can see"}</h3>
           </div>
-          <div className="overflow-x-auto">
-            <table className="erp-table">
-              <thead>
-                <tr>
-                  <th>{locale === "gr" ? "Λειτουργία" : "Feature"}</th>
-                  <th className="text-center"><Badge color="blue">{t("roleAdmin")}</Badge></th>
-                  <th className="text-center"><Badge color="green">{t("roleChef")}</Badge></th>
-                  <th className="text-center"><Badge color="amber">{t("roleStorekeeper")}</Badge></th>
-                </tr>
-              </thead>
-              <tbody>
-                {[
-                  { feature: locale === "gr" ? "Τιμές & Προμηθευτές" : "Prices & Suppliers", admin: "✓", chef: "✕", keeper: "✓" },
-                  { feature: locale === "gr" ? "Οικονομικά (Κόστολόγηση, Περιθώρια)" : "Financials (Costing, Margins)", admin: "✓", chef: "✕", keeper: "✕" },
-                  { feature: locale === "gr" ? "Συνταγές & Παρουσίαση" : "Recipes & Plating", admin: "✓", chef: "✓", keeper: "✕" },
-                  { feature: locale === "gr" ? "Λίστες Prep" : "Prep Lists", admin: "✓", chef: "✓", keeper: "✕" },
-                  { feature: locale === "gr" ? "Απογραφή Αποθέματος" : "Inventory Count", admin: "✓", chef: "✕", keeper: "✓" },
-                  { feature: locale === "gr" ? "Παραγγελίες & Τιμολόγια" : "Orders & Invoices", admin: "✓", chef: "✕", keeper: "✓" },
-                  { feature: locale === "gr" ? "Διαχείριση Χρηστών" : "User Management", admin: "✓", chef: "✕", keeper: "✕" },
-                ].map((row, i) => (
-                  <tr key={i}>
-                    <td className="font-medium">{row.feature}</td>
-                    <td className="text-center text-emerald-600 font-bold text-lg">{row.admin}</td>
-                    <td className="text-center">{row.chef === "✓" ? <span className="text-emerald-600 font-bold text-lg">✓</span> : <span className="text-red-400">✕</span>}</td>
-                    <td className="text-center">{row.keeper === "✓" ? <span className="text-emerald-600 font-bold text-lg">✓</span> : <span className="text-red-400">✕</span>}</td>
+          <div className="px-6 pt-4 text-xs text-slate-500">
+            {locale === "gr"
+              ? "Τσέκαρε τις καρτέλες που θα βλέπει κάθε χρήστης. Αποθηκεύεται αμέσως. Κλικ στο όνομα ενότητας = όλα/κανένα. Ο Διαχειριστής βλέπει πάντα τα πάντα. Οι καρτέλες «Διαχείρισης» είναι μόνο για Διαχειριστή."
+              : "Tick the tabs each user can see. Saves immediately. Click a section name to toggle all. Admins always see everything."}
+            {permMsg && <div className={`mt-2 font-medium ${permMsg.ok ? "text-emerald-700" : "text-red-600"}`}>{permMsg.text}</div>}
+          </div>
+          {matrixUsers.length === 0 ? (
+            <div className="p-6 text-sm text-slate-400">{locale === "gr" ? "Δεν υπάρχουν χρήστες εκτός από διαχειριστές." : "No non-admin users yet."}</div>
+          ) : (
+            <div className="overflow-x-auto p-2">
+              <table className="erp-table">
+                <thead>
+                  <tr>
+                    <th className="min-w-[220px]">{locale === "gr" ? "Καρτέλα" : "Tab"}</th>
+                    {matrixUsers.map(u => (
+                      <th key={u.id} className="text-center min-w-[120px]">
+                        <div className="font-semibold">{u.name}</div>
+                        <div className="text-[10px] font-normal text-slate-400">{roleLabel(u.role)}{!u.isActive ? (locale === "gr" ? " · ανενεργός" : " · inactive") : ""}</div>
+                        {isCustom(u) ? (
+                          <button onClick={() => void savePerms(u, null)} disabled={permBusy === u.id}
+                            className="mt-1 text-[10px] text-blue-600 underline" title={locale === "gr" ? "Επαναφορά στις προεπιλογές του ρόλου" : "Reset to role defaults"}>
+                            ↺ {locale === "gr" ? "προεπιλογές ρόλου" : "role defaults"}
+                          </button>
+                        ) : (
+                          <div className="mt-1 text-[10px] text-slate-400">{locale === "gr" ? "(προεπιλογές ρόλου)" : "(role defaults)"}</div>
+                        )}
+                      </th>
+                    ))}
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  <tr className="bg-amber-50/60">
+                    <td className="font-medium">💶 {locale === "gr" ? "Βλέπει τιμές & οικονομικά (σύνολα αγορών, χρεώσεις, πληρωμές)" : "Sees prices & financials"}</td>
+                    {matrixUsers.map(u => (
+                      <td key={u.id} className="text-center">
+                        <input type="checkbox" className="w-4 h-4 cursor-pointer" disabled={permBusy === u.id}
+                          checked={permsOf(u).has(PERM_FINANCIALS)} onChange={() => togglePerm(u, PERM_FINANCIALS)} />
+                      </td>
+                    ))}
+                  </tr>
+                  {SECTION_ORDER.map(section => {
+                    const tabs = APP_TABS.filter(tb => tb.section === section);
+                    const grantable = tabs.filter(tb => !tb.adminOnly).map(tb => tb.href);
+                    const lbl = SECTION_LABELS[section];
+                    return [
+                      <tr key={section} className="bg-slate-50">
+                        <td className="font-bold text-xs text-slate-600">{lbl.icon} {locale === "gr" ? lbl.gr : lbl.en}</td>
+                        {matrixUsers.map(u => (
+                          <td key={u.id} className="text-center">
+                            {grantable.length > 0 && (
+                              <button onClick={() => toggleSection(u, grantable)} disabled={permBusy === u.id}
+                                className="text-[10px] text-blue-600 underline">
+                                {grantable.every(h => permsOf(u).has(h)) ? (locale === "gr" ? "κανένα" : "none") : (locale === "gr" ? "όλα" : "all")}
+                              </button>
+                            )}
+                          </td>
+                        ))}
+                      </tr>,
+                      ...tabs.map(tb => (
+                        <tr key={tb.href}>
+                          <td className="text-sm pl-6">{tb.icon} {tabLabel(tb, locale, t)}</td>
+                          {matrixUsers.map(u => (
+                            <td key={u.id} className="text-center">
+                              {tb.adminOnly
+                                ? <span className="text-slate-300" title={locale === "gr" ? "Μόνο Διαχειριστής" : "Admin only"}>🔒</span>
+                                : <input type="checkbox" className="w-4 h-4 cursor-pointer" disabled={permBusy === u.id}
+                                    checked={permsOf(u).has(tb.href)} onChange={() => togglePerm(u, tb.href)} />}
+                            </td>
+                          ))}
+                        </tr>
+                      )),
+                    ];
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
 
         {/* Ingestion History */}
