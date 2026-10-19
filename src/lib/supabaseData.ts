@@ -1851,17 +1851,29 @@ export async function fetchSkuConversions(): Promise<SkuConversion[] | null> {
 
 export async function upsertSkuConversion(sku: string, unit: string, grams: number): Promise<void> {
   if (!supabase) throw new Error("Supabase not initialized");
+  // Αντί για upsert (που εξαρτάται από το constraint schema), κάνουμε delete+insert
+  // ώστε να δουλεύει ανεξάρτητα από το αν το constraint είναι (sku,unit) ή (business_id,sku,unit).
+  const delRes = await (supabase as any).from("sku_unit_conversions").delete().eq("sku", sku).eq("unit", unit);
+  if (delRes.error) throw delRes.error;
   const { error } = await (supabase as any).from("sku_unit_conversions")
-    .upsert({ sku, unit, grams, updated_at: new Date().toISOString() }, { onConflict: "business_id,sku,unit" });
+    .insert({ sku, unit, grams, updated_at: new Date().toISOString() });
   if (error) throw error;
 }
 
 export async function upsertSkuConversions(rows: { sku: string; unit: string; grams: number }[]): Promise<void> {
   if (!supabase) throw new Error("Supabase not initialized");
+  if (rows.length === 0) return;
   const now = new Date().toISOString();
-  for (let i = 0; i < rows.length; i += 500) {
+  // Delete υπάρχοντα για αυτά τα (sku,unit) ζεύγη, μετά insert
+  for (let i = 0; i < rows.length; i += 100) {
+    const batch = rows.slice(i, i + 100);
+    for (const r of batch) {
+      const { error } = await (supabase as any).from("sku_unit_conversions")
+        .delete().eq("sku", r.sku).eq("unit", r.unit);
+      if (error) throw error;
+    }
     const { error } = await (supabase as any).from("sku_unit_conversions")
-      .upsert(rows.slice(i, i + 500).map(r => ({ ...r, updated_at: now })), { onConflict: "business_id,sku,unit" });
+      .insert(batch.map(r => ({ ...r, updated_at: now })));
     if (error) throw error;
   }
 }
