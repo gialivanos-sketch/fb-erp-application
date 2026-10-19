@@ -142,7 +142,24 @@ export function priceIngredient(
   const buyUnit = cu === "ΤΕΜΑΧΙΟ" ? "ΤΕΜ" : cu;  // αντίστοιχη μονάδα αγοράς
   // 1) δηλωμένο βάρος τεμαχίου συνταγής (π.χ. 1 αυγό = 60 γρ., 1 λεμόνι = 120 γρ.)
   const g1 = conversions.find(c => c.sku === info.sku && c.unit === cu)?.grams;
-  if (gp.perGram != null && g1) return { ...base, status: "ok", unitCost: gp.perGram * g1, detail: span };
+  if (g1 && g1 > 0) {
+    // 1α) Έχουμε perGram (αγορά σε κιλά ή άλλη μονάδα με γνωστό βάρος)
+    if (gp.perGram != null) return { ...base, status: "ok", unitCost: gp.perGram * g1, detail: span };
+    // 1β) Δεν έχουμε perGram, αλλά υπάρχει κάποια μονάδα αγοράς με δηλωμένο βάρος ανά μονάδα
+    //     → €/cu = €/u_buy × (γρ/cu / γρ/u_buy)
+    for (const u of Object.keys(gp.perUnit)) {
+      let guGrams: number | null = null;
+      if (u === "ΚΙΛΟ" || u === "ΛΙΤΡΟ") guGrams = 1000;
+      else {
+        const uc = conversions.find(c => c.sku === info.sku && c.unit === u)?.grams ?? null;
+        if (uc && uc > 0) guGrams = uc;
+      }
+      if (guGrams && guGrams > 0) {
+        const costPerGram = gp.perUnit[u] / guGrams;
+        return { ...base, status: "ok", unitCost: costPerGram * g1, detail: `${span} · 1 ${u} = ${guGrams}γρ, 1 ${cu} = ${g1}γρ` };
+      }
+    }
+  }
   // 2) δηλωμένα «τεμάχια ανά συσκευασία» για οποιαδήποτε μονάδα αγοράς (1 ΚΙΒ = 25, 1 ΤΕΜ = 500…)
   for (const u of Object.keys(gp.perUnit)) {
     const n = conversions.find(c => c.sku === info.sku && c.unit === piecesKey(u))?.grams;
@@ -156,6 +173,10 @@ export function priceIngredient(
   }
   const packUnit = Object.keys(gp.perUnit).find(u => MULTI_UNITS.includes(u));
   if (packUnit) return { ...base, status: "needs_conversion", unitCost: 0, needUnit: piecesKey(packUnit) };
+  // 4) αγορά σε ΤΕΜ ενώ συνταγή σε ΜΑΤΣΟ (ή άλλη μη-τεμάχιο μονάδα) → 1 ΤΕΜ αγοράς = 1 cu συνταγής
+  if (cu !== "ΤΕΜΑΧΙΟ" && gp.perUnit["ΤΕΜ"] != null && !gp.multiPack["ΤΕΜ"]) {
+    return { ...base, status: "ok", unitCost: gp.perUnit["ΤΕΜ"] * ru.factor, detail: `${span} · 1 ΤΕΜ αγοράς = 1 ${cu.toLowerCase()}` };
+  }
   return { ...base, status: "needs_conversion", unitCost: 0, needUnit: cu };
 }
 
