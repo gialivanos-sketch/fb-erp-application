@@ -1851,14 +1851,16 @@ export async function fetchSkuConversions(): Promise<SkuConversion[] | null> {
 
 export async function upsertSkuConversion(sku: string, unit: string, grams: number): Promise<void> {
   if (!supabase) throw new Error("Supabase not initialized");
-  // Το constraint είναι (business_id, sku, unit) — business_id βάζει αυτόματα το default (current_business_id).
-  // Πρώτα UPDATE, αν δεν άλλαξε τίποτα τότε INSERT.
-  const { error: updErr, count } = await (supabase as any)
+  // UPDATE πρώτα — αν επέστρεψε data τότε υπήρχε → done.
+  // Αν δεν υπήρχε (data=[]) → INSERT.
+  // business_id βγαίνει από default current_business_id() στη βάση.
+  const { data: updated, error: updErr } = await (supabase as any)
     .from("sku_unit_conversions")
     .update({ grams, updated_at: new Date().toISOString() })
-    .eq("sku", sku).eq("unit", unit);
+    .eq("sku", sku).eq("unit", unit)
+    .select("id");
   if (updErr) throw updErr;
-  if ((count ?? 0) > 0) return; // updated → done
+  if (updated && updated.length > 0) return; // υπήρχε → ενημερώθηκε
   // Δεν υπήρχε → insert
   const { error: insErr } = await (supabase as any)
     .from("sku_unit_conversions")
