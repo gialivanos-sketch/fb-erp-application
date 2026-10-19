@@ -1845,8 +1845,12 @@ export async function fetchSkuConversions(): Promise<SkuConversion[] | null> {
   try {
     const rows = await fetchAllPages<any>((from, to) => (client as any).from("sku_unit_conversions")
       .select("sku, unit, grams").order("id").range(from, to));
+    console.log("[fetchSkuConversions] rows:", rows.length, rows.slice(0, 3));
     return rows.map((r: any) => ({ sku: r.sku, unit: r.unit, grams: Number(r.grams) }));
-  } catch { return null; }
+  } catch (e) {
+    console.error("[fetchSkuConversions] error:", e);
+    return null;
+  }
 }
 
 export async function upsertSkuConversion(sku: string, unit: string, grams: number): Promise<void> {
