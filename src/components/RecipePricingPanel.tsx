@@ -58,6 +58,11 @@ export default function RecipePricingPanel() {
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [linkFilter, setLinkFilter] = useState("");
   const [tier, setTier] = useState<"high" | "medium" | "none">("high");
+  // Inline δημιουργία νέας ομάδας SKU
+  const [showNewGroup, setShowNewGroup] = useState(false);
+  const [newGroupName, setNewGroupName] = useState("");
+  // Extra groups δημιουργημένες inline — προστίθενται στα candidates χωρίς reload
+  const [extraGroups, setExtraGroups] = useState<Array<{ sku: string; label: string }>>([]);
 
   useEffect(() => {
     let alive = true;
@@ -98,7 +103,14 @@ export default function RecipePricingPanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [purchaseSig]);
   const optionValue = (c: { sku: string | null; label: string }) => `${c.sku} — ${c.label}`;
-  const byOption = useMemo(() => new Map(candidates.map(c => [optionValue(c), c])), [candidates]);
+  // Συνδυάζει candidates από αγορές + extra groups που δημιουργήθηκαν inline
+  const allCandidates = useMemo<GroupCandidate[]>(() => {
+    const extra = extraGroups
+      .filter(g => !candidates.some(c => c.sku === g.sku))
+      .map(g => ({ key: g.sku, label: g.label, sku: g.sku, text: g.label, norm: normKey(g.label), normLabel: normKey(g.label), weight: 0 }));
+    return [...candidates, ...extra];
+  }, [candidates, extraGroups]);
+  const byOption = useMemo(() => new Map(allCandidates.map(c => [optionValue(c), c])), [allCandidates]);
 
   // Τιμολόγηση όλων των υλικών όλων των συνταγών
   const analysis = useMemo(() => {
@@ -276,6 +288,30 @@ export default function RecipePricingPanel() {
     } finally { setBusy(false); }
   }
 
+  async function createSkuGroupInline(ingredientName: string) {
+    const label = newGroupName.trim();
+    if (!label) { setMsg({ ok: false, text: gr ? "Γράψε όνομα ομάδας." : "Enter group name." }); return; }
+    // Υπολογισμός αυτόματου SKU από τα υπάρχοντα candidates + extraGroups
+    const allSkus = [...candidates.map(c => c.sku), ...extraGroups.map(g => g.sku)];
+    const nums = allSkus.filter((s): s is string => !!s).map(s => s.match(/^SKU-(\d+)$/)).filter((m): m is RegExpMatchArray => !!m).map(m => parseInt(m[1], 10));
+    const next = nums.length > 0 ? Math.max(...nums) + 1 : 1;
+    const sku = `SKU-${String(next).padStart(4, "0")}`;
+    setBusy(true); setMsg(null);
+    try {
+      // Δημιουργία entry με το όνομα του υλικού ώστε να συνδεθεί αμέσως
+      await db.createProductSkuMapEntry({ productName: ingredientName, sku, finalGroup: label });
+      // Ενημέρωση local state
+      setSkuMap(prev => [...(prev ?? []), { id: -(Date.now()), productName: ingredientName, sku, finalGroup: label }]);
+      setExtraGroups(prev => [...prev, { sku, label }]);
+      setChoice(c => ({ ...c, [ingredientName]: `${sku} — ${label}` }));
+      setNewGroupName("");
+      setShowNewGroup(false);
+      setMsg({ ok: true, text: gr ? `✅ Νέα ομάδα ${sku} — ${label} · συνδέθηκε με «${ingredientName}»` : `✅ Created ${sku} — ${label}` });
+    } catch (err) {
+      setMsg({ ok: false, text: (gr ? "Αποτυχία: " : "Failed: ") + String((err as { message?: string })?.message ?? err) });
+    } finally { setBusy(false); }
+  }
+
   async function switchToPieces(label: string, rows: { id: number; qty: number; unit: string }[]) {
     const qtys = new Map<string, number>();
     for (const r of rows) { const k = `${r.qty} ${r.unit.toLowerCase()}`; qtys.set(k, (qtys.get(k) ?? 0) + 1); }
@@ -373,7 +409,25 @@ export default function RecipePricingPanel() {
 
           {tab === "link" && (
             <div className="p-4">
-              <datalist id="sku-groups">{candidates.map(c => <option key={c.key} value={optionValue(c)} />)}</datalist>
+              <datalist id="sku-groups">{allCandidates.map(c => <option key={c.key} value={optionValue(c)} />)}</datalist>
+              {/* Δημιουργία νέας ομάδας SKU inline */}
+              <div className="mb-3">
+                {!showNewGroup
+                  ? <button onClick={() => setShowNewGroup(true)} className="text-xs text-blue-600 hover:underline">➕ {gr ? "Δημιουργία νέας ομάδας SKU" : "Create new SKU group"}</button>
+                  : (
+                    <div className="flex flex-wrap items-center gap-2 p-3 bg-blue-50 rounded-lg border border-blue-200">
+                      <span className="text-sm font-medium text-blue-800">{gr ? "Νέα ομάδα:" : "New group:"}</span>
+                      <input className="erp-input text-sm py-1 max-w-xs" placeholder={gr ? "Όνομα ομάδας (π.χ. ΠΑΤΖΑΡΙ ΦΡΕΣΚΟ)" : "Group name"}
+                        value={newGroupName} onChange={e => setNewGroupName(e.target.value)}
+                        onKeyDown={e => { if (e.key === "Enter" && filteredUnlinked.length > 0) createSkuGroupInline(filteredUnlinked[0].name); }} autoFocus />
+                      <span className="text-xs text-slate-500">{gr ? "SKU: αυτόματο" : "SKU: auto"}</span>
+                      <button disabled={busy || !newGroupName.trim()} onClick={() => { const sel = filteredUnlinked.find(u => !byOption.has(tier !== "high" ? chosenOrTop(u.name) : chosen(u.name))) ?? filteredUnlinked[0]; if (sel) createSkuGroupInline(sel.name); }} className="erp-btn-primary text-xs px-3 py-1">{gr ? "Δημιουργία" : "Create"}</button>
+                      <button onClick={() => { setShowNewGroup(false); setNewGroupName(""); }} className="erp-btn-secondary text-xs px-2 py-1">✕</button>
+                      <span className="text-[11px] text-slate-400">{gr ? "Δημιουργεί νέο SKU και συνδέει αυτόματα το πρώτο υλικό της λίστας." : "Creates SKU and links first ingredient."}</span>
+                    </div>
+                  )
+                }
+              </div>
               <div className="flex flex-wrap gap-2 mb-3 text-sm">
                 {([["high", gr ? "✅ Βέβαιες προτάσεις" : "Confident"], ["medium", gr ? "❓ Πιθανές — έλεγξε" : "Possible"], ["none", gr ? "✖ Χωρίς πρόταση" : "No suggestion"]] as const).map(([k, l]) => (
                   <button key={k} onClick={() => setTier(k)} className={`px-3 py-1 rounded-full border ${tier === k ? "bg-slate-800 text-white border-slate-800" : "bg-white text-slate-600 border-slate-200"}`}>{l} ({tierCount[k]})</button>
