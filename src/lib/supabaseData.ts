@@ -1851,32 +1851,26 @@ export async function fetchSkuConversions(): Promise<SkuConversion[] | null> {
 
 export async function upsertSkuConversion(sku: string, unit: string, grams: number): Promise<void> {
   if (!supabase) throw new Error("Supabase not initialized");
-  // delete+insert: αξιόπιστο ανεξάρτητα από constraint schema
-  const delRes = await (supabase as any).from("sku_unit_conversions").delete().eq("sku", sku).eq("unit", unit);
-  console.log("[conv] delete", sku, unit, "→", delRes.error ?? "ok", "count:", delRes.count);
-  if (delRes.error) throw delRes.error;
-  const insRes = await (supabase as any).from("sku_unit_conversions")
-    .insert({ sku, unit, grams, updated_at: new Date().toISOString() })
-    .select();
-  console.log("[conv] insert", sku, unit, grams, "→", insRes.error ?? "ok", "data:", JSON.stringify(insRes.data));
-  if (insRes.error) throw insRes.error;
+  // Το constraint είναι (business_id, sku, unit) — business_id βάζει αυτόματα το default (current_business_id).
+  // Πρώτα UPDATE, αν δεν άλλαξε τίποτα τότε INSERT.
+  const { error: updErr, count } = await (supabase as any)
+    .from("sku_unit_conversions")
+    .update({ grams, updated_at: new Date().toISOString() })
+    .eq("sku", sku).eq("unit", unit);
+  if (updErr) throw updErr;
+  if ((count ?? 0) > 0) return; // updated → done
+  // Δεν υπήρχε → insert
+  const { error: insErr } = await (supabase as any)
+    .from("sku_unit_conversions")
+    .insert({ sku, unit, grams });
+  if (insErr) throw insErr;
 }
 
 export async function upsertSkuConversions(rows: { sku: string; unit: string; grams: number }[]): Promise<void> {
   if (!supabase) throw new Error("Supabase not initialized");
   if (rows.length === 0) return;
-  const now = new Date().toISOString();
-  // Delete υπάρχοντα για αυτά τα (sku,unit) ζεύγη, μετά insert
-  for (let i = 0; i < rows.length; i += 100) {
-    const batch = rows.slice(i, i + 100);
-    for (const r of batch) {
-      const { error } = await (supabase as any).from("sku_unit_conversions")
-        .delete().eq("sku", r.sku).eq("unit", r.unit);
-      if (error) throw error;
-    }
-    const { error } = await (supabase as any).from("sku_unit_conversions")
-      .insert(batch.map(r => ({ ...r, updated_at: now })));
-    if (error) throw error;
+  for (const r of rows) {
+    await upsertSkuConversion(r.sku, r.unit, r.grams);
   }
 }
 
