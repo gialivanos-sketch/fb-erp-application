@@ -201,13 +201,22 @@ function longStems(s: string): string[] {
   return words(s).map(w => w.slice(0, Math.max(4, w.length - 2)));
 }
 
-/** true αν κάποια λέξη του υλικού ΔΕΝ υπάρχει ολόκληρη (χωρίς κατάληξη) στην ομάδα — πιθανό λάθος σύνδεσης. */
+/** true αν η κύρια λέξη του υλικού ΔΕΝ υπάρχει στην ομάδα — πιθανό λάθος σύνδεσης.
+ *  Αρκεί η 1η λέξη του υλικού να ταιριάζει με την 1η λέξη της ομάδας (π.χ. ΔΑΦΝΗ → ΔΑΦΝΗ ΦΥΛΛΟ = ΟΚ).
+ */
 export function linkLooksWrong(ingredientName: string, groupText: string): boolean {
   const t = normKey(groupText);
   const ls = longStems(ingredientName);
   if (ls.length === 0) return false;
-  // αρκεί η 1η (κύρια) λέξη να υπάρχει ολόκληρη
-  return !t.includes(ls[0]);
+  // Αν η 1η λέξη βρέθηκε στο κείμενο της ομάδας → ΟΚ
+  if (t.includes(ls[0])) return false;
+  // Επιπλέον: αν η 1η λέξη του υλικού ταιριάζει με τη 1η λέξη της ομάδας (stem) → ΟΚ
+  const groupFirstWord = words(groupText)[0];
+  if (groupFirstWord) {
+    const groupFirstStem = groupFirstWord.slice(0, Math.max(4, groupFirstWord.length - 2));
+    if (groupFirstStem === ls[0]) return false;
+  }
+  return true;
 }
 
 export interface GroupCandidate {
