@@ -281,7 +281,8 @@ export default function SkuMappingPage() {
 
   async function handleCreateNew() {
     if (!newProductName.trim() || !newGroup.trim()) return;
-    const skuToUse = newSku.trim() || nextAutoSku;
+    // Αν ο χρήστης δεν έχει πληκτρολογήσει SKU, παίρνουμε τον επόμενο από τη βάση
+    const skuToUse = newSku.trim() || `SKU-${String(await db.fetchNextSkuNumber()).padStart(4, "0")}`;
     setCreating(true);
     try {
       await db.createProductSkuMapEntry({
@@ -577,8 +578,8 @@ export default function SkuMappingPage() {
             />
 
             <button
-              onClick={() => {
-                const sku = (bulkNewSku.trim() || nextAutoSku);
+              onClick={async () => {
+                const sku = bulkNewSku.trim() || `SKU-${String(await db.fetchNextSkuNumber()).padStart(4, "0")}`;
                 handleBulkMerge(sku, bulkNewGroup.trim());
               }}
               disabled={bulkBusy || !bulkNewGroup.trim()}
