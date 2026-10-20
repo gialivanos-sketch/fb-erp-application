@@ -61,6 +61,7 @@ export default function RecipePricingPanel() {
   // Inline δημιουργία νέας ομάδας SKU
   const [showNewGroup, setShowNewGroup] = useState(false);
   const [newGroupName, setNewGroupName] = useState("");
+  const [newGroupTarget, setNewGroupTarget] = useState<string | null>(null); // υλικό για το οποίο φτιάχνουμε νέα ομάδα
   // Extra groups δημιουργημένες inline — προστίθενται στα candidates χωρίς reload
   const [extraGroups, setExtraGroups] = useState<Array<{ sku: string; label: string }>>([]);
 
@@ -408,24 +409,18 @@ export default function RecipePricingPanel() {
           {tab === "link" && (
             <div className="p-4">
               <datalist id="sku-groups">{allCandidates.map(c => <option key={c.key} value={optionValue(c)} />)}</datalist>
-              {/* Δημιουργία νέας ομάδας SKU inline */}
-              <div className="mb-3">
-                {!showNewGroup
-                  ? <button onClick={() => setShowNewGroup(true)} className="text-xs text-blue-600 hover:underline">➕ {gr ? "Δημιουργία νέας ομάδας SKU" : "Create new SKU group"}</button>
-                  : (
-                    <div className="flex flex-wrap items-center gap-2 p-3 bg-blue-50 rounded-lg border border-blue-200">
-                      <span className="text-sm font-medium text-blue-800">{gr ? "Νέα ομάδα:" : "New group:"}</span>
-                      <input className="erp-input text-sm py-1 max-w-xs" placeholder={gr ? "Όνομα ομάδας (π.χ. ΠΑΤΖΑΡΙ ΦΡΕΣΚΟ)" : "Group name"}
-                        value={newGroupName} onChange={e => setNewGroupName(e.target.value)}
-                        onKeyDown={e => { if (e.key === "Enter" && filteredUnlinked.length > 0) createSkuGroupInline(filteredUnlinked[0].name); }} autoFocus />
-                      <span className="text-xs text-slate-500">{gr ? "SKU: αυτόματο" : "SKU: auto"}</span>
-                      <button disabled={busy || !newGroupName.trim()} onClick={() => { const sel = filteredUnlinked.find(u => !byOption.has(tier !== "high" ? chosenOrTop(u.name) : chosen(u.name))) ?? filteredUnlinked[0]; if (sel) createSkuGroupInline(sel.name); }} className="erp-btn-primary text-xs px-3 py-1">{gr ? "Δημιουργία" : "Create"}</button>
-                      <button onClick={() => { setShowNewGroup(false); setNewGroupName(""); }} className="erp-btn-secondary text-xs px-2 py-1">✕</button>
-                      <span className="text-[11px] text-slate-400">{gr ? "Δημιουργεί νέο SKU και συνδέει αυτόματα το πρώτο υλικό της λίστας." : "Creates SKU and links first ingredient."}</span>
-                    </div>
-                  )
-                }
-              </div>
+              {/* Δημιουργία νέας ομάδας SKU inline — εμφανίζεται anchored στο συγκεκριμένο υλικό */}
+              {showNewGroup && newGroupTarget && (
+                <div className="mb-3 flex flex-wrap items-center gap-2 p-3 bg-blue-50 rounded-lg border border-blue-200">
+                  <span className="text-sm font-medium text-blue-800">{gr ? "Νέα ομάδα για" : "New group for"} <span className="font-bold">«{newGroupTarget}»</span>:</span>
+                  <input className="erp-input text-sm py-1 max-w-xs" placeholder={gr ? "Όνομα ομάδας (π.χ. ΠΑΤΖΑΡΙ ΦΡΕΣΚΟ)" : "Group name"}
+                    value={newGroupName} onChange={e => setNewGroupName(e.target.value)}
+                    onKeyDown={e => { if (e.key === "Enter" && newGroupTarget) createSkuGroupInline(newGroupTarget); }} autoFocus />
+                  <span className="text-xs text-slate-500">{gr ? "SKU: αυτόματο" : "SKU: auto"}</span>
+                  <button disabled={busy || !newGroupName.trim()} onClick={() => createSkuGroupInline(newGroupTarget)} className="erp-btn-primary text-xs px-3 py-1">{gr ? "Δημιουργία" : "Create"}</button>
+                  <button onClick={() => { setShowNewGroup(false); setNewGroupName(""); setNewGroupTarget(null); }} className="erp-btn-secondary text-xs px-2 py-1">✕</button>
+                </div>
+              )}
               <div className="flex flex-wrap gap-2 mb-3 text-sm">
                 {([["high", gr ? "✅ Βέβαιες προτάσεις" : "Confident"], ["medium", gr ? "❓ Πιθανές — έλεγξε" : "Possible"], ["none", gr ? "✖ Χωρίς πρόταση" : "No suggestion"]] as const).map(([k, l]) => (
                   <button key={k} onClick={() => setTier(k)} className={`px-3 py-1 rounded-full border ${tier === k ? "bg-slate-800 text-white border-slate-800" : "bg-white text-slate-600 border-slate-200"}`}>{l} ({tierCount[k]})</button>
@@ -473,7 +468,10 @@ export default function RecipePricingPanel() {
                               placeholder={gr ? "γράψε για αναζήτηση…" : "type to search…"}
                               onChange={e => setChoice(c => ({ ...c, [u.name]: e.target.value }))} />
                           </td>
-                          <td><button disabled={busy || !valid} onClick={() => saveLinks([u.name], tier !== "high")} className="erp-btn-secondary text-xs px-2 py-1">✓</button></td>
+                          <td className="flex gap-1">
+                            <button disabled={busy || !valid} onClick={() => saveLinks([u.name], tier !== "high")} className="erp-btn-secondary text-xs px-2 py-1">✓</button>
+                            <button disabled={busy} title={gr ? "Δημιούργησε νέα ομάδα για αυτό το υλικό" : "Create new SKU group for this ingredient"} onClick={() => { setNewGroupTarget(u.name); setNewGroupName(""); setShowNewGroup(true); setTimeout(() => document.querySelector<HTMLInputElement>(".bg-blue-50 input")?.focus(), 50); }} className="erp-btn-secondary text-xs px-2 py-1">➕</button>
+                          </td>
                         </tr>
                       );
                     })}
