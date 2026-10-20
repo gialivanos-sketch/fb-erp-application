@@ -291,10 +291,8 @@ export default function RecipePricingPanel() {
   async function createSkuGroupInline(ingredientName: string) {
     const label = newGroupName.trim();
     if (!label) { setMsg({ ok: false, text: gr ? "Γράψε όνομα ομάδας." : "Enter group name." }); return; }
-    // Υπολογισμός αυτόματου SKU από τα υπάρχοντα candidates + extraGroups
-    const allSkus = [...candidates.map(c => c.sku), ...extraGroups.map(g => g.sku)];
-    const nums = allSkus.filter((s): s is string => !!s).map(s => s.match(/^SKU-(\d+)$/)).filter((m): m is RegExpMatchArray => !!m).map(m => parseInt(m[1], 10));
-    const next = nums.length > 0 ? Math.max(...nums) + 1 : 1;
+    // Υπολογισμός αυτόματου SKU από τη ΒΑΣΗ (όχι client-side) για να αποφύγουμε duplicates
+    const next = await db.fetchNextSkuNumber();
     const sku = `SKU-${String(next).padStart(4, "0")}`;
     setBusy(true); setMsg(null);
     try {

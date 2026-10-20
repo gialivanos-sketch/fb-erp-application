@@ -1720,6 +1720,23 @@ export async function fetchProductSkuMap(): Promise<ProductSkuMapEntry[]> {
   }));
 }
 
+/** Επιστρέφει τον επόμενο διαθέσιμο αριθμό SKU από τη βάση — thread-safe. */
+export async function fetchNextSkuNumber(): Promise<number> {
+  if (!supabase) throw new Error("Supabase not initialized");
+  const client = supabase as any;
+  // Παίρνουμε το μέγιστο SKU-XXXX από τη βάση (όχι από client state)
+  const { data, error } = await client
+    .from("product_sku_map")
+    .select("sku")
+    .like("sku", "SKU-%")
+    .order("sku", { ascending: false })
+    .limit(1);
+  if (error) throw error;
+  if (!data || data.length === 0) return 1;
+  const m = (data[0].sku as string).match(/^SKU-(\d+)$/);
+  return m ? parseInt(m[1], 10) + 1 : 1;
+}
+
 export async function createProductSkuMapEntry(input: { productName: string; sku: string; finalGroup: string }): Promise<void> {
   if (!supabase) throw new Error("Supabase not initialized");
   const { error } = await (supabase as any).from("product_sku_map").insert({
