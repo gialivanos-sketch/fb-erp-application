@@ -253,6 +253,96 @@ export default function DraftOrderPage() {
     }
   }
 
+  function buildSupplierPdfHtml(supName: string, supEmail: string, groupNet: number, groupVat: number, groupGross: number, groupItems: typeof items, today: string) {
+    const rows = groupItems.map((item, idx) => {
+      const qty = item.orderedQuantity % 1 === 0 ? item.orderedQuantity.toFixed(0) : item.orderedQuantity.toFixed(3);
+      const bg = idx % 2 === 0 ? "#f0f0f0" : "#ffffff";
+      return `<tr style="background:${bg}">
+        <td style="padding:5px 8px;border:1px solid #aaaaaa;font-size:10px">${item.productName}</td>
+        <td style="padding:5px 8px;border:1px solid #aaaaaa;text-align:center;font-size:10px">${qty}</td>
+        <td style="padding:5px 8px;border:1px solid #aaaaaa;text-align:right;font-size:10px">${item.basePrice.toFixed(2)}</td>
+        <td style="padding:5px 8px;border:1px solid #aaaaaa;text-align:center;font-size:10px">${item.unit}</td>
+        <td style="padding:5px 8px;border:1px solid #aaaaaa;text-align:right;font-size:10px">${item.grossAmount.toFixed(2)}</td>
+      </tr>`;
+    }).join("");
+
+    const pageHtml = `
+    <div style="font-family:Arial,sans-serif">
+      <div style="background:#2a6f4e;color:#fff;padding:10px 14px;font-size:15px;font-weight:700;border:1px solid #aaaaaa">
+        ${bizName} &nbsp;–&nbsp; ORDER FORM
+      </div>
+      <table style="width:100%;border-collapse:collapse;margin-bottom:0">
+        <colgroup><col style="width:22%"><col style="width:23%"><col style="width:5%"><col style="width:28%"><col style="width:22%"></colgroup>
+        <tr>
+          <td style="background:#2a6f4e;color:#fff;font-weight:700;font-size:10px;padding:5px 8px;border:1px solid #aaaaaa">Προμηθευτής</td>
+          <td style="background:#fff;font-weight:700;font-size:10px;padding:5px 8px;border:1px solid #aaaaaa">${supName}</td>
+          <td style="border:none"></td>
+          <td style="background:#2a6f4e;color:#fff;font-weight:700;font-size:10px;padding:5px 8px;border:1px solid #aaaaaa;text-align:right">Ημερομηνία</td>
+          <td style="background:#fff;font-weight:700;font-size:10px;padding:5px 8px;border:1px solid #aaaaaa">${today}</td>
+        </tr>
+        <tr>
+          <td style="background:#2a6f4e;color:#fff;font-weight:700;font-size:10px;padding:5px 8px;border:1px solid #aaaaaa">Email</td>
+          <td style="background:#fff;font-weight:700;font-size:10px;padding:5px 8px;border:1px solid #aaaaaa">${supEmail}</td>
+          <td style="border:none"></td>
+          <td style="background:#2a6f4e;color:#fff;font-weight:700;font-size:10px;padding:5px 8px;border:1px solid #aaaaaa;text-align:right">Αριθμός Παραγγελίας</td>
+          <td style="background:#fff;font-weight:700;font-size:10px;padding:5px 8px;border:1px solid #aaaaaa">${orderNum}</td>
+        </tr>
+        <tr>
+          <td style="background:#2a6f4e;color:#fff;font-weight:700;font-size:10px;padding:5px 8px;border:1px solid #aaaaaa">Αριθμός Τιμολογίου</td>
+          <td style="background:#fff;font-weight:700;font-size:10px;padding:5px 8px;border:1px solid #aaaaaa">${invoiceNumber || ""}</td>
+          <td style="border:none"></td>
+          <td style="background:#2a6f4e;color:#fff;font-weight:700;font-size:10px;padding:5px 8px;border:1px solid #aaaaaa;text-align:right">Συνολική Αξία</td>
+          <td style="background:#fff;font-weight:700;font-size:10px;padding:5px 8px;border:1px solid #aaaaaa">${groupGross.toFixed(2)}</td>
+        </tr>
+        <tr>
+          <td rowspan="2" style="background:#2a6f4e;color:#fff;font-weight:700;font-size:10px;padding:5px 8px;border:1px solid #aaaaaa;vertical-align:top">Σημειώσεις</td>
+          <td rowspan="2" style="background:#fff;font-size:10px;padding:5px 8px;border:1px solid #aaaaaa;vertical-align:top">${notes || ""}</td>
+          <td style="border:none"></td>
+          <td style="background:#2a6f4e;color:#fff;font-weight:700;font-size:10px;padding:5px 8px;border:1px solid #aaaaaa;text-align:right">Καθαρή Αξία:</td>
+          <td style="background:#fff;font-weight:700;font-size:10px;padding:5px 8px;border:1px solid #aaaaaa">${groupNet.toFixed(2)}</td>
+        </tr>
+        <tr>
+          <td style="border:none"></td>
+          <td style="background:#2a6f4e;color:#fff;font-weight:700;font-size:10px;padding:5px 8px;border:1px solid #aaaaaa;text-align:right">ΦΠΑ:</td>
+          <td style="background:#fff;font-weight:700;font-size:10px;padding:5px 8px;border:1px solid #aaaaaa">${groupVat.toFixed(2)}</td>
+        </tr>
+      </table>
+      <table style="width:100%;border-collapse:collapse;margin-top:8px">
+        <colgroup><col style="width:45%"><col style="width:12%"><col style="width:15%"><col style="width:13%"><col style="width:15%"></colgroup>
+        <thead>
+          <tr style="background:#2a6f4e;color:#fff">
+            <th style="padding:6px 8px;text-align:left;font-size:10px;font-weight:700;border:1px solid #aaaaaa">Προϊόν</th>
+            <th style="padding:6px 8px;text-align:center;font-size:10px;font-weight:700;border:1px solid #aaaaaa">Ποσότητα</th>
+            <th style="padding:6px 8px;text-align:right;font-size:10px;font-weight:700;border:1px solid #aaaaaa">Τιμή Μονάδας</th>
+            <th style="padding:6px 8px;text-align:center;font-size:10px;font-weight:700;border:1px solid #aaaaaa">Μονάδα</th>
+            <th style="padding:6px 8px;text-align:right;font-size:10px;font-weight:700;border:1px solid #aaaaaa">Σύνολο</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <div style="text-align:center;margin-top:24px;font-size:9px;color:#94a3b8">
+        ${bizName} &nbsp;|&nbsp; Παραγγελία ${orderNum} &nbsp;|&nbsp; ${today}
+      </div>
+    </div>`;
+
+    return `<!DOCTYPE html><html lang="el"><head><meta charset="UTF-8">
+      <title>Παραγγελία ${orderNum} - ${supName}</title>
+      <style>
+        * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; color-adjust: exact !important; }
+        body { font-family: Arial, sans-serif; margin: 0; padding: 10mm; color: #1e293b; }
+        .print-btn { position:fixed; bottom:20px; right:20px; background:#2a6f4e; color:#fff; border:none; padding:12px 24px; font-size:14px; font-weight:700; border-radius:8px; cursor:pointer; box-shadow:0 4px 12px rgba(0,0,0,0.2); z-index:9999; }
+        .print-btn:hover { background:#1e5c3a; }
+        @media print {
+          body { padding: 0; }
+          @page { size: A4; margin: 10mm; }
+          .print-btn { display: none !important; }
+        }
+      </style>
+    </head><body>
+    <button class="print-btn" onclick="window.print()">🖨️ Εκτύπωση / Print</button>
+    ${pageHtml}</body></html>`;
+  }
+
   function handleExportPDF() {
     const today = new Date(orderDate).toLocaleDateString("el-GR", { day: "2-digit", month: "2-digit", year: "numeric" });
 
@@ -264,137 +354,20 @@ export default function DraftOrderPage() {
       groups.get(sid)!.items.push(item);
     }
 
-    let pagesHtml = "";
-    let first = true;
+    // Open a separate tab per supplier
     for (const [sid, g] of groups.entries()) {
       const sup = g.sup ?? suppliers.find(x => x.id === sid);
       const supName = sup ? (locale === "gr" ? sup.name : (sup.nameEn || sup.name)) : "—";
       const supEmail = sup?.contactEmail ?? "—";
-      const groupNet = g.items.reduce((s, i) => s + i.netAmount, 0);
-      const groupVat = g.items.reduce((s, i) => s + i.vatAmount, 0);
+      const groupNet   = g.items.reduce((s, i) => s + i.netAmount, 0);
+      const groupVat   = g.items.reduce((s, i) => s + i.vatAmount, 0);
       const groupGross = g.items.reduce((s, i) => s + i.grossAmount, 0);
 
-      const rows = g.items.map((item, idx) => {
-        const qty = item.orderedQuantity % 1 === 0 ? item.orderedQuantity.toFixed(0) : item.orderedQuantity.toFixed(3);
-        const bg = idx % 2 === 0 ? "#f0f0f0" : "#ffffff";
-        return `<tr style="background:${bg}">
-          <td style="padding:5px 8px;border:1px solid #aaaaaa;font-size:10px">${item.productName}</td>
-          <td style="padding:5px 8px;border:1px solid #aaaaaa;text-align:center;font-size:10px">${qty}</td>
-          <td style="padding:5px 8px;border:1px solid #aaaaaa;text-align:right;font-size:10px">${item.basePrice.toFixed(2)}</td>
-          <td style="padding:5px 8px;border:1px solid #aaaaaa;text-align:center;font-size:10px">${item.unit}</td>
-          <td style="padding:5px 8px;border:1px solid #aaaaaa;text-align:right;font-size:10px">${item.grossAmount.toFixed(2)}</td>
-        </tr>`;
-      }).join("");
-
-      if (!first) pagesHtml += `<div style="page-break-before:always"></div>`;
-      first = false;
-
-      pagesHtml += `
-      <div style="margin-bottom:40px;font-family:Arial,sans-serif">
-
-        <!-- Title banner — green #2A6F4E -->
-        <div style="background:#2a6f4e;color:#fff;padding:10px 14px;font-size:15px;font-weight:700;border:1px solid #aaaaaa">
-          ${bizName} &nbsp;–&nbsp; ORDER FORM
-        </div>
-
-        <!-- Info grid — 5 columns matching Excel layout -->
-        <table style="width:100%;border-collapse:collapse;margin-bottom:0">
-          <colgroup>
-            <col style="width:22%">
-            <col style="width:23%">
-            <col style="width:5%">
-            <col style="width:28%">
-            <col style="width:22%">
-          </colgroup>
-          <!-- Row 2: Supplier | Date -->
-          <tr>
-            <td style="background:#2a6f4e;color:#fff;font-weight:700;font-size:10px;padding:5px 8px;border:1px solid #aaaaaa">Προμηθευτής</td>
-            <td style="background:#fff;font-weight:700;font-size:10px;padding:5px 8px;border:1px solid #aaaaaa" colspan="1">${supName}</td>
-            <td style="background:#fff;border:none"></td>
-            <td style="background:#2a6f4e;color:#fff;font-weight:700;font-size:10px;padding:5px 8px;border:1px solid #aaaaaa;text-align:right">Ημερομηνία</td>
-            <td style="background:#fff;font-weight:700;font-size:10px;padding:5px 8px;border:1px solid #aaaaaa">${today}</td>
-          </tr>
-          <!-- Row 3: Email | Order number -->
-          <tr>
-            <td style="background:#2a6f4e;color:#fff;font-weight:700;font-size:10px;padding:5px 8px;border:1px solid #aaaaaa">Email</td>
-            <td style="background:#fff;font-weight:700;font-size:10px;padding:5px 8px;border:1px solid #aaaaaa">${supEmail}</td>
-            <td style="background:#fff;border:none"></td>
-            <td style="background:#2a6f4e;color:#fff;font-weight:700;font-size:10px;padding:5px 8px;border:1px solid #aaaaaa;text-align:right">Αριθμός Παραγγελίας</td>
-            <td style="background:#fff;font-weight:700;font-size:10px;padding:5px 8px;border:1px solid #aaaaaa">${orderNum}</td>
-          </tr>
-          <!-- Row 4: Invoice number | Total gross -->
-          <tr>
-            <td style="background:#2a6f4e;color:#fff;font-weight:700;font-size:10px;padding:5px 8px;border:1px solid #aaaaaa">Αριθμός Τιμολογίου</td>
-            <td style="background:#fff;font-weight:700;font-size:10px;padding:5px 8px;border:1px solid #aaaaaa">${invoiceNumber || ""}</td>
-            <td style="background:#fff;border:none"></td>
-            <td style="background:#2a6f4e;color:#fff;font-weight:700;font-size:10px;padding:5px 8px;border:1px solid #aaaaaa;text-align:right">Συνολική Αξία</td>
-            <td style="background:#fff;font-weight:700;font-size:10px;padding:5px 8px;border:1px solid #aaaaaa">${groupGross.toFixed(2)}</td>
-          </tr>
-          <!-- Row 5: Notes (spans 2 rows) | Καθαρή Αξία -->
-          <tr>
-            <td rowspan="2" style="background:#2a6f4e;color:#fff;font-weight:700;font-size:10px;padding:5px 8px;border:1px solid #aaaaaa;vertical-align:top">Σημειώσεις</td>
-            <td rowspan="2" style="background:#fff;font-size:10px;padding:5px 8px;border:1px solid #aaaaaa;vertical-align:top">${notes || ""}</td>
-            <td style="background:#fff;border:none"></td>
-            <td style="background:#2a6f4e;color:#fff;font-weight:700;font-size:10px;padding:5px 8px;border:1px solid #aaaaaa;text-align:right">Καθαρή Αξία:</td>
-            <td style="background:#fff;font-weight:700;font-size:10px;padding:5px 8px;border:1px solid #aaaaaa">${groupNet.toFixed(2)}</td>
-          </tr>
-          <!-- Row 6: (notes cont.) | ΦΠΑ -->
-          <tr>
-            <td style="background:#fff;border:none"></td>
-            <td style="background:#2a6f4e;color:#fff;font-weight:700;font-size:10px;padding:5px 8px;border:1px solid #aaaaaa;text-align:right">ΦΠΑ:</td>
-            <td style="background:#fff;font-weight:700;font-size:10px;padding:5px 8px;border:1px solid #aaaaaa">${groupVat.toFixed(2)}</td>
-          </tr>
-        </table>
-
-        <!-- Products table -->
-        <table style="width:100%;border-collapse:collapse;margin-top:8px">
-          <colgroup>
-            <col style="width:45%">
-            <col style="width:12%">
-            <col style="width:15%">
-            <col style="width:13%">
-            <col style="width:15%">
-          </colgroup>
-          <thead>
-            <tr style="background:#2a6f4e;color:#fff">
-              <th style="padding:6px 8px;text-align:left;font-size:10px;font-weight:700;border:1px solid #aaaaaa">Προϊόν</th>
-              <th style="padding:6px 8px;text-align:center;font-size:10px;font-weight:700;border:1px solid #aaaaaa">Ποσότητα</th>
-              <th style="padding:6px 8px;text-align:right;font-size:10px;font-weight:700;border:1px solid #aaaaaa">Τιμή Μονάδας</th>
-              <th style="padding:6px 8px;text-align:center;font-size:10px;font-weight:700;border:1px solid #aaaaaa">Μονάδα</th>
-              <th style="padding:6px 8px;text-align:right;font-size:10px;font-weight:700;border:1px solid #aaaaaa">Σύνολο</th>
-            </tr>
-          </thead>
-          <tbody>${rows}</tbody>
-        </table>
-
-        <div style="text-align:center;margin-top:24px;font-size:9px;color:#94a3b8">
-          ${bizName} &nbsp;|&nbsp; Παραγγελία ${orderNum} &nbsp;|&nbsp; ${today}
-        </div>
-      </div>`;
-    }
-
-    const html = `<!DOCTYPE html><html lang="el"><head><meta charset="UTF-8">
-      <title>Παραγγελία ${orderNum}</title>
-      <style>
-        * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; color-adjust: exact !important; }
-        body { font-family: Arial, sans-serif; margin: 20px; color: #1e293b; }
-        .print-btn { position:fixed; bottom:20px; right:20px; background:#2a6f4e; color:#fff; border:none; padding:12px 24px; font-size:14px; font-weight:700; border-radius:8px; cursor:pointer; box-shadow:0 4px 12px rgba(0,0,0,0.2); z-index:9999; }
-        .print-btn:hover { background:#1e5c3a; }
-        @media print {
-          body { margin: 0; }
-          @page { size: A4; margin: 10mm; }
-          .print-btn { display: none !important; }
-        }
-      </style>
-    </head><body>
-    <button class="print-btn" onclick="window.print()">🖨️ Εκτύπωση / Print</button>
-    ${pagesHtml}</body></html>`;
-
-    const blob = new Blob([html], { type: "text/html;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const win = window.open(url, "_blank");
-    if (win) {
-      win.onload = () => URL.revokeObjectURL(url);
+      const html = buildSupplierPdfHtml(supName, supEmail, groupNet, groupVat, groupGross, g.items, today);
+      const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const win = window.open(url, "_blank");
+      if (win) win.onload = () => URL.revokeObjectURL(url);
     }
   }
 
@@ -408,8 +381,6 @@ export default function DraftOrderPage() {
       if (!groups.has(sid)) groups.set(sid, { sup: suppliers.find(x => x.id === sid), items: [] });
       groups.get(sid)!.items.push(item);
     }
-
-    const wb = XLSX.utils.book_new();
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     type XStyle = Record<string, any>;
@@ -569,11 +540,13 @@ export default function DraftOrderPage() {
       ws["!rows"] = [{ hpt: 28 }];
 
       const sheetName = supName.replace(/[\\/*?[\]:]/g, "").substring(0, 31);
+      const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, sheetName);
-    }
 
-    const filename = `Παραγγελία_${orderNum}_${new Date(orderDate).toISOString().split("T")[0]}.xlsx`;
-    XLSX.writeFile(wb, filename);
+      const safeName = supName.replace(/[^a-zA-Z0-9Ͱ-Ͽἀ-῿_-]/g, "_").substring(0, 30);
+      const filename = `Παραγγελία_${orderNum}_${safeName}_${new Date(orderDate).toISOString().split("T")[0]}.xlsx`;
+      XLSX.writeFile(wb, filename);
+    }
   }
 
   return (
@@ -808,64 +781,6 @@ export default function DraftOrderPage() {
             </button>
             <button onClick={handleExportPDF} disabled={items.length === 0} className="erp-btn-secondary">🖨️ PDF / {t("btnPrint")}</button>
             <button onClick={handleExportExcel} disabled={items.length === 0} className="erp-btn-secondary">📊 Excel</button>
-            {items.length > 0 && (() => {
-              // Group items by supplierId to build per-supplier email buttons
-              const supplierGroups = new Map<number, { sup: typeof suppliers[0] | undefined; items: typeof items; net: number; vat: number; gross: number }>();
-              for (const item of items) {
-                const sid = item.supplierId || selectedSupplier || 0;
-                if (!supplierGroups.has(sid)) {
-                  supplierGroups.set(sid, { sup: suppliers.find(x => x.id === sid), items: [], net: 0, vat: 0, gross: 0 });
-                }
-                const g = supplierGroups.get(sid)!;
-                g.items.push(item);
-                g.net += item.netAmount;
-                g.vat += item.vatAmount;
-                g.gross += item.grossAmount;
-              }
-              function sendEmail(sid: number) {
-                const g = supplierGroups.get(sid)!;
-                const s = g.sup ?? suppliers.find(x => x.id === sid);
-                if (!s?.contactEmail) {
-                  window.alert(locale === "gr" ? "⚠️ Δεν βρέθηκε email προμηθευτή" : "⚠️ No supplier email found");
-                  return;
-                }
-                const supplierName = locale === "gr" ? s.name : (s.nameEn || s.name);
-                const today = new Date(orderDate).toLocaleDateString("el-GR", { day: "2-digit", month: "2-digit", year: "numeric" });
-                const subject = `Παραγγελία ${orderNum} – ${bizName} – ${today}`;
-
-                // Clean email body — supplier name, order number, date change automatically
-                const body = [
-                  `Αγαπητέ/ή ${supplierName},`,
-                  ``,
-                  `Σας αποστέλλουμε την παραγγελία μας με αριθμό ${orderNum} ημερομηνίας ${today}.`,
-                  ``,
-                  `Επισυνάπτεται το αρχείο PDF με τα πλήρη στοιχεία της παραγγελίας.`,
-                  ``,
-                  `Παρακαλούμε επιβεβαιώστε την παραλαβή.`,
-                  ``,
-                  `Με εκτίμηση,`,
-                  `${bizName}`,
-                ].join("\n");
-
-                // Download PDF at the same time
-                handleExportPDF();
-
-                // Open Outlook/Mail with pre-filled email
-                const url = `mailto:${s.contactEmail}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-                const a = document.createElement("a");
-                a.href = url; a.target = "_blank"; a.rel = "noopener";
-                document.body.appendChild(a); a.click(); document.body.removeChild(a);
-              }
-              return Array.from(supplierGroups.entries()).map(([sid, g]) => {
-                const sup = g.sup ?? suppliers.find(x => x.id === sid);
-                const supLabel = sup ? (locale === "gr" ? sup.name : (sup.nameEn || sup.name)) : `#${sid}`;
-                return (
-                  <button key={sid} onClick={() => sendEmail(sid)} className="erp-btn-secondary">
-                    📧 {supLabel} ({fmt(g.gross)})
-                  </button>
-                );
-              });
-            })()}
           </div>
         </div>
       </div>
