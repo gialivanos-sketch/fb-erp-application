@@ -276,13 +276,13 @@ export default function DraftOrderPage() {
 
       const rows = g.items.map((item, idx) => {
         const qty = item.orderedQuantity % 1 === 0 ? item.orderedQuantity.toFixed(0) : item.orderedQuantity.toFixed(3);
-        const bg = idx % 2 === 0 ? "#f8fafc" : "#ffffff";
+        const bg = idx % 2 === 0 ? "#f0f0f0" : "#ffffff";
         return `<tr style="background:${bg}">
-          <td style="padding:5px 6px;border-bottom:1px solid #e5e7eb">${item.productName}</td>
-          <td style="padding:5px 6px;border-bottom:1px solid #e5e7eb;text-align:center">${qty}</td>
-          <td style="padding:5px 6px;border-bottom:1px solid #e5e7eb;text-align:right">${item.basePrice.toFixed(2)} €</td>
-          <td style="padding:5px 6px;border-bottom:1px solid #e5e7eb;text-align:center">${item.unit}</td>
-          <td style="padding:5px 6px;border-bottom:1px solid #e5e7eb;text-align:right">${item.grossAmount.toFixed(2)} €</td>
+          <td style="padding:5px 8px;border:1px solid #aaaaaa;font-size:10px">${item.productName}</td>
+          <td style="padding:5px 8px;border:1px solid #aaaaaa;text-align:center;font-size:10px">${qty}</td>
+          <td style="padding:5px 8px;border:1px solid #aaaaaa;text-align:right;font-size:10px">${item.basePrice.toFixed(2)}</td>
+          <td style="padding:5px 8px;border:1px solid #aaaaaa;text-align:center;font-size:10px">${item.unit}</td>
+          <td style="padding:5px 8px;border:1px solid #aaaaaa;text-align:right;font-size:10px">${item.grossAmount.toFixed(2)}</td>
         </tr>`;
       }).join("");
 
@@ -290,64 +290,84 @@ export default function DraftOrderPage() {
       first = false;
 
       pagesHtml += `
-      <div style="margin-bottom:40px">
-        <div style="background:#1e40af;color:#fff;padding:10px 14px;font-size:15px;font-weight:700;letter-spacing:0.5px;margin-bottom:0">
+      <div style="margin-bottom:40px;font-family:Arial,sans-serif">
+
+        <!-- Title banner — green #2A6F4E -->
+        <div style="background:#2a6f4e;color:#fff;padding:10px 14px;font-size:15px;font-weight:700;border:1px solid #aaaaaa">
           ${bizName} &nbsp;–&nbsp; ORDER FORM
         </div>
-        <table style="width:100%;border-collapse:collapse;margin-bottom:14px">
+
+        <!-- Info grid — 5 columns matching Excel layout -->
+        <table style="width:100%;border-collapse:collapse;margin-bottom:0">
+          <colgroup>
+            <col style="width:22%">
+            <col style="width:23%">
+            <col style="width:5%">
+            <col style="width:28%">
+            <col style="width:22%">
+          </colgroup>
+          <!-- Row 2: Supplier | Date -->
           <tr>
-            <td style="width:22%;background:#1e40af;color:#fff;font-weight:700;font-size:10px;padding:5px 8px">Προμηθευτής</td>
-            <td style="width:28%;background:#f8fafc;border:1px solid #e2e8f0;font-size:10px;padding:5px 8px">${supName}</td>
-            <td style="width:22%;background:#1e40af;color:#fff;font-weight:700;font-size:10px;padding:5px 8px">Ημερομηνία</td>
-            <td style="width:28%;background:#f8fafc;border:1px solid #e2e8f0;font-size:10px;padding:5px 8px">${today}</td>
+            <td style="background:#2a6f4e;color:#fff;font-weight:700;font-size:10px;padding:5px 8px;border:1px solid #aaaaaa">Προμηθευτής</td>
+            <td style="background:#fff;font-weight:700;font-size:10px;padding:5px 8px;border:1px solid #aaaaaa" colspan="1">${supName}</td>
+            <td style="background:#fff;border:none"></td>
+            <td style="background:#2a6f4e;color:#fff;font-weight:700;font-size:10px;padding:5px 8px;border:1px solid #aaaaaa;text-align:right">Ημερομηνία</td>
+            <td style="background:#fff;font-weight:700;font-size:10px;padding:5px 8px;border:1px solid #aaaaaa">${today}</td>
           </tr>
+          <!-- Row 3: Email | Order number -->
           <tr>
-            <td style="background:#1e40af;color:#fff;font-weight:700;font-size:10px;padding:5px 8px">Email Επικοινωνίας</td>
-            <td style="background:#f8fafc;border:1px solid #e2e8f0;font-size:10px;padding:5px 8px">${supEmail}</td>
-            <td style="background:#1e40af;color:#fff;font-weight:700;font-size:10px;padding:5px 8px">Αριθμός Παραγγελίας</td>
-            <td style="background:#f8fafc;border:1px solid #e2e8f0;font-size:10px;padding:5px 8px">${orderNum}</td>
+            <td style="background:#2a6f4e;color:#fff;font-weight:700;font-size:10px;padding:5px 8px;border:1px solid #aaaaaa">Email</td>
+            <td style="background:#fff;font-weight:700;font-size:10px;padding:5px 8px;border:1px solid #aaaaaa">${supEmail}</td>
+            <td style="background:#fff;border:none"></td>
+            <td style="background:#2a6f4e;color:#fff;font-weight:700;font-size:10px;padding:5px 8px;border:1px solid #aaaaaa;text-align:right">Αριθμός Παραγγελίας</td>
+            <td style="background:#fff;font-weight:700;font-size:10px;padding:5px 8px;border:1px solid #aaaaaa">${orderNum}</td>
           </tr>
+          <!-- Row 4: Invoice number | Total gross -->
           <tr>
-            <td style="background:#1e40af;color:#fff;font-weight:700;font-size:10px;padding:5px 8px">Αριθμός Τιμολογίου</td>
-            <td style="background:#f8fafc;border:1px solid #e2e8f0;font-size:10px;padding:5px 8px">${invoiceNumber || ""}</td>
-            <td style="background:#1e40af;color:#fff;font-weight:700;font-size:10px;padding:5px 8px">Συνολική Αξία</td>
-            <td style="background:#f8fafc;border:1px solid #e2e8f0;font-size:10px;padding:5px 8px;font-weight:700">${groupGross.toFixed(2)} EUR</td>
+            <td style="background:#2a6f4e;color:#fff;font-weight:700;font-size:10px;padding:5px 8px;border:1px solid #aaaaaa">Αριθμός Τιμολογίου</td>
+            <td style="background:#fff;font-weight:700;font-size:10px;padding:5px 8px;border:1px solid #aaaaaa">${invoiceNumber || ""}</td>
+            <td style="background:#fff;border:none"></td>
+            <td style="background:#2a6f4e;color:#fff;font-weight:700;font-size:10px;padding:5px 8px;border:1px solid #aaaaaa;text-align:right">Συνολική Αξία</td>
+            <td style="background:#fff;font-weight:700;font-size:10px;padding:5px 8px;border:1px solid #aaaaaa">${groupGross.toFixed(2)}</td>
           </tr>
+          <!-- Row 5: Notes (spans 2 rows) | Καθαρή Αξία -->
           <tr>
-            <td style="background:#1e40af;color:#fff;font-weight:700;font-size:10px;padding:5px 8px">Σημειώσεις</td>
-            <td colspan="3" style="background:#f8fafc;border:1px solid #e2e8f0;font-size:10px;padding:5px 8px">${notes || ""}</td>
+            <td rowspan="2" style="background:#2a6f4e;color:#fff;font-weight:700;font-size:10px;padding:5px 8px;border:1px solid #aaaaaa;vertical-align:top">Σημειώσεις</td>
+            <td rowspan="2" style="background:#fff;font-size:10px;padding:5px 8px;border:1px solid #aaaaaa;vertical-align:top">${notes || ""}</td>
+            <td style="background:#fff;border:none"></td>
+            <td style="background:#2a6f4e;color:#fff;font-weight:700;font-size:10px;padding:5px 8px;border:1px solid #aaaaaa;text-align:right">Καθαρή Αξία:</td>
+            <td style="background:#fff;font-weight:700;font-size:10px;padding:5px 8px;border:1px solid #aaaaaa">${groupNet.toFixed(2)}</td>
+          </tr>
+          <!-- Row 6: (notes cont.) | ΦΠΑ -->
+          <tr>
+            <td style="background:#fff;border:none"></td>
+            <td style="background:#2a6f4e;color:#fff;font-weight:700;font-size:10px;padding:5px 8px;border:1px solid #aaaaaa;text-align:right">ΦΠΑ:</td>
+            <td style="background:#fff;font-weight:700;font-size:10px;padding:5px 8px;border:1px solid #aaaaaa">${groupVat.toFixed(2)}</td>
           </tr>
         </table>
-        <table style="width:100%;border-collapse:collapse">
+
+        <!-- Products table -->
+        <table style="width:100%;border-collapse:collapse;margin-top:8px">
+          <colgroup>
+            <col style="width:45%">
+            <col style="width:12%">
+            <col style="width:15%">
+            <col style="width:13%">
+            <col style="width:15%">
+          </colgroup>
           <thead>
-            <tr style="background:#1e40af;color:#fff">
-              <th style="padding:6px 8px;text-align:left;font-size:10px;font-weight:700">Προϊόν</th>
-              <th style="padding:6px 8px;text-align:center;font-size:10px;font-weight:700">Ποσότητα</th>
-              <th style="padding:6px 8px;text-align:right;font-size:10px;font-weight:700">Τιμή Μονάδας</th>
-              <th style="padding:6px 8px;text-align:center;font-size:10px;font-weight:700">Μονάδα</th>
-              <th style="padding:6px 8px;text-align:right;font-size:10px;font-weight:700">Σύνολο</th>
+            <tr style="background:#2a6f4e;color:#fff">
+              <th style="padding:6px 8px;text-align:left;font-size:10px;font-weight:700;border:1px solid #aaaaaa">Προϊόν</th>
+              <th style="padding:6px 8px;text-align:center;font-size:10px;font-weight:700;border:1px solid #aaaaaa">Ποσότητα</th>
+              <th style="padding:6px 8px;text-align:right;font-size:10px;font-weight:700;border:1px solid #aaaaaa">Τιμή Μονάδας</th>
+              <th style="padding:6px 8px;text-align:center;font-size:10px;font-weight:700;border:1px solid #aaaaaa">Μονάδα</th>
+              <th style="padding:6px 8px;text-align:right;font-size:10px;font-weight:700;border:1px solid #aaaaaa">Σύνολο</th>
             </tr>
           </thead>
           <tbody>${rows}</tbody>
         </table>
-        <table style="width:100%;border-collapse:collapse;margin-top:2px">
-          <tr>
-            <td colspan="3"></td>
-            <td style="background:#f8fafc;border-bottom:1px solid #cbd5e1;padding:5px 8px;text-align:right;font-size:10px;color:#666">Καθαρή Αξία:</td>
-            <td style="background:#f8fafc;border-bottom:1px solid #cbd5e1;padding:5px 8px;text-align:right;font-size:10px;color:#666;width:100px">${groupNet.toFixed(2)} EUR</td>
-          </tr>
-          <tr>
-            <td colspan="3"></td>
-            <td style="background:#f8fafc;border-bottom:1px solid #cbd5e1;padding:5px 8px;text-align:right;font-size:10px;color:#666">ΦΠΑ:</td>
-            <td style="background:#f8fafc;border-bottom:1px solid #cbd5e1;padding:5px 8px;text-align:right;font-size:10px;color:#666">${groupVat.toFixed(2)} EUR</td>
-          </tr>
-          <tr>
-            <td colspan="3"></td>
-            <td style="background:#1e3a8a;color:#fff;padding:6px 8px;text-align:right;font-size:11px;font-weight:700">ΣΥΝΟΛΟ:</td>
-            <td style="background:#1e3a8a;color:#fff;padding:6px 8px;text-align:right;font-size:11px;font-weight:700">${groupGross.toFixed(2)} EUR</td>
-          </tr>
-        </table>
-        <div style="text-align:center;margin-top:30px;font-size:9px;color:#94a3b8">
+
+        <div style="text-align:center;margin-top:24px;font-size:9px;color:#94a3b8">
           ${bizName} &nbsp;|&nbsp; Παραγγελία ${orderNum} &nbsp;|&nbsp; ${today}
         </div>
       </div>`;
