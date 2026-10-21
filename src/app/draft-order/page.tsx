@@ -824,7 +824,6 @@ export default function DraftOrderPage() {
               }
               function sendEmail(sid: number) {
                 const g = supplierGroups.get(sid)!;
-                // Re-lookup supplier at call time in case async load finished after initial render
                 const s = g.sup ?? suppliers.find(x => x.id === sid);
                 if (!s?.contactEmail) {
                   window.alert(locale === "gr" ? "⚠️ Δεν βρέθηκε email προμηθευτή" : "⚠️ No supplier email found");
@@ -833,51 +832,26 @@ export default function DraftOrderPage() {
                 const supplierName = locale === "gr" ? s.name : (s.nameEn || s.name);
                 const today = new Date(orderDate).toLocaleDateString("el-GR", { day: "2-digit", month: "2-digit", year: "numeric" });
                 const subject = `Παραγγελία ${orderNum} – ${bizName} – ${today}`;
-                const SEP = "================================================";
-                // Build pipe-separated rows — readable in any email font
-                const tableRows = g.items.map((item, idx) => {
-                  const qty = item.orderedQuantity % 1 === 0 ? item.orderedQuantity.toFixed(0) : item.orderedQuantity.toFixed(3);
-                  const name = item.productName.length > 32 ? item.productName.substring(0, 31) + "…" : item.productName;
-                  return `${String(idx + 1).padStart(2)}. ${name.padEnd(33)} | ${(qty + " " + item.unit).padEnd(9)} | ${(item.basePrice.toFixed(2) + " EUR").padStart(10)} | ${(item.grossAmount.toFixed(2) + " EUR").padStart(10)}`;
-                }).join("\n");
+
+                // Clean email body — supplier name, order number, date change automatically
                 const body = [
-                  `${bizName} — ΠΑΡΑΓΓΕΛΙΑ`,
-                  SEP,
-                  `Προμηθευτής   : ${supplierName}`,
-                  `Email         : ${s.contactEmail}`,
-                  `Ημερομηνία    : ${today}`,
-                  `ID Παραγγελίας: ${orderNum}`,
-                  invoiceNumber ? `Αρ. Τιμολογίου: ${invoiceNumber}` : "",
-                  SEP,
+                  `Αγαπητέ/ή ${supplierName},`,
                   ``,
-                  `Αγαπητοί,`,
-                  `Σας αποστέλλουμε την παραγγελία μας.`,
-                  `Παρακαλούμε επιβεβαιώστε διαθεσιμότητα και ημερομηνία παράδοσης.`,
+                  `Σας αποστέλλουμε την παραγγελία μας με αριθμό ${orderNum} ημερομηνίας ${today}.`,
                   ``,
-                  `  #  ${"ΠΡΟΪΟΝ".padEnd(33)} | ${"ΠΟΣΟΤΗΤΑ".padEnd(9)} |   ΤΙΜΗ/ΜΟΝ |     ΣΥΝΟΛΟ`,
-                  `     ${"-".repeat(33)}-+-${"-".repeat(9)}-+${"-".repeat(11)}-+${"-".repeat(11)}`,
-                  tableRows,
-                  `     ${"-".repeat(33)}-+-${"-".repeat(9)}-+${"-".repeat(11)}-+${"-".repeat(11)}`,
-                  `${"".padEnd(48)}  Καθαρή Αξία : ${g.net.toFixed(2)} EUR`,
-                  `${"".padEnd(48)}  ΦΠΑ         : ${g.vat.toFixed(2)} EUR`,
-                  `${"".padEnd(48)}  ΣΥΝΟΛΟ      : ${g.gross.toFixed(2)} EUR`,
-                  SEP,
-                  notes ? `Σημειώσεις: ${notes}` : "",
+                  `Επισυνάπτεται το αρχείο PDF με τα πλήρη στοιχεία της παραγγελίας.`,
+                  ``,
+                  `Παρακαλούμε επιβεβαιώστε την παραλαβή.`,
                   ``,
                   `Με εκτίμηση,`,
                   `${bizName}`,
-                ].filter(l => l !== undefined).join("\n");
-                const s_enc = encodeURIComponent(subject);
-                const b_enc = encodeURIComponent(body);
-                const fullUrl = `mailto:${s.contactEmail}?subject=${s_enc}&body=${b_enc}`;
-                // Fallback: items only if full URL too long for mobile
-                const shortBody = [
-                  `Παραγγελία ${orderNum} – ${supplierName} – ${today}`,
-                  tableRows,
-                  `ΣΥΝΟΛΟ: ${g.gross.toFixed(2)} EUR`,
                 ].join("\n");
-                const shortUrl = `mailto:${s.contactEmail}?subject=${s_enc}&body=${encodeURIComponent(shortBody)}`;
-                const url = fullUrl.length < 2000 ? fullUrl : shortUrl;
+
+                // Download PDF at the same time
+                handleExportPDF();
+
+                // Open Outlook/Mail with pre-filled email
+                const url = `mailto:${s.contactEmail}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
                 const a = document.createElement("a");
                 a.href = url; a.target = "_blank"; a.rel = "noopener";
                 document.body.appendChild(a); a.click(); document.body.removeChild(a);
