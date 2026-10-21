@@ -4,7 +4,7 @@ import { useApp } from "@/lib/context";
 import { PageHeader, Badge, KpiCard } from "@/components/shared";
 import * as db from "@/lib/supabaseData";
 import type { SupplierProduct } from "@/lib/types";
-import * as XLSX from "xlsx";
+import * as XLSX from "xlsx-js-style";
 import { useBusinessName } from "@/lib/useBusinessName";
 
 interface OrderItemDraft {
