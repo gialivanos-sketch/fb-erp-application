@@ -216,7 +216,7 @@ export default function SupplierQuotesPage() {
       </FilterBar>
 
       <div className="flex gap-6">
-        <div className={`flex-1 ${showBasket ? "hidden lg:block lg:w-2/3" : ""}`}>
+        <div className={`flex-1 min-w-0`}>
           <div className="erp-card">
             <div className="erp-card-header flex items-center justify-between">
               <h3 className="font-semibold">{t("supplierProducts")}</h3>
@@ -273,7 +273,7 @@ export default function SupplierQuotesPage() {
         </div>
 
         {showBasket && (
-          <div className="w-full lg:w-1/3">
+          <div className="w-full lg:w-80 flex-shrink-0">
             <div className="erp-card sticky top-4">
               <div className="erp-card-header flex items-center justify-between">
                 <h3 className="font-semibold">🛒 {locale === "gr" ? "Ενεργό Καλάθι" : "Active Basket"}</h3>

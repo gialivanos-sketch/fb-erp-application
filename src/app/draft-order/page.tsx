@@ -357,12 +357,17 @@ export default function DraftOrderPage() {
       <title>Παραγγελία ${orderNum}</title>
       <style>
         body { font-family: Arial, sans-serif; margin: 20px; color: #1e293b; }
+        .print-btn { position:fixed; bottom:20px; right:20px; background:#1e40af; color:#fff; border:none; padding:12px 24px; font-size:14px; font-weight:700; border-radius:8px; cursor:pointer; box-shadow:0 4px 12px rgba(0,0,0,0.2); z-index:9999; }
+        .print-btn:hover { background:#1e3a8a; }
         @media print {
           body { margin: 10mm; }
           @page { size: A4; margin: 10mm; }
+          .print-btn { display: none !important; }
         }
       </style>
-    </head><body>${pagesHtml}</body></html>`;
+    </head><body>
+    <button class="print-btn" onclick="window.print()">🖨️ Εκτύπωση / Print</button>
+    ${pagesHtml}</body></html>`;
 
     const blob = new Blob([html], { type: "text/html;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -385,6 +390,26 @@ export default function DraftOrderPage() {
 
     const wb = XLSX.utils.book_new();
 
+    // Style helpers (xlsx free edition uses plain objects for styles)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    type XStyle = Record<string, any>;
+    const blueHdr: XStyle = { font: { bold: true, color: { rgb: "FFFFFF" }, sz: 11 }, fill: { fgColor: { rgb: "1E40AF" } }, alignment: { horizontal: "left", vertical: "center" } };
+    const lightCell: XStyle = { fill: { fgColor: { rgb: "F8FAFC" } }, alignment: { horizontal: "left", vertical: "center" }, border: { top: { style: "thin", color: { rgb: "E2E8F0" } }, bottom: { style: "thin", color: { rgb: "E2E8F0" } }, left: { style: "thin", color: { rgb: "E2E8F0" } }, right: { style: "thin", color: { rgb: "E2E8F0" } } } };
+    const lightCellBold: XStyle = { ...lightCell, font: { bold: true } };
+    const colHdr: XStyle = { font: { bold: true, color: { rgb: "FFFFFF" }, sz: 10 }, fill: { fgColor: { rgb: "1E40AF" } }, alignment: { horizontal: "center", vertical: "center" } };
+    const dataCell: XStyle = { alignment: { horizontal: "left", vertical: "center" }, border: { bottom: { style: "thin", color: { rgb: "E5E7EB" } } } };
+    const dataCellRight: XStyle = { ...dataCell, alignment: { horizontal: "right", vertical: "center" } };
+    const totalLbl: XStyle = { font: { color: { rgb: "666666" } }, alignment: { horizontal: "right", vertical: "center" }, fill: { fgColor: { rgb: "F8FAFC" } }, border: { bottom: { style: "thin", color: { rgb: "CBD5E1" } } } };
+    const totalVal: XStyle = { ...totalLbl, alignment: { horizontal: "right", vertical: "center" } };
+    const grandLbl: XStyle = { font: { bold: true, color: { rgb: "FFFFFF" }, sz: 11 }, fill: { fgColor: { rgb: "1E3A8A" } }, alignment: { horizontal: "right", vertical: "center" } };
+    const grandVal: XStyle = { ...grandLbl };
+    const titleStyle: XStyle = { font: { bold: true, color: { rgb: "FFFFFF" }, sz: 13 }, fill: { fgColor: { rgb: "1E40AF" } }, alignment: { horizontal: "left", vertical: "center" } };
+
+    function sc(ws: XLSX.WorkSheet, addr: string, style: XStyle) {
+      if (!ws[addr]) return;
+      ws[addr].s = style;
+    }
+
     for (const [sid, g] of groups.entries()) {
       const sup = g.sup ?? suppliers.find(x => x.id === sid);
       const supName = sup ? (locale === "gr" ? sup.name : (sup.nameEn || sup.name)) : `SUP-${sid}`;
@@ -393,39 +418,114 @@ export default function DraftOrderPage() {
       const groupVat = g.items.reduce((s, i) => s + i.vatAmount, 0);
       const groupGross = g.items.reduce((s, i) => s + i.grossAmount, 0);
 
-      const rows: (string | number)[][] = [
-        // Header block
-        ["Προμηθευτής", supName, "", "Ημερομηνία", today],
-        ["Στοιχεία Επικοινωνίας", supEmail, "", "ID Παραγγελίας", orderNum],
-        ["Σημειώσεις", notes || "", "", "Αριθμός Τιμολογίου", invoiceNumber || ""],
-        ["", "", "", "Συνολική Αξία", groupGross],
-        [],
-        // Column headers
-        ["Προϊόν", "Ποσότητα", "Τιμή Μονάδας", "ΦΠΑ %", "Μονάδα", "Σύνολο"],
-        // Items
+      // Row layout:
+      // 1: Title (merged A1:F1)
+      // 2-5: Info grid (2 columns: label | value | gap | label | value)
+      // 6: Column headers
+      // 7+N: Items
+      // N+1: blank
+      // N+2: Καθαρή Αξία
+      // N+3: ΦΠΑ
+      // N+4: ΣΥΝΟΛΟ
+      // N+5: blank
+      // N+6: footer
+
+      const dataStartRow = 7; // 1-indexed
+      const itemCount = g.items.length;
+      const totalsStartRow = dataStartRow + itemCount + 1;
+
+      const rows: (string | number | null)[][] = [
+        // Row 1: title
+        [`${bizName}  –  ORDER FORM`, null, null, null, null, null],
+        // Rows 2-5: info grid
+        ["Προμηθευτής", supName, null, "Ημερομηνία", today, null],
+        ["Email Επικοινωνίας", supEmail, null, "Αριθμός Παραγγελίας", orderNum, null],
+        ["Αριθμός Τιμολογίου", invoiceNumber || "", null, "Συνολική Αξία", groupGross, null],
+        ["Σημειώσεις", notes || "", null, null, null, null],
+        // Row 6: column headers
+        ["Προϊόν", "Ποσότητα", "Τιμή Μονάδας", "Μονάδα", null, "Σύνολο"],
+        // Rows 7+: items
         ...g.items.map(item => [
           item.productName,
           item.orderedQuantity,
           item.basePrice,
-          `${item.vatPercent}%`,
           item.unit,
+          null,
           item.grossAmount,
-        ]),
-        [],
+        ] as (string | number | null)[]),
+        // blank
+        [null, null, null, null, null, null],
         // Totals
-        ["", "", "", "", "Καθαρή Αξία:", groupNet],
-        ["", "", "", "", "ΦΠΑ:", groupVat],
-        ["", "", "", "", "ΣΥΝΟΛΟ:", groupGross],
-        [],
-        [bizName, "", "", "", "", ""],
+        [null, null, null, null, "Καθαρή Αξία:", groupNet],
+        [null, null, null, null, "ΦΠΑ:", groupVat],
+        [null, null, null, null, "ΣΥΝΟΛΟ:", groupGross],
+        // blank
+        [null, null, null, null, null, null],
+        // footer
+        [bizName, null, null, `Παραγγελία ${orderNum}`, today, null],
       ];
 
       const ws = XLSX.utils.aoa_to_sheet(rows);
 
+      // Merge title row A1:F1
+      ws["!merges"] = [
+        { s: { r: 0, c: 0 }, e: { r: 0, c: 5 } },   // title
+        { s: { r: 4, c: 1 }, e: { r: 4, c: 2 } },   // notes value spans 2 cols
+        { s: { r: rows.length - 1, c: 0 }, e: { r: rows.length - 1, c: 2 } }, // footer left
+        { s: { r: rows.length - 1, c: 3 }, e: { r: rows.length - 1, c: 4 } }, // footer center
+      ];
+
+      // Apply styles
+      sc(ws, "A1", titleStyle);
+
+      // Info rows (rows 2-5 = index 1-4)
+      const infoRows = ["A2","A3","A4","A5"];
+      infoRows.forEach(a => sc(ws, a, blueHdr));
+      ["B2","B3","B4","B5"].forEach(a => sc(ws, a, lightCell));
+      ["D2","D3","D4"].forEach(a => sc(ws, a, blueHdr));
+      ["E2","E3","E4"].forEach(a => sc(ws, a, lightCell));
+      // Bold total in info
+      if (ws["E4"]) { ws["E4"].s = lightCellBold; ws["E4"].z = '#,##0.00 "EUR"'; }
+
+      // Column headers row 6
+      ["A6","B6","C6","D6","E6","F6"].forEach(a => sc(ws, a, colHdr));
+
+      // Data rows
+      for (let i = 0; i < itemCount; i++) {
+        const r = dataStartRow + i; // 1-indexed
+        const rowStr = String(r);
+        sc(ws, `A${rowStr}`, dataCell);
+        sc(ws, `B${rowStr}`, dataCellRight);
+        sc(ws, `C${rowStr}`, dataCellRight);
+        sc(ws, `D${rowStr}`, dataCell);
+        sc(ws, `F${rowStr}`, dataCellRight);
+        // Number formats
+        if (ws[`C${rowStr}`]) ws[`C${rowStr}`].z = '#,##0.00 "€"';
+        if (ws[`F${rowStr}`]) ws[`F${rowStr}`].z = '#,##0.00 "€"';
+        // Zebra
+        if (i % 2 === 0) {
+          ["A","B","C","D","F"].forEach(col => {
+            const addr = `${col}${rowStr}`;
+            if (ws[addr]) ws[addr].s = { ...ws[addr].s, fill: { fgColor: { rgb: "F8FAFC" } } };
+          });
+        }
+      }
+
+      // Totals rows
+      const t1 = totalsStartRow + 1, t2 = totalsStartRow + 2, t3 = totalsStartRow + 3;
+      sc(ws, `E${t1}`, totalLbl); sc(ws, `F${t1}`, totalVal);
+      sc(ws, `E${t2}`, totalLbl); sc(ws, `F${t2}`, totalVal);
+      sc(ws, `E${t3}`, grandLbl); sc(ws, `F${t3}`, grandVal);
+      if (ws[`F${t1}`]) ws[`F${t1}`].z = '#,##0.00 "EUR"';
+      if (ws[`F${t2}`]) ws[`F${t2}`].z = '#,##0.00 "EUR"';
+      if (ws[`F${t3}`]) ws[`F${t3}`].z = '#,##0.00 "EUR"';
+
       // Column widths
       ws["!cols"] = [
-        { wch: 45 }, { wch: 12 }, { wch: 14 }, { wch: 10 }, { wch: 12 }, { wch: 14 },
+        { wch: 42 }, { wch: 12 }, { wch: 14 }, { wch: 12 }, { wch: 16 }, { wch: 14 },
       ];
+      // Row heights
+      ws["!rows"] = [{ hpt: 28 }]; // title row taller
 
       // Safe sheet name (max 31 chars, no special chars)
       const sheetName = supName.replace(/[\\/*?[\]:]/g, "").substring(0, 31);
@@ -666,8 +766,7 @@ export default function DraftOrderPage() {
             <button onClick={saveOrder} className="erp-btn-primary" disabled={items.length === 0 || !selectedSupplier || saving}>
               {saving ? "…" : "💾"} {t("btnSaveOrder")}
             </button>
-            <button onClick={() => handleExportPDF()} className="erp-btn-secondary">🖨️ {t("btnPrint")}</button>
-            <button onClick={handleExportPDF} disabled={items.length === 0} className="erp-btn-secondary">📄 PDF</button>
+            <button onClick={handleExportPDF} disabled={items.length === 0} className="erp-btn-secondary">🖨️ PDF / {t("btnPrint")}</button>
             <button onClick={handleExportExcel} disabled={items.length === 0} className="erp-btn-secondary">📊 Excel</button>
             {items.length > 0 && (() => {
               // Group items by supplierId to build per-supplier email buttons
