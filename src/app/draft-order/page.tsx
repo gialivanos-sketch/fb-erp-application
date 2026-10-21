@@ -376,11 +376,12 @@ export default function DraftOrderPage() {
     const html = `<!DOCTYPE html><html lang="el"><head><meta charset="UTF-8">
       <title>Παραγγελία ${orderNum}</title>
       <style>
+        * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; color-adjust: exact !important; }
         body { font-family: Arial, sans-serif; margin: 20px; color: #1e293b; }
-        .print-btn { position:fixed; bottom:20px; right:20px; background:#1e40af; color:#fff; border:none; padding:12px 24px; font-size:14px; font-weight:700; border-radius:8px; cursor:pointer; box-shadow:0 4px 12px rgba(0,0,0,0.2); z-index:9999; }
-        .print-btn:hover { background:#1e3a8a; }
+        .print-btn { position:fixed; bottom:20px; right:20px; background:#2a6f4e; color:#fff; border:none; padding:12px 24px; font-size:14px; font-weight:700; border-radius:8px; cursor:pointer; box-shadow:0 4px 12px rgba(0,0,0,0.2); z-index:9999; }
+        .print-btn:hover { background:#1e5c3a; }
         @media print {
-          body { margin: 10mm; }
+          body { margin: 0; }
           @page { size: A4; margin: 10mm; }
           .print-btn { display: none !important; }
         }
