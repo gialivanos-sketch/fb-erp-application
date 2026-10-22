@@ -1246,12 +1246,17 @@ export async function fetchIngredientSupplierMap(
 ): Promise<Record<string, { supplierProductId: number; productName: string; basePrice: string; supplierId: number; supplierName: string; unit: string } | null>> {
   if (ingredientNames.length === 0) return {};
   const client = requireClient();
-  const { data, error } = await (client.from("ingredient_supplier_map") as any)
+
+  // L3 fix — Στρώμα 1: ingredient_supplier_map (manual overrides + auto-matched)
+  const { data: mapData, error: mapErr } = await (client.from("ingredient_supplier_map") as any)
     .select("ingredient_name, supplier_product_id, is_manual, match_score, supplier_products(id, product_name, base_price, unit, supplier_id, suppliers(id, name))")
     .in("ingredient_name", ingredientNames);
-  if (error) throw error;
+  if (mapErr) throw mapErr;
+
   const result: Record<string, { supplierProductId: number; productName: string; basePrice: string; supplierId: number; supplierName: string; unit: string } | null> = {};
-  for (const row of (data ?? []) as any[]) {
+  const mappedNames = new Set<string>();
+
+  for (const row of (mapData ?? []) as any[]) {
     const sp = row.supplier_products;
     if (sp) {
       result[row.ingredient_name] = {
@@ -1262,10 +1267,46 @@ export async function fetchIngredientSupplierMap(
         supplierName: sp.suppliers?.name ?? "",
         unit: sp.unit,
       };
-    } else {
-      result[row.ingredient_name] = null;
+      mappedNames.add(row.ingredient_name);
     }
   }
+
+  // L3 fix — Στρώμα 2: fallback μέσω ingredients.mapped_supplier_product_id
+  // για υλικά που ΔΕΝ βρέθηκαν στο ingredient_supplier_map
+  const unmapped = ingredientNames.filter(n => !mappedNames.has(n));
+  if (unmapped.length > 0) {
+    const { data: ingData } = await (client.from("ingredients") as any)
+      .select("name, base_price, unit, mapped_supplier_product_id, supplier_products:mapped_supplier_product_id(id, product_name, base_price, unit, supplier_id, suppliers(id, name))")
+      .in("name", unmapped);
+
+    for (const ing of (ingData ?? []) as any[]) {
+      const sp = ing.supplier_products;
+      if (sp) {
+        // Έχει mapped supplier_product — χρησιμοποίησε αυτόν
+        result[ing.name] = {
+          supplierProductId: sp.id,
+          productName: sp.product_name,
+          basePrice: sp.base_price,
+          supplierId: sp.supplier_id,
+          supplierName: sp.suppliers?.name ?? "",
+          unit: sp.unit,
+        };
+      } else if (ing.base_price && Number(ing.base_price) > 0) {
+        // Έχει τιμή στο ingredients αλλά όχι mapped supplier — δείξε τιμή χωρίς προμηθευτή
+        result[ing.name] = {
+          supplierProductId: 0,
+          productName: ing.name,
+          basePrice: String(ing.base_price),
+          supplierId: 0,
+          supplierName: "—",
+          unit: ing.unit ?? "",
+        };
+      } else {
+        result[ing.name] = null;
+      }
+    }
+  }
+
   return result;
 }
 
