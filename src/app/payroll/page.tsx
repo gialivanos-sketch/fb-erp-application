@@ -155,11 +155,11 @@ export default function PayrollPage() {
           </div>
           <div>
             <label className="erp-label">{locale === "gr" ? "Βασικές Αποδοχές (€)" : "Base Salary (€)"}</label>
-            <input type="number" value={form.base_salary} onChange={(e) => setForm({ ...form, base_salary: e.target.value })} className="erp-input" step="0.01" />
+            <input type="number" value={form.base_salary} onChange={(e) => setForm({ ...form, base_salary: e.target.value })} className="erp-input" step="0.01" min="0" />
           </div>
           <div>
             <label className="erp-label">{locale === "gr" ? "Bonus (€)" : "Bonus (€)"}</label>
-            <input type="number" value={form.bonuses} onChange={(e) => setForm({ ...form, bonuses: e.target.value })} className="erp-input" step="0.01" />
+            <input type="number" value={form.bonuses} onChange={(e) => setForm({ ...form, bonuses: e.target.value })} className="erp-input" step="0.01" min="0" />
           </div>
           <div>
             <label className="erp-label">{locale === "gr" ? "Κρατήσεις (€)" : "Deductions (€)"}</label>

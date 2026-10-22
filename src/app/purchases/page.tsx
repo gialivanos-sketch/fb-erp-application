@@ -152,7 +152,7 @@ export default function PurchasesPage() {
           </div>
           <div>
             <label className="erp-label">{locale === "gr" ? "Καθαρό Ποσό (€)" : "Net Amount (€)"}</label>
-            <input type="number" value={form.amount_net} onChange={(e) => setForm({ ...form, amount_net: e.target.value })} className="erp-input" step="0.01" placeholder="0.00" />
+            <input type="number" value={form.amount_net} onChange={(e) => setForm({ ...form, amount_net: e.target.value })} className="erp-input" step="0.01" min="0" placeholder="0.00" />
           </div>
           <div>
             <label className="erp-label">{locale === "gr" ? "ΦΠΑ %" : "VAT %"}</label>

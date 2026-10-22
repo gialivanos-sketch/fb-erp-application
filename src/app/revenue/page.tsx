@@ -137,11 +137,11 @@ export default function RevenuePage() {
           </div>
           <div>
             <label className="erp-label">{locale === "gr" ? "Ποσό (€)" : "Amount (€)"}</label>
-            <input type="number" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} className="erp-input" step="0.01" placeholder="0.00" />
+            <input type="number" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} className="erp-input" step="0.01" min="0" placeholder="0.00" />
           </div>
           <div>
             <label className="erp-label">{locale === "gr" ? "Πελάτες" : "Covers"}</label>
-            <input type="number" value={form.covers} onChange={(e) => setForm({ ...form, covers: e.target.value })} className="erp-input" placeholder="0" />
+            <input type="number" value={form.covers} onChange={(e) => setForm({ ...form, covers: e.target.value })} className="erp-input" min="0" placeholder="0" />
           </div>
           <div>
             <label className="erp-label">{locale === "gr" ? "Σημειώσεις" : "Notes"}</label>

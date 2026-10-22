@@ -134,12 +134,12 @@ export default function IngredientsPage() {
           <div><label className="erp-label">{locale === "gr" ? "Ελληνικό Όνομα" : "Greek Name"}</label><input type="text" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} className="erp-input" /></div>
           <div><label className="erp-label">English Name</label><input type="text" value={form.nameEn} onChange={e => setForm({ ...form, nameEn: e.target.value })} className="erp-input" /></div>
           <div className="grid grid-cols-2 gap-3">
-            <div><label className="erp-label">{locale === "gr" ? "Τρέχον Απόθεμα" : "Current Stock"}</label><input type="number" value={form.currentStock} onChange={e => setForm({ ...form, currentStock: e.target.value })} className="erp-input" step="0.01" /></div>
-            <div><label className="erp-label">{t("fieldBasePrice")}</label><input type="number" value={form.basePrice} onChange={e => setForm({ ...form, basePrice: e.target.value })} className="erp-input" step="0.01" /></div>
+            <div><label className="erp-label">{locale === "gr" ? "Τρέχον Απόθεμα" : "Current Stock"}</label><input type="number" value={form.currentStock} onChange={e => setForm({ ...form, currentStock: e.target.value })} className="erp-input" step="0.01" min="0" /></div>
+            <div><label className="erp-label">{t("fieldBasePrice")}</label><input type="number" value={form.basePrice} onChange={e => setForm({ ...form, basePrice: e.target.value })} className="erp-input" step="0.01" min="0" /></div>
           </div>
           <div className="grid grid-cols-3 gap-3">
             <div><label className="erp-label">{t("fieldConversionFactor")}</label><input type="number" value={form.conversionFactor} onChange={e => setForm({ ...form, conversionFactor: e.target.value })} className="erp-input" step="0.001" /></div>
-            <div><label className="erp-label">{t("fieldWastage")}</label><input type="number" value={form.wastageFactor} onChange={e => setForm({ ...form, wastageFactor: e.target.value })} className="erp-input" step="0.1" /></div>
+            <div><label className="erp-label">{t("fieldWastage")}</label><input type="number" value={form.wastageFactor} onChange={e => setForm({ ...form, wastageFactor: e.target.value })} className="erp-input" step="0.1" min="0" max="99" /></div>
             <div><label className="erp-label">{t("fieldCalories")}</label><input type="number" value={form.calories} onChange={e => setForm({ ...form, calories: Number(e.target.value) })} className="erp-input" /></div>
           </div>
           <div><label className="erp-label">{t("fieldConversionPerUnit")}</label><input type="text" value={form.conversionPerUnit} onChange={e => setForm({ ...form, conversionPerUnit: e.target.value })} className="erp-input" placeholder="1 Item = 250 g" /></div>

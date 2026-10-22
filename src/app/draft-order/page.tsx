@@ -670,9 +670,9 @@ export default function DraftOrderPage() {
               <select value={newUnit} onChange={(e) => setNewUnit(e.target.value)} className="erp-select">
                 <option value="kg">kg</option><option value="g">g</option><option value="L">L</option><option value="ml">ml</option><option value="pcs">pcs</option>
               </select>
-              <input type="number" value={newPrice || ""} onChange={(e) => setNewPrice(Number(e.target.value))} placeholder={t("fieldBasePrice")} className="erp-input" step="0.01" />
-              <input type="number" value={newVat} onChange={(e) => setNewVat(Number(e.target.value))} placeholder="VAT %" className="erp-input" />
-              <input type="number" value={newDiscount} onChange={(e) => setNewDiscount(Number(e.target.value))} placeholder="Disc %" className="erp-input" />
+              <input type="number" value={newPrice || ""} onChange={(e) => setNewPrice(Number(e.target.value))} placeholder={t("fieldBasePrice")} className="erp-input" step="0.01" min="0" />
+              <input type="number" value={newVat} onChange={(e) => setNewVat(Number(e.target.value))} placeholder="VAT %" className="erp-input" min="0" />
+              <input type="number" value={newDiscount} onChange={(e) => setNewDiscount(Number(e.target.value))} placeholder="Disc %" className="erp-input" min="0" />
             </div>
             {(newQualityGrade || newRegion) && (
               <div className="flex gap-2 mt-2">
@@ -716,9 +716,9 @@ export default function DraftOrderPage() {
                         <tr key={idx}>
                           <td className="text-xs text-slate-400">{idx + 1}</td>
                           <td><input type="text" value={item.productName} onChange={(e) => updateItemField(idx, "productName", e.target.value)} className="erp-input text-xs py-1 min-w-[180px]" /></td>
-                          <td><input type="number" value={item.orderedQuantity} onChange={(e) => updateItemField(idx, "orderedQuantity", Number(e.target.value))} className="erp-input text-xs py-1 w-20" step="0.01" /></td>
+                          <td><input type="number" value={item.orderedQuantity} onChange={(e) => updateItemField(idx, "orderedQuantity", Number(e.target.value))} className="erp-input text-xs py-1 w-20" step="0.01" min="0" /></td>
                           <td className="text-sm min-w-[70px]">{item.unit}</td>
-                          <td><input type="number" value={item.basePrice} onChange={(e) => updateItemField(idx, "basePrice", Number(e.target.value))} className="erp-input text-xs py-1 w-20" step="0.01" /></td>
+                          <td><input type="number" value={item.basePrice} onChange={(e) => updateItemField(idx, "basePrice", Number(e.target.value))} className="erp-input text-xs py-1 w-20" step="0.01" min="0" /></td>
                           <td>{item.vatPercent}%</td>
                           <td>{item.discountPercent}%</td>
                           <td className="font-medium">{fmt(item.netAmount)}</td>
@@ -749,11 +749,11 @@ export default function DraftOrderPage() {
                     <tr key={i}>
                       <td className="text-xs text-slate-400">{i + 1}</td>
                       <td><input type="text" value={item.productName} onChange={(e) => updateItemField(i, "productName", e.target.value)} className="erp-input text-xs py-1 min-w-[180px]" /></td>
-                      <td><input type="number" value={item.orderedQuantity} onChange={(e) => updateItemField(i, "orderedQuantity", Number(e.target.value))} className="erp-input text-xs py-1 w-20" step="0.01" /></td>
+                      <td><input type="number" value={item.orderedQuantity} onChange={(e) => updateItemField(i, "orderedQuantity", Number(e.target.value))} className="erp-input text-xs py-1 w-20" step="0.01" min="0" /></td>
                       <td className="text-sm min-w-[70px]">{item.unit}</td>
-                      <td><input type="number" value={item.basePrice} onChange={(e) => updateItemField(i, "basePrice", Number(e.target.value))} className="erp-input text-xs py-1 w-20" step="0.01" /></td>
-                      <td><input type="number" value={item.vatPercent} onChange={(e) => updateItemField(i, "vatPercent", Number(e.target.value))} className="erp-input text-xs py-1 w-16" /></td>
-                      <td><input type="number" value={item.discountPercent} onChange={(e) => updateItemField(i, "discountPercent", Number(e.target.value))} className="erp-input text-xs py-1 w-16" /></td>
+                      <td><input type="number" value={item.basePrice} onChange={(e) => updateItemField(i, "basePrice", Number(e.target.value))} className="erp-input text-xs py-1 w-20" step="0.01" min="0" /></td>
+                      <td><input type="number" value={item.vatPercent} onChange={(e) => updateItemField(i, "vatPercent", Number(e.target.value))} className="erp-input text-xs py-1 w-16" min="0" /></td>
+                      <td><input type="number" value={item.discountPercent} onChange={(e) => updateItemField(i, "discountPercent", Number(e.target.value))} className="erp-input text-xs py-1 w-16" min="0" /></td>
                       <td className="font-medium">{fmt(item.netAmount)}</td>
                       <td className="text-slate-500">{fmt(item.vatAmount)}</td>
                       <td className="font-semibold text-emerald-700">{fmt(item.grossAmount)}</td>

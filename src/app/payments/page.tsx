@@ -81,7 +81,7 @@ export default function PaymentsPage() {
                 {suppliers.map(s => <option key={s.id} value={s.id}>{locale === "gr" ? s.name : (s.nameEn || s.name)}</option>)}
               </select>
             </div>
-            <div><label className="erp-label">{t("fieldAmount")}</label><input type="number" value={newAmount || ""} onChange={e => setNewAmount(Number(e.target.value))} className="erp-input" step="0.01" /></div>
+            <div><label className="erp-label">{t("fieldAmount")}</label><input type="number" value={newAmount || ""} onChange={e => setNewAmount(Number(e.target.value))} className="erp-input" step="0.01" min="0" /></div>
             <div><label className="erp-label">{locale === "gr" ? "Τύπος" : "Type"}</label>
               <select value={newType} onChange={e => setNewType(e.target.value as "debit" | "payment")} className="erp-select">
                 <option value="payment">{locale === "gr" ? "Πληρωμή" : "Payment"}</option>

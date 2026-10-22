@@ -92,8 +92,13 @@ export default function RecipeCostingPage() {
   }
 
   const fmt = (n: number) => `€${n.toFixed(2)}`;
-  function lineCost(i: { quantity?: unknown; unitCost?: unknown }) {
-    return (Number(i.quantity) || 0) * (Number(i.unitCost) || 0);
+  function lineCost(i: { quantity?: unknown; unitCost?: unknown; wastageFactor?: unknown }) {
+    const qty = Number(i.quantity) || 0;
+    const cost = Number(i.unitCost) || 0;
+    const waste = Number(i.wastageFactor) || 0;
+    // P5/L1: κόστος φύρας — αν waste=20%, χρειαζόμαστε 1.25× ποσότητα
+    const wasteDivisor = waste >= 100 ? 1 : (1 - waste / 100);
+    return (qty * cost) / wasteDivisor;
   }
   const avgMargin = recipes.length > 0 ? recipes.reduce((s, r) => s + Number(r.profitMarginPercent || 0), 0) / recipes.length : 0;
   const avgCost = recipes.length > 0 ? recipes.reduce((s, r) => s + Number(r.totalCost || 0), 0) / recipes.length : 0;
@@ -287,10 +292,10 @@ export default function RecipeCostingPage() {
         <div className="erp-card-header"><h3 className="font-semibold">⚙️ {locale === "gr" ? "Παράμετροι Κοστολόγησης" : "Costing Parameters"}</h3></div>
         <div className="p-6">
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <div><label className="erp-label">{t("fieldLaborCost")}</label><input type="number" value={laborCost} onChange={e => { const n = num(e.target.value); setLaborCost(n); scheduleSave({ labor: n }); }} className="erp-input" step="0.01" /></div>
-            <div><label className="erp-label">{t("fieldOverheadCost")}</label><input type="number" value={overheadCost} onChange={e => { const n = num(e.target.value); setOverheadCost(n); scheduleSave({ overhead: n }); }} className="erp-input" step="0.01" /></div>
-            <div><label className="erp-label">{t("fieldProfitMargin")}</label><input type="number" value={profitMargin} onChange={e => { const n = num(e.target.value); setProfitMargin(n); scheduleSave({ margin: n }); }} className="erp-input" step="1" max="99" /></div>
-            <div><label className="erp-label">{t("fieldVatPercent")}</label><input type="number" value={vatPercent} onChange={e => { const n = num(e.target.value); setVatPercent(n); scheduleSave({ vat: n }); }} className="erp-input" step="1" /></div>
+            <div><label className="erp-label">{t("fieldLaborCost")}</label><input type="number" value={laborCost} onChange={e => { const n = num(e.target.value); setLaborCost(n); scheduleSave({ labor: n }); }} className="erp-input" step="0.01" min="0" /></div>
+            <div><label className="erp-label">{t("fieldOverheadCost")}</label><input type="number" value={overheadCost} onChange={e => { const n = num(e.target.value); setOverheadCost(n); scheduleSave({ overhead: n }); }} className="erp-input" step="0.01" min="0" /></div>
+            <div><label className="erp-label">{t("fieldProfitMargin")}</label><input type="number" value={profitMargin} onChange={e => { const n = num(e.target.value); setProfitMargin(n); scheduleSave({ margin: n }); }} className="erp-input" step="1" min="0" max="99" /></div>
+            <div><label className="erp-label">{t("fieldVatPercent")}</label><input type="number" value={vatPercent} onChange={e => { const n = num(e.target.value); setVatPercent(n); scheduleSave({ vat: n }); }} className="erp-input" step="1" min="0" /></div>
           </div>
           <div className="mt-3 text-sm">
             {!selectedRecipe ? <span className="text-slate-400">{locale === "gr" ? "Διάλεξε συνταγή — ό,τι αλλάζεις αποθηκεύεται αυτόματα στη συνταγή." : "Pick a recipe — changes save automatically."}</span>
