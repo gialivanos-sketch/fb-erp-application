@@ -40,7 +40,7 @@ export default function InventoryPage() {
     }
     if (data.supplierProducts.length > 0) {
       const bySupplier = new Map(data.suppliers.map((s) => [s.id, s]));
-      return data.supplierProducts.slice(0, 30).map((p, idx) => ({
+      return data.supplierProducts.map((p, idx) => ({
         id: idx + 1,
         productName: p.productName,
         initialStock: "0.00",

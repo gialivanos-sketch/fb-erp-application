@@ -1162,6 +1162,8 @@ export async function addRecipeIngredient(recipeId: number, item: RecipeIngredie
     .select("id")
     .single();
   if (error) throw error;
+  // P4: επανυπολόγισε το συνολικό κόστος πρώτων υλών της συνταγής
+  await recalcRecipeCost(recipeId);
   return data.id as number;
 }
 
@@ -1176,13 +1178,62 @@ export async function updateRecipeIngredient(id: number, item: Partial<RecipeIng
   if (item.wastageFactor !== undefined) patch.wastage_factor = item.wastageFactor;
   if (item.requiresPrep !== undefined) patch.requires_prep = item.requiresPrep;
   if (item.prepNotes !== undefined) patch.prep_notes = item.prepNotes;
+  // Χρειαζόμαστε το recipe_id για το recalc — πρώτα παίρνουμε το ingredient
+  const { data: existing } = await requireClient()
+    .from("recipe_ingredients")
+    .select("recipe_id")
+    .eq("id", id)
+    .single();
   const { error } = await requireClient().from("recipe_ingredients").update(patch).eq("id", id);
   if (error) throw error;
+  // P4: επανυπολόγισε μετά την ενημέρωση
+  if (existing?.recipe_id) await recalcRecipeCost(existing.recipe_id);
 }
 
 export async function deleteRecipeIngredient(id: number): Promise<void> {
+  // P4: πάρε το recipe_id πριν τη διαγραφή για να κάνεις recalc μετά
+  const { data: existing } = await requireClient()
+    .from("recipe_ingredients")
+    .select("recipe_id")
+    .eq("id", id)
+    .single();
   const { error } = await requireClient().from("recipe_ingredients").delete().eq("id", id);
   if (error) throw error;
+  // P4: επανυπολόγισε μετά τη διαγραφή
+  if (existing?.recipe_id) await recalcRecipeCost(existing.recipe_id);
+}
+
+// ============================================================
+// P4 — recalcRecipeCost: επανυπολογισμός total_raw_material_cost
+//      για μια συνταγή με βάση ΟΛΑ τα τρέχοντα υλικά της.
+//      Χρησιμοποιεί τον τύπο P5: (qty * unit_cost) / (1 - waste/100)
+//      Καλείται μετά από κάθε add/update/delete σε recipe_ingredients.
+// ============================================================
+export async function recalcRecipeCost(recipeId: number): Promise<void> {
+  const client = requireClient();
+  // 1. Φέρε όλα τα τρέχοντα υλικά της συνταγής
+  const { data: ingredients, error: fetchErr } = await client
+    .from("recipe_ingredients")
+    .select("quantity, unit_cost, wastage_factor")
+    .eq("recipe_id", recipeId);
+  if (fetchErr) throw fetchErr;
+
+  // 2. Υπολόγισε το συνολικό κόστος πρώτων υλών (τύπος P5)
+  const totalRawMaterial = (ingredients ?? []).reduce((sum, ing) => {
+    const qty = Number(ing.quantity) || 0;
+    const cost = Number(ing.unit_cost) || 0;
+    const waste = Number(ing.wastage_factor) || 0;
+    // Αν waste >= 100%, ο παρανομαστής γίνεται 0 ή αρνητικός — guard
+    const wasteDivisor = waste >= 100 ? 1 : (1 - waste / 100);
+    return sum + (qty * cost) / wasteDivisor;
+  }, 0);
+
+  // 3. Ενημέρωσε το recipes.total_raw_material_cost
+  const { error: updateErr } = await client
+    .from("recipes")
+    .update({ total_raw_material_cost: Math.round(totalRawMaterial * 100) / 100 })
+    .eq("id", recipeId);
+  if (updateErr) throw updateErr;
 }
 
 // ============================================================
