@@ -68,7 +68,7 @@ export default function RecipeCostingPage() {
   function costingFor(r: Recipe, laborCost: number, overheadCost: number, profitMargin: number, vatPercent: number, targetPrice: number) {
     // πρώτη ύλη = Σ (ποσότητα × τιμή μονάδας)
     const ings = r.ingredients ?? [];
-    const rawMaterial = ings.length ? ings.reduce((s, i) => s + lineCost(i), 0) : Number(r.totalRawMaterialCost);
+    const rawMaterial = ings.length ? ings.reduce((s, i) => s + lineCost(i), 0) : (Number(r.totalRawMaterialCost) || 0);
     const labor = laborCost;
     const overhead = overheadCost;
     const total = rawMaterial + labor + overhead;
@@ -289,7 +289,7 @@ export default function RecipeCostingPage() {
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             <div><label className="erp-label">{t("fieldLaborCost")}</label><input type="number" value={laborCost} onChange={e => { const n = num(e.target.value); setLaborCost(n); scheduleSave({ labor: n }); }} className="erp-input" step="0.01" /></div>
             <div><label className="erp-label">{t("fieldOverheadCost")}</label><input type="number" value={overheadCost} onChange={e => { const n = num(e.target.value); setOverheadCost(n); scheduleSave({ overhead: n }); }} className="erp-input" step="0.01" /></div>
-            <div><label className="erp-label">{t("fieldProfitMargin")}</label><input type="number" value={profitMargin} onChange={e => { const n = num(e.target.value); setProfitMargin(n); scheduleSave({ margin: n }); }} className="erp-input" step="1" max="100" /></div>
+            <div><label className="erp-label">{t("fieldProfitMargin")}</label><input type="number" value={profitMargin} onChange={e => { const n = num(e.target.value); setProfitMargin(n); scheduleSave({ margin: n }); }} className="erp-input" step="1" max="99" /></div>
             <div><label className="erp-label">{t("fieldVatPercent")}</label><input type="number" value={vatPercent} onChange={e => { const n = num(e.target.value); setVatPercent(n); scheduleSave({ vat: n }); }} className="erp-input" step="1" /></div>
           </div>
           <div className="mt-3 text-sm">

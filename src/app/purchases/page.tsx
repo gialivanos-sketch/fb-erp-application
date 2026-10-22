@@ -72,6 +72,7 @@ export default function PurchasesPage() {
         category: form.category,
         amount_net: Number(form.amount_net),
         vat_rate: Number(form.vat_rate),
+        amount_gross: Math.round(Number(form.amount_net) * (1 + Number(form.vat_rate) / 100) * 100) / 100,
         notes: form.notes,
       });
       setForm(EMPTY_FORM);
